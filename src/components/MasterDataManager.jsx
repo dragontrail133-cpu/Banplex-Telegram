@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
+import { FolderKanban, Loader2, Plus, Users2 } from 'lucide-react'
 import ProtectedRoute from './ProtectedRoute'
-import GenericMasterForm from './master/GenericMasterForm'
+import ActionCard from './ui/ActionCard'
 import { masterTabs } from './master/masterTabs'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
+import {
+  AppBadge,
+  AppButton,
+  AppCard,
+  AppCardStrong,
+  AppEmptyState,
+  AppErrorState,
+  SectionHeader,
+} from './ui/AppPrimitives'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -160,18 +169,16 @@ function MasterDataManager() {
         allowedRoles={['Owner', 'Admin']}
         description="Master data hanya tersedia untuk Owner dan Admin."
       >
-        <section className="rounded-[26px] border border-amber-200 bg-amber-50/85 px-5 py-5 text-amber-950">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-700">
-            Workspace Belum Aktif
-          </p>
-          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em]">
+        <AppCard className="app-tone-warning space-y-3">
+          <p className="app-kicker text-[var(--app-tone-warning-text)]">Workspace Belum Aktif</p>
+          <h2 className="text-2xl font-semibold tracking-[-0.03em]">
             Team aktif belum tersedia.
           </h2>
-          <p className="mt-3 text-sm leading-6 text-amber-800/80">
+          <p className="text-sm leading-6 text-[var(--app-tone-warning-text)]/80">
             Login ulang atau selesaikan onboarding agar manager master data bisa
             memuat workspace yang benar.
           </p>
-        </section>
+        </AppCard>
       </ProtectedRoute>
     )
   }
@@ -181,33 +188,22 @@ function MasterDataManager() {
       allowedRoles={['Owner', 'Admin']}
       description="Master data universal hanya tersedia untuk Owner dan Admin."
     >
-      <section className="space-y-5">
-        <div className="rounded-[28px] border border-white/70 bg-white/70 p-4 shadow-sm backdrop-blur sm:p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="text-sm font-medium uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
-                Universal Master Data Manager
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
-                Kelola master lintas modul dalam satu layar
-              </h2>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--app-hint-color)]">
-                Semua fetch memakai filter `deleted_at is null`, dan aksi hapus selalu
-                memakai soft delete agar histori operasional tetap aman.
-              </p>
-            </div>
+      <section className="space-y-4">
+        <AppCardStrong className="space-y-4 p-4 sm:p-5">
+          <SectionHeader
+            eyebrow="Master Data Manager"
+            action={
+              <AppButton
+                leadingIcon={<Plus className="h-4 w-4" />}
+                onClick={openCreateForm}
+                type="button"
+              >
+                {currentConfig.createLabel}
+              </AppButton>
+            }
+          />
 
-            <button
-              className="inline-flex items-center justify-center gap-2 rounded-[20px] bg-gradient-to-r from-sky-600 via-cyan-500 to-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-500/20 transition active:scale-[0.99]"
-              onClick={openCreateForm}
-              type="button"
-            >
-              <Plus className="h-4 w-4" />
-              {currentConfig.createLabel}
-            </button>
-          </div>
-
-          <div className="mt-5 flex gap-3 overflow-x-auto pb-1">
+          <div className="flex gap-2 overflow-x-auto pb-1">
             {masterTabs.map((tab) => {
               const TabIcon = tab.icon
               const isActive = tab.key === activeTab
@@ -215,10 +211,10 @@ function MasterDataManager() {
               return (
                 <button
                   key={tab.key}
-                  className={`inline-flex min-w-fit items-center gap-2 rounded-[18px] border px-4 py-3 text-sm font-semibold transition ${
+                  className={`inline-flex min-w-fit items-center gap-2 rounded-full border px-4 py-2.5 text-sm font-semibold transition ${
                     isActive
-                      ? 'border-sky-200 bg-sky-50 text-sky-700 shadow-sm'
-                      : 'border-slate-200 bg-white/85 text-[var(--app-text-color)] hover:bg-white'
+                      ? 'border-[var(--app-accent-color)]/20 bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]'
+                      : 'border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] text-[var(--app-text-color)]'
                   }`}
                   onClick={() => {
                     setActiveTab(tab.key)
@@ -232,135 +228,113 @@ function MasterDataManager() {
               )
             })}
           </div>
-        </div>
+        </AppCardStrong>
 
-        <section className="rounded-[28px] border border-white/70 bg-white/70 p-4 shadow-sm backdrop-blur sm:p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-sm font-medium uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
-                {currentConfig.label}
-              </p>
-              <h3 className="mt-2 text-xl font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
-                {currentConfig.description}
-              </h3>
-              <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">
-                {currentRecords.length} data aktif tersedia untuk workspace ini.
-              </p>
-            </div>
-
-            {isLoading ? (
-              <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-[var(--app-hint-color)]">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Sinkronisasi master data
-              </div>
-            ) : null}
-          </div>
+        <AppCardStrong className="space-y-4 p-4 sm:p-5">
+          <SectionHeader
+            eyebrow={currentConfig.label}
+            title={currentConfig.description}
+            description={`${currentRecords.length} data aktif tersedia untuk workspace ini.`}
+            action={
+              isLoading ? (
+                <div className="inline-flex items-center gap-2 rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-3 py-2 text-sm text-[var(--app-hint-color)]">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Sinkronisasi
+                </div>
+              ) : null
+            }
+          />
 
           {feedbackMessage ? (
-            <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-700">
-              {feedbackMessage}
-            </div>
+            <AppCard className="app-tone-success p-4">
+              <p className="text-sm leading-6">{feedbackMessage}</p>
+            </AppCard>
           ) : null}
 
           {error ? (
-            <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
-              {error}
-            </div>
+            <AppErrorState
+              title="Master data gagal dimuat"
+              description={error}
+            />
           ) : null}
 
-          <div className="mt-5 space-y-3">
+          <div className="space-y-3">
             {currentRecords.length > 0 ? (
               currentRecords.map((record) => {
                 const workerRates = workerRatesByWorkerId[record.id] ?? []
+                const primaryTitle =
+                  record.name ||
+                  record.project_name ||
+                  record.supplier_name ||
+                  record.creditor_name ||
+                  record.profession_name ||
+                  record.staff_name ||
+                  record.worker_name ||
+                  'Tanpa Nama'
+                const badges = currentConfig.getBadges?.(record) ?? []
+                const primaryBadge = badges[0] ?? null
+                const hiddenBadges = badges.slice(1)
+                const recordDescription =
+                  currentConfig.key === 'workers'
+                    ? renderWorkerDescription(record)
+                    : currentConfig.getDescription?.(record)
 
                 return (
-                  <article
+                  <ActionCard
                     key={record.id}
-                    className="rounded-[24px] border border-slate-200 bg-white/90 px-4 py-4 shadow-sm"
-                  >
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-base font-semibold text-[var(--app-text-color)]">
-                            {record.name ||
-                              record.project_name ||
-                              record.supplier_name ||
-                              record.creditor_name ||
-                              record.profession_name ||
-                              record.staff_name ||
-                              record.worker_name ||
-                              'Tanpa Nama'}
-                          </p>
-
-                          {(currentConfig.getBadges?.(record) ?? []).map((badge) => (
-                            <span
-                              key={`${record.id}-${badge}`}
-                              className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600"
-                            >
-                              {badge}
-                            </span>
-                          ))}
-                        </div>
-
-                        <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">
-                          {currentConfig.key === 'workers'
-                            ? renderWorkerDescription(record)
-                            : currentConfig.getDescription?.(record)}
-                        </p>
-
-                        {currentConfig.key === 'workers' && workerRates.length > 0 ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {workerRates.map((rate) => (
-                              <span
-                                key={rate.id}
-                                className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700"
-                              >
-                                {rate.project_name || 'Proyek'} | {rate.role_name} |{' '}
-                                {formatCurrency(rate.wage_amount)}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="flex flex-col gap-2 sm:flex-row">
-                        <button
-                          className="inline-flex items-center justify-center gap-2 rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-[var(--app-text-color)] transition hover:bg-slate-50"
-                          onClick={() => openEditForm(record)}
-                          type="button"
-                        >
-                          <Pencil className="h-4 w-4" />
-                          Edit
-                        </button>
-
-                        <button
-                          className="inline-flex items-center justify-center gap-2 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
-                          onClick={async () => {
-                            try {
-                              await handleDelete(record)
-                            } catch (deleteError) {
-                              console.error('Gagal menghapus master data:', deleteError)
-                            }
-                          }}
-                          type="button"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Hapus
-                        </button>
-                      </div>
-                    </div>
-                  </article>
+                    title={primaryTitle}
+                    subtitle={
+                      currentConfig.key === 'workers'
+                        ? recordDescription
+                        : recordDescription || 'Data referensi aktif'
+                    }
+                    badge={primaryBadge}
+                    badges={hiddenBadges}
+                    details={workerRates.map(
+                      (rate) =>
+                        `${rate.project_name || 'Proyek'} | ${rate.role_name} | ${formatCurrency(rate.wage_amount)}`
+                    )}
+                    className="bg-[var(--app-surface-strong-color)] px-4 py-4"
+                    leadingIcon={
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
+                        {currentConfig.key === 'workers' ? (
+                          <Users2 className="h-4 w-4" />
+                        ) : (
+                          <FolderKanban className="h-4 w-4" />
+                        )}
+                      </span>
+                    }
+                    actions={[
+                      {
+                        id: 'edit',
+                        label: 'Edit',
+                        onClick: () => openEditForm(record),
+                      },
+                      {
+                        id: 'delete',
+                        label: 'Hapus',
+                        destructive: true,
+                        onClick: async () => {
+                          try {
+                            await handleDelete(record)
+                          } catch (deleteError) {
+                            console.error('Gagal menghapus master data:', deleteError)
+                          }
+                        },
+                      },
+                    ]}
+                  />
                 )
               })
             ) : (
-              <div className="rounded-[24px] border border-dashed border-slate-200 bg-white/70 px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
-                {currentConfig.emptyTitle} Gunakan tombol tambah untuk membuat data
-                pertama.
-              </div>
+              <AppEmptyState
+                icon={<FolderKanban className="h-5 w-5" />}
+                title={currentConfig.emptyTitle}
+                description="Gunakan tombol tambah untuk membuat data pertama."
+              />
             )}
           </div>
-        </section>
-
+        </AppCardStrong>
       </section>
     </ProtectedRoute>
   )

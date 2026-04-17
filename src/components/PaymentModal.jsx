@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
 import useAuthStore from '../store/useAuthStore'
 import usePaymentStore from '../store/usePaymentStore'
+import { AppButton, AppCardStrong, AppDialog, AppInput, AppTextarea } from './ui/AppPrimitives'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -83,66 +83,46 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 px-3 py-4 sm:items-center">
-      <div className="w-full max-w-lg overflow-hidden rounded-[28px] border border-white/60 bg-[var(--app-surface-color)] shadow-telegram backdrop-blur-xl">
-        <div className="flex items-start justify-between gap-4 border-b border-white/70 px-5 py-5">
-          <div>
-            <p className="text-sm font-medium uppercase tracking-[0.22em] text-[var(--app-accent-color)]">
-              Pembayaran Tagihan
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
-              {bill.supplierName}
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">
-              {bill.projectName}
-            </p>
-          </div>
+    <AppDialog
+      open
+      onClose={onClose}
+      title="Pembayaran Tagihan"
+      description={bill.supplierName}
+    >
+      <div className="space-y-5">
+        <p className="text-sm leading-6 text-[var(--app-hint-color)]">
+          {bill.projectName}
+        </p>
 
-          <button
-            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white/80 text-[var(--app-text-color)] transition hover:bg-white"
-            onClick={onClose}
-            type="button"
-          >
-            <X className="h-4 w-4" />
-          </button>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <AppCardStrong className="space-y-1.5 px-4 py-4">
+            <p className="app-meta">Total Bill</p>
+            <p className="text-base font-semibold text-[var(--app-text-color)]">
+              {formatCurrency(bill.amount)}
+            </p>
+          </AppCardStrong>
+
+          <AppCardStrong className="space-y-1.5 px-4 py-4">
+            <p className="app-meta">Sudah Dibayar</p>
+            <p className="text-base font-semibold text-[var(--app-text-color)]">
+              {formatCurrency(bill.paidAmount)}
+            </p>
+          </AppCardStrong>
+
+          <AppCardStrong className="space-y-1.5 px-4 py-4 app-tone-warning">
+            <p className="app-meta">Sisa Tagihan</p>
+            <p className="text-base font-semibold">
+              {formatCurrency(bill.remainingAmount)}
+            </p>
+          </AppCardStrong>
         </div>
 
-        <form className="space-y-5 px-5 py-5" onSubmit={handleSubmit}>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Total Bill
-              </p>
-              <p className="mt-1 text-base font-semibold text-[var(--app-text-color)]">
-                {formatCurrency(bill.amount)}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Sudah Dibayar
-              </p>
-              <p className="mt-1 text-base font-semibold text-[var(--app-text-color)]">
-                {formatCurrency(bill.paidAmount)}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3">
-              <p className="text-xs uppercase tracking-[0.18em] text-amber-700">
-                Sisa Tagihan
-              </p>
-              <p className="mt-1 text-base font-semibold text-amber-800">
-                {formatCurrency(bill.remainingAmount)}
-              </p>
-            </div>
-          </div>
-
+        <form className="space-y-5" onSubmit={handleSubmit}>
           <label className="block space-y-2">
             <span className="text-sm font-semibold text-[var(--app-text-color)]">
               Nominal Pembayaran
             </span>
-            <input
-              className="w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+            <AppInput
               inputMode="decimal"
               max={bill.remainingAmount}
               min="0.01"
@@ -160,8 +140,7 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
             <span className="text-sm font-semibold text-[var(--app-text-color)]">
               Tanggal Pembayaran
             </span>
-            <input
-              className="w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+            <AppInput
               name="paymentDate"
               onChange={handleChange}
               required
@@ -174,8 +153,7 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
             <span className="text-sm font-semibold text-[var(--app-text-color)]">
               Catatan
             </span>
-            <textarea
-              className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+            <AppTextarea
               name="notes"
               onChange={handleChange}
               placeholder="Contoh: Transfer tahap pertama."
@@ -184,31 +162,23 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
           </label>
 
           {error ? (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+            <div className="app-card-dashed border-[var(--app-tone-danger-border)] px-4 py-3 text-sm leading-6 text-[var(--app-tone-danger-text)]">
               {error}
             </div>
           ) : null}
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <button
-              className="inline-flex items-center justify-center rounded-[22px] border border-slate-200 bg-white/85 px-5 py-4 text-base font-semibold text-[var(--app-text-color)] transition hover:bg-white"
-              onClick={onClose}
-              type="button"
-            >
+            <AppButton onClick={onClose} type="button" variant="secondary">
               Batal
-            </button>
+            </AppButton>
 
-            <button
-              className="inline-flex items-center justify-center rounded-[22px] bg-slate-950 px-5 py-4 text-base font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={isSubmitting}
-              type="submit"
-            >
+            <AppButton disabled={isSubmitting} type="submit" variant="primary">
               {isSubmitting ? 'Menyimpan...' : 'Simpan Pembayaran'}
-            </button>
+            </AppButton>
           </div>
         </form>
       </div>
-    </div>
+    </AppDialog>
   )
 }
 

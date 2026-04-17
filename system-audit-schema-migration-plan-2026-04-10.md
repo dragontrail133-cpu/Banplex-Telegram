@@ -115,9 +115,6 @@ Semua path di bawah adalah temuan langsung dari service/config repo saat audit.
 | `teams/main/bills/{billId}/payments/{paymentId}` | histori pembayaran tagihan | `amount`, `date`, `createdAt`, `workerId`, `workerName`, `recipientName`, `description`, `attachmentUrl` | Subcollection. |
 | `teams/main/attendance_records/{id}` | absensi & upah harian | `workerId`, `workerName`, `projectId`, `jobRole`, `date`, `attendanceStatus`, `checkIn`, `checkOut`, `workHours`, `normalHours`, `overtimeHours`, `dailyWage`, `hourlyWage`, `customWage`, `totalPay`, `isPaid`, `billId`, `integrityFlag`, `isDeleted`, timestamps | Satu record bisa mewakili manual atau timestamp flow. |
 | `teams/main/stock_transactions/{id}` | mutasi stok | `materialId`, `quantity`, `type`, `date`, `pricePerUnit`, `projectId`, `relatedExpenseId`, `isDeleted`, timestamps | Dipakai untuk stok masuk/keluar. |
-| `teams/main/comments/{id}` | komentar/chat lintas entitas | `parentId`, `parentType`, `replyToId`, `content`, `userId`, `userName`, `attachments`, `isEdited`, `isDeleted`, `createdAt`, `clientMsgId` | Model komentar generik, bukan subcollection per entitas. |
-| `teams/main/notifications/{id}` | notifikasi in-app | `message`, `userName`, `type`, `recipientUserId`, `read`, `createdAt` | Diisi oleh endpoint serverless `/api/notify`. |
-| `teams/main/logs/{id}` | log aktivitas | `action`, `actionType`, `details`, `userId`, `userName`, `status`, `dataType`, `dataId`, `dataPayload`, `operation`, `createdAt` | Campuran activity log dan quota log. |
 | `teams/main/settings/pdf` | konfigurasi PDF | minimal teramati: `headerColor` | Setting PDF saat ini minim dan sebagian asset masih file statis di `public/`. |
 | `teams/main/statistics/billing` | statistik tagihan singleton | `totalOutstanding`, `totalPaid`, `totalCount`, `lastUpdated`, `lastCalculated` | Derived data, bukan source of truth. |
 | `teams/main/hrd_applicants/{id}` | database pelamar HRD | biodata, alamat, pendidikan, `statusAplikasi`, `sumberLowongan`, `catatanHrd`, `urlKtp`, `urlKk`, `urlPasFoto`, `urlSuratSehat`, `urlCv`, `urlLainnya`, timestamps | Dokumen masih berupa URL file. |
@@ -908,9 +905,6 @@ Mendukung halaman `laporan`:
 - **Simulasi pembayaran**: user menginput dana tersedia, memilih atau auto-select tagihan/pinjaman yang ingin dialokasikan, lalu dapat mengunduh simulasi sebagai PDF.
 - **File Storage / Beneficiary DB**: CRUD, filter, impor XLSX/CSV, ekspor CSV/XLSX/PDF untuk data `penerimaManfaat`.
 - **HRD Applicants**: CRUD, filter status, impor/ekspor, lampiran dokumen, dan status pipeline HR seperti `Screening`, `Interview HR`, `Offering`, `Diterima`, `Ditolak`.
-- **Chat/komentar lintas entitas**: komentar generik untuk bill/expense/loan/income/journal, mendukung reply, edit, delete, dan sinkronisasi offline.
-- **Notifikasi**: in-app notification dari Firestore + web push via service worker, VAPID, dan Redis/KV subscription store.
-- **Log aktivitas**: perubahan penting dicatat ke `logs` dan juga dipakai untuk notifikasi.
 - **Recycle bin**: soft delete untuk master data dan transaksi, termasuk logika restore untuk item terkait.
 - **Admin tools**: manual push sync, repair data, orphan loan restore, integrity check, cleanup server, dan utilitas maintenance lain.
 

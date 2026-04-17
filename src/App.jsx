@@ -1,17 +1,22 @@
 import { useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import useTelegram from './hooks/useTelegram'
+import useTelegramThemeSync from './hooks/useTelegramThemeSync'
 import Dashboard from './pages/Dashboard'
 import AttendancePage from './pages/AttendancePage'
+import BeneficiariesPage from './pages/BeneficiariesPage'
 import EditRecordPage from './pages/EditRecordPage'
 import MainLayout from './components/layouts/MainLayout'
+import HrdPage from './pages/HrdPage'
 import MasterPage from './pages/MasterPage'
 import MasterFormPage from './pages/MasterFormPage'
 import MaterialInvoicePage from './pages/MaterialInvoicePage'
 import MorePage from './pages/MorePage'
 import ProjectsPage from './pages/ProjectsPage'
 import PaymentPage from './pages/PaymentPage'
+import PayrollPage from './pages/PayrollPage'
 import TransactionsPage from './pages/TransactionsPage'
+import TeamInvitePage from './pages/TeamInvitePage'
 import useAuthStore from './store/useAuthStore'
 
 function LoadingScreen() {
@@ -47,6 +52,7 @@ function UnregisteredScreen({ message }) {
 
 function App() {
   const { tg, startParam } = useTelegram()
+  useTelegramThemeSync(tg)
   const initializeTelegramAuth = useAuthStore(
     (state) => state.initializeTelegramAuth
   )
@@ -89,9 +95,14 @@ function App() {
         <Route path="/lainnya" element={<Navigate to="/more" replace />} />
       </Route>
       <Route path="/attendance/new" element={<AttendancePage />} />
+      <Route path="/more/payroll" element={<PayrollPage />} />
+      <Route path="/more/hrd" element={<HrdPage />} />
+      <Route path="/more/beneficiaries" element={<BeneficiariesPage />} />
+      <Route path="/more/team-invite" element={<TeamInvitePage />} />
       <Route path="/material-invoice/new" element={<MaterialInvoicePage />} />
       <Route path="/edit/:type/:id" element={<EditRecordPage />} />
-      <Route path="/payment/:id" element={<PaymentPage />} />
+      <Route path="/payment/:id" element={<PaymentPage paymentType="bill" />} />
+      <Route path="/loan-payment/:id" element={<PaymentPage paymentType="loan" />} />
       <Route path="/master/:tab/add" element={<MasterFormPage />} />
       <Route path="/master/:tab/edit/:id" element={<MasterFormPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />

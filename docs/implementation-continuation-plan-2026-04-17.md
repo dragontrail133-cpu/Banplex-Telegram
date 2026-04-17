@@ -54,6 +54,12 @@ Dokumen ini secara sengaja **menghapus poin notifikasi/chat/log in-app** dari pr
 - dashboard dan transaction list menampilkan data yang sama dengan tabel domain final
 - tidak ada jalur create utama yang masih tergantung pada model lama tanpa justifikasi
 
+#### Keputusan sprint integrasi saat ini
+
+- `transactions` ditetapkan sebagai compatibility layer sementara.
+- Jalur create utama wajib pindah ke tabel domain relasional final.
+- Dashboard dan transaction list wajib membaca cashflow final dari tabel domain, bukan `transactions`.
+
 ### 2. Otomasi fee staf per termin
 
 #### Masalah saat ini

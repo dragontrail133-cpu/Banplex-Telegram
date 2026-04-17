@@ -524,11 +524,6 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="app-kicker">Sheet Harian</p>
-              <h3 className="app-title">Absensi massal per tanggal dan proyek</h3>
-              <p className="app-copy">
-                Simpan banyak worker sekaligus. Upah dihitung dari wage rate dan
-                record `unbilled` akan dibundel menjadi tagihan per worker di payroll.
-              </p>
             </div>
 
             <button

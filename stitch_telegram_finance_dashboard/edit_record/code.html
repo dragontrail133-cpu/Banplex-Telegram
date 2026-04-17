@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Edit Record - The Financial Atelier</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-error": "#ffffff",
+                        "secondary-fixed": "#cbe9da",
+                        "on-primary-fixed-variant": "#00513b",
+                        "on-surface": "#191c1d",
+                        "on-error-container": "#93000a",
+                        "surface-variant": "#e1e3e4",
+                        "on-primary": "#ffffff",
+                        "primary": "#004532",
+                        "on-surface-variant": "#3f4944",
+                        "on-secondary-fixed": "#052016",
+                        "on-secondary-fixed-variant": "#324c41",
+                        "on-tertiary-fixed": "#3b0908",
+                        "primary-fixed-dim": "#8bd6b6",
+                        "inverse-on-surface": "#f0f1f2",
+                        "surface-container-highest": "#e1e3e4",
+                        "tertiary": "#652925",
+                        "background": "#f8f9fa",
+                        "on-tertiary-fixed-variant": "#73332f",
+                        "surface-container": "#edeeef",
+                        "tertiary-fixed-dim": "#ffb3ac",
+                        "secondary-fixed-dim": "#afcdbe",
+                        "error-container": "#ffdad6",
+                        "surface-container-low": "#f3f4f5",
+                        "primary-container": "#065f46",
+                        "on-tertiary": "#ffffff",
+                        "on-primary-fixed": "#002116",
+                        "surface": "#f8f9fa",
+                        "on-tertiary-container": "#ffb4ad",
+                        "on-secondary-container": "#4d685c",
+                        "outline": "#6f7973",
+                        "surface-container-lowest": "#ffffff",
+                        "error": "#ba1a1a",
+                        "outline-variant": "#bec9c2",
+                        "surface-bright": "#f8f9fa",
+                        "secondary": "#496458",
+                        "surface-container-high": "#e7e8e9",
+                        "primary-fixed": "#a6f2d1",
+                        "on-background": "#191c1d",
+                        "tertiary-container": "#823f3a",
+                        "secondary-container": "#c8e7d7",
+                        "on-primary-container": "#8bd6b7",
+                        "inverse-surface": "#2e3132",
+                        "on-secondary": "#ffffff",
+                        "surface-tint": "#1b6b51",
+                        "inverse-primary": "#8bd6b6",
+                        "surface-dim": "#d9dadb",
+                        "tertiary-fixed": "#ffdad6"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope", "sans-serif"],
+                        "body": ["Manrope", "sans-serif"],
+                        "label": ["Manrope", "sans-serif"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Manrope', sans-serif; }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface-container-low text-on-surface antialiased min-h-screen flex flex-col selection:bg-primary selection:text-on-primary pb-24 md:pb-0">
+<!-- Top Navigation for Context (Simulating Full Screen Sheet) -->
+<header class="bg-surface-container-lowest sticky top-0 z-40 w-full flex items-center px-6 py-4">
+<button class="mr-4 text-on-surface-variant hover:text-on-surface transition-colors flex items-center justify-center rounded-full w-10 h-10 bg-surface-container-high/50 hover:bg-surface-container-high">
+<span class="material-symbols-outlined" style="font-variation-settings: 'wght' 300;">close</span>
+</button>
+<h1 class="font-headline font-bold text-lg tracking-tight text-on-surface flex-1">Edit Record</h1>
+<!-- Subtle status indicator -->
+<span class="text-xs font-semibold tracking-widest text-primary-container uppercase bg-secondary-container px-3 py-1 rounded-full">Draft</span>
+</header>
+<!-- Main Content Area -->
+<main class="flex-1 w-full max-w-3xl mx-auto px-6 py-8 md:py-12">
+<!-- Context Block: Identifying the Record -->
+<section class="mb-10 bg-surface-container-lowest rounded-xl p-6 relative overflow-hidden group">
+<!-- Decorative gradient accent -->
+<div class="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-primary to-primary-container"></div>
+<div class="flex items-start justify-between">
+<div>
+<h2 class="font-headline font-bold text-xl text-on-surface mb-1">Invoice #INV-2023-089</h2>
+<p class="font-body text-sm text-on-surface-variant mb-4">Originally created on Oct 12, 2023 by Administrator</p>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-outline text-sm" style="font-variation-settings: 'wght' 300;">history</span>
+<span class="font-label text-xs uppercase tracking-widest text-outline">Last modified 2 days ago</span>
+</div>
+</div>
+<div class="hidden sm:flex items-center justify-center w-12 h-12 rounded-full bg-surface-container-low">
+<span class="material-symbols-outlined text-primary-container" style="font-variation-settings: 'wght' 300;">edit_document</span>
+</div>
+</div>
+</section>
+<!-- Dynamic Form Fields -->
+<form class="space-y-8">
+<!-- Bento-style field grouping: Basic Info -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-surface-container-lowest p-6 rounded-xl">
+<div class="col-span-1 md:col-span-2">
+<h3 class="font-headline font-bold text-base text-on-surface mb-6 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'wght' 300;">info</span>
+                        Primary Details
+                    </h3>
+</div>
+<!-- Record Name -->
+<div class="col-span-1 md:col-span-2 relative group">
+<label class="block font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-2 ml-1" for="recordName">Name</label>
+<div class="relative">
+<input class="w-full bg-surface-container-low text-on-surface font-body text-base px-4 py-3 rounded-lg border-0 focus:ring-0 focus:outline-none transition-all placeholder:text-outline" id="recordName" placeholder="Enter record name" type="text" value="Q3 Marketing Campaign Retainer"/>
+<!-- Underline Focus Effect -->
+<div class="absolute bottom-0 left-0 w-full h-[2px] bg-outline-variant opacity-50 group-focus-within:bg-primary group-focus-within:opacity-100 transition-all duration-300"></div>
+</div>
+</div>
+<!-- Date Picker -->
+<div class="col-span-1 relative group">
+<label class="block font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-2 ml-1" for="recordDate">Date</label>
+<div class="relative flex items-center">
+<input class="w-full bg-surface-container-low text-on-surface font-body text-base px-4 py-3 pl-11 rounded-lg border-0 focus:ring-0 focus:outline-none transition-all placeholder:text-outline" id="recordDate" placeholder="Select date" type="text" value="Oct 12, 2023"/>
+<span class="material-symbols-outlined absolute left-3 text-outline" style="font-variation-settings: 'wght' 300;">calendar_today</span>
+<!-- Underline Focus Effect -->
+<div class="absolute bottom-0 left-0 w-full h-[2px] bg-outline-variant opacity-50 group-focus-within:bg-primary group-focus-within:opacity-100 transition-all duration-300"></div>
+</div>
+</div>
+<!-- Project Selection -->
+<div class="col-span-1 relative group">
+<label class="block font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-2 ml-1" for="recordProject">Project</label>
+<div class="relative flex items-center">
+<select class="w-full bg-surface-container-low text-on-surface font-body text-base px-4 py-3 pl-11 appearance-none rounded-lg border-0 focus:ring-0 focus:outline-none transition-all cursor-pointer" id="recordProject">
+<option value="p1">Project Alpha - Brand Refresh</option>
+<option selected="" value="p2">Project Beta - Q3 Marketing</option>
+<option value="p3">Project Gamma - Web Dev</option>
+</select>
+<span class="material-symbols-outlined absolute left-3 text-outline pointer-events-none" style="font-variation-settings: 'wght' 300;">folder</span>
+<span class="material-symbols-outlined absolute right-3 text-outline pointer-events-none" style="font-variation-settings: 'wght' 300;">expand_more</span>
+<!-- Underline Focus Effect -->
+<div class="absolute bottom-0 left-0 w-full h-[2px] bg-outline-variant opacity-50 group-focus-within:bg-primary group-focus-within:opacity-100 transition-all duration-300"></div>
+</div>
+</div>
+</div>
+<!-- Bento-style field grouping: Financials -->
+<div class="grid grid-cols-1 gap-6 bg-surface-container-lowest p-6 rounded-xl">
+<div>
+<h3 class="font-headline font-bold text-base text-on-surface mb-6 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'wght' 300;">payments</span>
+                        Financial Data
+                    </h3>
+</div>
+<!-- Nominal Amount -->
+<div class="relative group">
+<label class="block font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-2 ml-1" for="recordNominal">Nominal</label>
+<div class="relative flex items-center bg-surface-container-low rounded-lg overflow-hidden">
+<div class="px-4 py-3 bg-surface-container-high text-on-surface-variant font-bold border-r border-surface-container-highest">IDR</div>
+<input class="w-full bg-transparent text-on-surface font-headline font-bold text-xl px-4 py-3 border-0 focus:ring-0 focus:outline-none transition-all placeholder:text-outline" id="recordNominal" placeholder="0.00" type="text" value="125,000,000"/>
+<!-- Underline Focus Effect -->
+<div class="absolute bottom-0 left-0 w-full h-[2px] bg-outline-variant opacity-50 group-focus-within:bg-primary group-focus-within:opacity-100 transition-all duration-300"></div>
+</div>
+<p class="font-body text-xs text-on-surface-variant mt-2 ml-1">Amount is inclusive of 11% VAT.</p>
+</div>
+<!-- Description/Notes -->
+<div class="relative group mt-4">
+<label class="block font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-2 ml-1" for="recordNotes">Additional Notes</label>
+<div class="relative">
+<textarea class="w-full bg-surface-container-low text-on-surface font-body text-base px-4 py-3 rounded-lg border-0 focus:ring-0 focus:outline-none transition-all placeholder:text-outline resize-none" id="recordNotes" placeholder="Enter any supporting details or context for this edit..." rows="3">Adjusted nominal amount to reflect the latest scope change requested by the client on Oct 14.</textarea>
+<!-- Underline Focus Effect -->
+<div class="absolute bottom-0 left-0 w-full h-[2px] bg-outline-variant opacity-50 group-focus-within:bg-primary group-focus-within:opacity-100 transition-all duration-300"></div>
+</div>
+</div>
+</div>
+</form>
+<!-- Spacer for sticky footer -->
+<div class="h-12"></div>
+</main>
+<!-- Sticky Footer Actions -->
+<footer class="fixed bottom-0 left-0 w-full bg-surface-container-lowest/90 backdrop-blur-xl border-t border-surface-container-high px-6 py-4 z-50 shadow-[0_-4px_20px_rgba(25,28,29,0.04)]">
+<div class="max-w-3xl mx-auto flex flex-col-reverse sm:flex-row items-center justify-end gap-4">
+<button class="w-full sm:w-auto px-6 py-3 rounded-xl font-headline font-bold text-sm text-on-surface bg-surface-container-high hover:bg-surface-variant transition-colors">
+                Kembali
+            </button>
+<button class="w-full sm:w-auto px-6 py-3 rounded-xl font-headline font-bold text-sm text-on-primary bg-gradient-to-br from-primary to-primary-container shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'wght' 600;">save</span>
+                Simpan Perubahan
+            </button>
+</div>
+</footer>
+</body></html>

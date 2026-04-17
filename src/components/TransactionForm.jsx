@@ -3,6 +3,7 @@ import useTelegram from '../hooks/useTelegram'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
 import useTransactionStore from '../store/useTransactionStore'
+import { AppButton, AppCardDashed, AppInput, AppSelect, AppTextarea } from './ui/AppPrimitives'
 
 const transactionTypes = [
   { value: 'income', label: 'Pemasukan' },
@@ -45,8 +46,8 @@ function createInitialFormData(initialType = 'income') {
 
 function InlineSelectLoader() {
   return (
-    <div className="pointer-events-none absolute inset-y-0 right-4 flex items-center gap-2 text-xs font-medium text-slate-400">
-      <div className="h-4 w-4 animate-spin rounded-full border-2 border-sky-200 border-t-sky-600" />
+    <div className="pointer-events-none absolute inset-y-0 right-4 flex items-center gap-2 text-xs font-medium text-[var(--app-hint-color)]">
+      <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--app-border-color)] border-t-[var(--app-accent-color)]" />
       <span className="hidden sm:inline">Memuat data...</span>
     </div>
   )
@@ -55,7 +56,7 @@ function InlineSelectLoader() {
 function TransactionForm({ initialType = 'income', onSuccess }) {
   const [formData, setFormData] = useState(() => createInitialFormData(initialType))
   const [successMessage, setSuccessMessage] = useState(null)
-  const { tg, user } = useTelegram()
+  const { tg, user, haptic } = useTelegram()
   const authUser = useAuthStore((state) => state.user)
   const projects = useMasterStore((state) => state.projects)
   const categories = useMasterStore((state) => state.categories)
@@ -113,10 +114,12 @@ function TransactionForm({ initialType = 'income', onSuccess }) {
       })
 
       if (tg?.close) {
+        haptic?.notificationOccurred('success')
         tg.close()
         return
       }
 
+      haptic?.notificationOccurred('success')
       await onSuccess?.()
       setFormData(createInitialFormData())
       setSuccessMessage('Transaksi berhasil disimpan ke database.')
@@ -126,6 +129,7 @@ function TransactionForm({ initialType = 'income', onSuccess }) {
           ? submitError.message
           : 'Gagal menyimpan transaksi.'
 
+      haptic?.notificationOccurred('error')
       tg?.showAlert?.(message)
     }
   }
@@ -184,36 +188,35 @@ function TransactionForm({ initialType = 'income', onSuccess }) {
   useEffect(() => () => clearError(), [clearError])
 
   return (
-    <form
-      className="space-y-5"
-      onSubmit={handleSubmit}
-    >
+    <form className="space-y-5" onSubmit={handleSubmit}>
       <fieldset className="space-y-5" disabled={isSubmitting}>
         <section className="space-y-2">
           <p className="text-sm font-semibold text-[var(--app-text-color)]">
             Tipe Transaksi
           </p>
           <div className="grid grid-cols-2 gap-3">
-            {transactionTypes.map((type) => (
-              <label
-                key={type.value}
-                className={`flex cursor-pointer items-center justify-center rounded-2xl border px-4 py-3 text-sm font-medium transition ${
-                  formData.type === type.value
-                    ? 'border-sky-500 bg-sky-50 text-sky-700 shadow-sm'
-                    : 'border-slate-200 bg-white/80 text-slate-600'
-                }`}
-              >
-                <input
-                  checked={formData.type === type.value}
-                  className="sr-only"
-                  name="type"
-                  onChange={handleChange}
-                  type="radio"
-                  value={type.value}
-                />
-                {type.label}
-              </label>
-            ))}
+            {transactionTypes.map((type) => {
+              const isSelected = formData.type === type.value
+
+              return (
+                <AppButton
+                  key={type.value}
+                  aria-pressed={isSelected}
+                  className="rounded-[22px]"
+                  onClick={() =>
+                    setFormData((current) => ({
+                      ...current,
+                      type: type.value,
+                    }))
+                  }
+                  size="lg"
+                  type="button"
+                  variant={isSelected ? 'primary' : 'secondary'}
+                >
+                  {type.label}
+                </AppButton>
+              )
+            })}
           </div>
         </section>
 
@@ -222,10 +225,8 @@ function TransactionForm({ initialType = 'income', onSuccess }) {
             Proyek
           </span>
           <div className="relative">
-            <select
-              className={`w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 pr-14 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200 ${
-                isMasterLoading ? 'animate-pulse' : ''
-              }`}
+            <AppSelect
+              className={isMasterLoading ? 'animate-pulse pr-14' : 'pr-14'}
               disabled={isProjectDisabled}
               name="projectId"
               onChange={handleChange}
@@ -246,7 +247,7 @@ function TransactionForm({ initialType = 'income', onSuccess }) {
               ) : (
                 <option value="">Data proyek belum tersedia</option>
               )}
-            </select>
+            </AppSelect>
 
             {isMasterLoading ? <InlineSelectLoader /> : null}
           </div>
@@ -257,10 +258,8 @@ function TransactionForm({ initialType = 'income', onSuccess }) {
             Kategori
           </span>
           <div className="relative">
-            <select
-              className={`w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 pr-14 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200 ${
-                isMasterLoading ? 'animate-pulse' : ''
-              }`}
+            <AppSelect
+              className={isMasterLoading ? 'animate-pulse pr-14' : 'pr-14'}
               disabled={isCategoryDisabled}
               name="categoryId"
               onChange={handleChange}
@@ -281,7 +280,7 @@ function TransactionForm({ initialType = 'income', onSuccess }) {
               ) : (
                 <option value="">Data kategori belum tersedia</option>
               )}
-            </select>
+            </AppSelect>
 
             {isMasterLoading ? <InlineSelectLoader /> : null}
           </div>
@@ -291,8 +290,7 @@ function TransactionForm({ initialType = 'income', onSuccess }) {
           <span className="text-sm font-semibold text-[var(--app-text-color)]">
             Nominal
           </span>
-          <input
-            className="w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+          <AppInput
             inputMode="decimal"
             min="0.01"
             name="amount"
@@ -309,8 +307,7 @@ function TransactionForm({ initialType = 'income', onSuccess }) {
           <span className="text-sm font-semibold text-[var(--app-text-color)]">
             Tanggal
           </span>
-          <input
-            className="w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+          <AppInput
             name="date"
             onChange={handleChange}
             required
@@ -323,8 +320,7 @@ function TransactionForm({ initialType = 'income', onSuccess }) {
           <span className="text-sm font-semibold text-[var(--app-text-color)]">
             Deskripsi Singkat
           </span>
-          <input
-            className="w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+          <AppInput
             name="description"
             onChange={handleChange}
             placeholder="Contoh: Pembayaran invoice proyek"
@@ -337,8 +333,7 @@ function TransactionForm({ initialType = 'income', onSuccess }) {
           <span className="text-sm font-semibold text-[var(--app-text-color)]">
             Catatan Tambahan
           </span>
-          <textarea
-            className="min-h-32 w-full resize-none rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+          <AppTextarea
             name="notes"
             onChange={handleChange}
             placeholder="Tambahkan konteks singkat untuk transaksi ini."
@@ -346,44 +341,38 @@ function TransactionForm({ initialType = 'income', onSuccess }) {
           />
         </label>
 
-        <div
-          className={`rounded-2xl border border-dashed px-4 py-3 text-sm leading-6 ${
-            hasMainButton
-              ? 'border-sky-200 bg-sky-50/80 text-sky-800'
-              : 'border-amber-200 bg-amber-50/80 text-amber-800'
-          }`}
-        >
+        <AppCardDashed className={`px-4 py-3 text-sm leading-6 ${
+          hasMainButton
+            ? 'border-[var(--app-tone-info-border)] text-[var(--app-tone-info-text)]'
+            : 'border-[var(--app-tone-warning-border)] text-[var(--app-tone-warning-text)]'
+        }`}>
           {hasMainButton
             ? 'Gunakan MainButton Telegram untuk menyimpan transaksi ini.'
             : 'MainButton Telegram tidak tersedia di browser. Gunakan tombol manual di bawah untuk menyimpan transaksi.'}
-        </div>
+        </AppCardDashed>
 
         {error ? (
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+          <div className="app-card-dashed border-[var(--app-tone-danger-border)] px-4 py-3 text-sm leading-6 text-[var(--app-tone-danger-text)]">
             {error}
           </div>
         ) : null}
 
         {masterError ? (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+          <div className="app-card-dashed border-[var(--app-tone-warning-border)] px-4 py-3 text-sm leading-6 text-[var(--app-tone-warning-text)]">
             {masterError}
           </div>
         ) : null}
 
         {successMessage ? (
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-700">
+          <div className="app-card-dashed border-[var(--app-tone-success-border)] px-4 py-3 text-sm leading-6 text-[var(--app-tone-success-text)]">
             {successMessage}
           </div>
         ) : null}
 
         {!hasMainButton ? (
-          <button
-            className="flex w-full items-center justify-center rounded-[22px] bg-slate-950 px-5 py-4 text-base font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isSubmitting || !isMasterDataReady}
-            type="submit"
-          >
+          <AppButton disabled={isSubmitting || !isMasterDataReady} type="submit" variant="primary">
             {isSubmitting ? 'Menyimpan...' : 'Simpan Transaksi'}
-          </button>
+          </AppButton>
         ) : null}
       </fieldset>
     </form>

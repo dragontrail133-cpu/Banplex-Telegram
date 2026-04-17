@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Pencil, Plus, RefreshCcw, Trash2 } from 'lucide-react'
+import { Plus, RefreshCcw } from 'lucide-react'
+import ActionCard from './ui/ActionCard'
+import { AppButton, AppInput, AppSelect, AppSheet, AppTextarea } from './ui/AppPrimitives'
 import useHrStore, { beneficiaryStatusOptions } from '../store/useHrStore'
 
 function normalizeText(value, fallback = '') {
@@ -26,18 +28,6 @@ function formatDate(value) {
     month: 'short',
     year: 'numeric',
   }).format(parsedDate)
-}
-
-function getStatusStyles(status) {
-  if (status === 'pending') {
-    return 'border-amber-200 bg-amber-50 text-amber-700'
-  }
-
-  if (status === 'inactive') {
-    return 'border-slate-200 bg-slate-100 text-slate-600'
-  }
-
-  return 'border-emerald-200 bg-emerald-50 text-emerald-700'
 }
 
 function createInitialFormData() {
@@ -71,18 +61,20 @@ function BeneficiaryList() {
     })
   }, [fetchBeneficiaries])
 
-  useEffect(() => {
-    if (!isModalOpen) {
-      setFormData(createInitialFormData())
-      setEditingId(null)
-      setLocalError(null)
-      clearError()
-    }
-  }, [clearError, isModalOpen])
+  const resetModalState = () => {
+    setFormData(createInitialFormData())
+    setEditingId(null)
+    setLocalError(null)
+    clearError()
+  }
+
+  const handleCloseModal = () => {
+    resetModalState()
+    setIsModalOpen(false)
+  }
 
   const openCreateModal = () => {
-    setEditingId(null)
-    setFormData(createInitialFormData())
+    resetModalState()
     setIsModalOpen(true)
   }
 
@@ -151,9 +143,7 @@ function BeneficiaryList() {
 
       await fetchBeneficiaries({ force: true })
 
-      setIsModalOpen(false)
-      setEditingId(null)
-      setFormData(createInitialFormData())
+      handleCloseModal()
     } catch (submitError) {
       const message =
         submitError instanceof Error
@@ -217,85 +207,37 @@ function BeneficiaryList() {
           Memuat data penerima manfaat...
         </div>
       ) : beneficiaries.length > 0 ? (
-        <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white/85 shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Nama
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    NIK
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Instansi
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Status
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Aksi
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {beneficiaries.map((beneficiary) => (
-                  <tr key={beneficiary.id} className="align-top">
-                    <td className="px-4 py-4">
-                      <div className="font-semibold text-[var(--app-text-color)]">
-                        {beneficiary.name}
-                      </div>
-                      <div className="mt-1 text-xs text-[var(--app-hint-color)]">
-                        Dicatat {formatDate(beneficiary.created_at)}
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 text-sm text-slate-600">
-                      {beneficiary.nik || '-'}
-                    </td>
-                    <td className="px-4 py-4 text-sm text-slate-600">
-                      {beneficiary.institution || '-'}
-                    </td>
-                    <td className="px-4 py-4">
-                      <span
-                        className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getStatusStyles(
-                          beneficiary.status
-                        )}`}
-                      >
-                        {beneficiary.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                          disabled={isSubmitting}
-                          onClick={() => openEditModal(beneficiary)}
-                          type="button"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                          Edit
-                        </button>
-                        <button
-                          className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                          disabled={isSubmitting}
-                          onClick={() => {
-                            void deleteBeneficiary(beneficiary.id).catch((deleteError) => {
-                              console.error('Gagal menghapus penerima manfaat:', deleteError)
-                            })
-                          }}
-                          type="button"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Hapus
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="space-y-3">
+          {beneficiaries.map((beneficiary) => (
+            <ActionCard
+              key={beneficiary.id}
+              title={beneficiary.name}
+              subtitle={beneficiary.institution || beneficiary.nik || 'Penerima manfaat aktif'}
+              badge={beneficiary.status}
+              badges={beneficiary.nik ? [beneficiary.nik] : []}
+              details={[
+                `Dicatat ${formatDate(beneficiary.created_at)}`,
+                beneficiary.notes || 'Tanpa catatan',
+              ]}
+              actions={[
+                {
+                  id: 'edit',
+                  label: 'Edit',
+                  onClick: () => openEditModal(beneficiary),
+                },
+                {
+                  id: 'delete',
+                  label: 'Hapus',
+                  destructive: true,
+                  onClick: () => {
+                    void deleteBeneficiary(beneficiary.id).catch((deleteError) => {
+                      console.error('Gagal menghapus penerima manfaat:', deleteError)
+                    })
+                  },
+                },
+              ]}
+            />
+          ))}
         </div>
       ) : (
         <div className="rounded-3xl border border-dashed border-slate-200 bg-white/70 px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
@@ -304,136 +246,107 @@ function BeneficiaryList() {
       )}
 
       {isModalOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 px-3 py-4 sm:items-center"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              setIsModalOpen(false)
-            }
-          }}
+        <AppSheet
+          open={isModalOpen}
+          onClose={handleCloseModal}
+          title={editingId ? 'Edit Data' : 'Tambah Data Baru'}
+          description="Masukkan biodata dasar penerima manfaat agar data lebih rapi."
         >
-          <div className="w-full max-w-lg overflow-hidden rounded-[28px] border border-white/60 bg-[var(--app-surface-color)] shadow-telegram backdrop-blur-xl">
-            <div className="border-b border-white/70 px-5 py-5">
-              <p className="text-sm font-medium uppercase tracking-[0.22em] text-[var(--app-accent-color)]">
-                Data Penerima Manfaat
-              </p>
-              <h3 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
-                {editingId ? 'Edit Data' : 'Tambah Data Baru'}
-              </h3>
-              <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">
-                Masukkan biodata dasar penerima manfaat agar data lebih rapi.
-              </p>
+          <form className="space-y-5" onSubmit={handleSubmit}>
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-[var(--app-text-color)]">
+                Nama
+              </span>
+              <AppInput
+                name="name"
+                onChange={handleChange}
+                placeholder="Contoh: Siti Aminah"
+                required
+                type="text"
+                value={formData.name}
+              />
+            </label>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block space-y-2">
+                <span className="text-sm font-semibold text-[var(--app-text-color)]">
+                  NIK
+                </span>
+                <AppInput
+                  name="nik"
+                  onChange={handleChange}
+                  placeholder="Nomor KTP"
+                  type="text"
+                  value={formData.nik}
+                />
+              </label>
+
+              <label className="block space-y-2">
+                <span className="text-sm font-semibold text-[var(--app-text-color)]">
+                  Instansi
+                </span>
+                <AppInput
+                  name="institution"
+                  onChange={handleChange}
+                  placeholder="Contoh: Yayasan Mandiri"
+                  type="text"
+                  value={formData.institution}
+                />
+              </label>
             </div>
 
-            <form className="space-y-5 px-5 py-5" onSubmit={handleSubmit}>
-              <label className="block space-y-2">
-                <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                  Nama
-                </span>
-                <input
-                  className="w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                  name="name"
-                  onChange={handleChange}
-                  placeholder="Contoh: Siti Aminah"
-                  required
-                  type="text"
-                  value={formData.name}
-                />
-              </label>
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-[var(--app-text-color)]">
+                Status
+              </span>
+              <AppSelect
+                name="status"
+                onChange={handleChange}
+                value={formData.status}
+              >
+                {beneficiaryStatusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </AppSelect>
+            </label>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block space-y-2">
-                  <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                    NIK
-                  </span>
-                  <input
-                    className="w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                    name="nik"
-                    onChange={handleChange}
-                    placeholder="Nomor KTP"
-                    type="text"
-                    value={formData.nik}
-                  />
-                </label>
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-[var(--app-text-color)]">
+                Catatan
+              </span>
+              <AppTextarea
+                name="notes"
+                onChange={handleChange}
+                placeholder="Opsional"
+                value={formData.notes}
+              />
+            </label>
 
-                <label className="block space-y-2">
-                  <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                    Instansi
-                  </span>
-                  <input
-                    className="w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                    name="institution"
-                    onChange={handleChange}
-                    placeholder="Contoh: Yayasan Mandiri"
-                    type="text"
-                    value={formData.institution}
-                  />
-                </label>
+            {localError ? (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+                {localError}
               </div>
+            ) : null}
 
-              <label className="block space-y-2">
-                <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                  Status
-                </span>
-                <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                  name="status"
-                  onChange={handleChange}
-                  value={formData.status}
-                >
-                  {beneficiaryStatusOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                  Catatan
-                </span>
-                <textarea
-                  className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                  name="notes"
-                  onChange={handleChange}
-                  placeholder="Opsional"
-                  value={formData.notes}
-                />
-              </label>
-
-              {localError ? (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
-                  {localError}
-                </div>
-              ) : null}
-
-              {error ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-                  {error}
-                </div>
-              ) : null}
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <button
-                  className="inline-flex items-center justify-center rounded-[22px] border border-slate-200 bg-white/85 px-5 py-4 text-base font-semibold text-[var(--app-text-color)] transition hover:bg-white"
-                  onClick={() => setIsModalOpen(false)}
-                  type="button"
-                >
-                  Batal
-                </button>
-
-                <button
-                  className="inline-flex items-center justify-center rounded-[22px] bg-slate-950 px-5 py-4 text-base font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={isSubmitting}
-                  type="submit"
-                >
-                  {isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
-                </button>
+            {error ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                {error}
               </div>
-            </form>
-          </div>
-        </div>
+            ) : null}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <AppButton onClick={handleCloseModal} type="button" variant="secondary">
+                Batal
+              </AppButton>
+
+              <AppButton disabled={isSubmitting} type="submit">
+                {isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
+              </AppButton>
+            </div>
+          </form>
+        </AppSheet>
       ) : null}
     </section>
   )

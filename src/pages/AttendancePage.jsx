@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { CalendarCheck2, Users } from 'lucide-react'
 import ProtectedRoute from '../components/ProtectedRoute'
 import FormLayout from '../components/layouts/FormLayout'
 import AttendanceForm from '../components/AttendanceForm'
@@ -21,22 +22,12 @@ function AttendancePage() {
         onBack={() => navigate(-1)}
         title="Absensi Harian"
       >
-        <section className="space-y-4">
-          <div className="app-page-surface p-4">
-            <p className="app-kicker">
-              Absensi Harian
-            </p>
-            <h2 className="app-title">
-              Input banyak worker dalam satu tanggal
-            </h2>
-            <p className="app-copy">
-              Record harian disimpan per worker, upah dihitung otomatis dari wage
-              rate, lalu payroll akan membundel tagihan per worker.
-            </p>
-          </div>
+        <div className=" ">
+          <section className=" ">
+          </section>
 
           <AttendanceForm formId={formId} hideActions />
-        </section>
+        </div>
       </FormLayout>
     </ProtectedRoute>
   )

@@ -521,6 +521,19 @@ function buildLoanMessage(payload) {
   ].join('\n')
 }
 
+function buildLoanPaymentMessage(payload) {
+  return [
+    '<b>Pembayaran Pinjaman Berhasil Dicatat</b>',
+    `<i>Loan ID: ${escapeHtml(normalizeText(payload.loanId, '-'))}</i>`,
+    `Tanggal: <b>${escapeHtml(formatDate(payload.paymentDate))}</b>`,
+    `Kreditur: <b>${escapeHtml(normalizeText(payload.creditorName))}</b>`,
+    `Oleh: <b>${escapeHtml(normalizeText(payload.userName, 'Pengguna Telegram'))}</b>`,
+    `Nominal Bayar: <b>${escapeHtml(formatCurrency(payload.amount))}</b>`,
+    `Sisa Pinjaman: <b>${escapeHtml(formatCurrency(payload.remainingAmount))}</b>`,
+    `Catatan: <i>${escapeHtml(normalizeText(payload.description))}</i>`,
+  ].join('\n')
+}
+
 function buildSalaryBillMessage(payload) {
   return [
     `<b>Tagihan Gaji untuk ${escapeHtml(normalizeText(payload.workerName))} sebesar ${escapeHtml(formatCurrency(payload.amount))} telah dibuat.</b>`,
@@ -631,6 +644,10 @@ function isProjectIncomePayload(body) {
 
 function isLoanPayload(body) {
   return normalizeText(body.notificationType, '') === 'loan'
+}
+
+function isLoanPaymentPayload(body) {
+  return normalizeText(body.notificationType, '') === 'loan_payment'
 }
 
 function isSalaryBillPayload(body) {
@@ -777,6 +794,34 @@ function parseLoanPayload(body) {
   return payload
 }
 
+function parseLoanPaymentPayload(body) {
+  const payload = {
+    loanId: normalizeText(body.loanId ?? body.loan_id, ''),
+    paymentDate: normalizeText(
+      body.paymentDate ?? body.payment_date ?? body.date,
+      new Date().toISOString()
+    ),
+    userName: normalizeText(body.userName, 'Pengguna Telegram'),
+    creditorName: normalizeText(body.creditorName, ''),
+    amount: Number(body.amount),
+    remainingAmount: Number(body.remainingAmount),
+    description: normalizeText(
+      body.description ?? body.notes,
+      'Pembayaran pinjaman telah dilakukan.'
+    ),
+  }
+
+  if (!payload.loanId || !Number.isFinite(payload.amount) || payload.amount <= 0) {
+    throw new Error('Payload notifikasi pembayaran pinjaman tidak lengkap atau tidak valid.')
+  }
+
+  if (!Number.isFinite(payload.remainingAmount) || payload.remainingAmount < 0) {
+    payload.remainingAmount = 0
+  }
+
+  return payload
+}
+
 function parseSalaryBillPayload(body) {
   const payload = {
     workerName: normalizeText(body.workerName, ''),
@@ -856,6 +901,14 @@ async function sendLoanNotification(payload, telegramBotToken, telegramChatId) {
   })
 }
 
+async function sendLoanPaymentNotification(payload, telegramBotToken, telegramChatId) {
+  return sendTelegramTextNotification({
+    telegramBotToken,
+    telegramChatId,
+    message: buildLoanPaymentMessage(payload),
+  })
+}
+
 async function sendSalaryBillNotification(payload, telegramBotToken, telegramChatId) {
   return sendTelegramTextNotification({
     telegramBotToken,
@@ -913,6 +966,12 @@ export default async function handler(req, res) {
     } else if (isLoanPayload(body)) {
       telegramResult = await sendLoanNotification(
         parseLoanPayload(body),
+        TELEGRAM_BOT_TOKEN,
+        TELEGRAM_CHAT_ID
+      )
+    } else if (isLoanPaymentPayload(body)) {
+      telegramResult = await sendLoanPaymentNotification(
+        parseLoanPaymentPayload(body),
         TELEGRAM_BOT_TOKEN,
         TELEGRAM_CHAT_ID
       )

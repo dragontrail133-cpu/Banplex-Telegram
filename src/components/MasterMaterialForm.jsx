@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { X } from 'lucide-react'
 import useMasterStore from '../store/useMasterStore'
 
@@ -18,13 +18,16 @@ function MasterMaterialForm({ isOpen, onClose }) {
   const storeError = useMasterStore((state) => state.error)
   const clearError = useMasterStore((state) => state.clearError)
 
-  useEffect(() => {
-    if (isOpen) {
-      setFormData(createInitialFormData())
-      setLocalError(null)
-      clearError()
-    }
-  }, [clearError, isOpen])
+  const resetFormState = () => {
+    setFormData(createInitialFormData())
+    setLocalError(null)
+    clearError()
+  }
+
+  const handleClose = () => {
+    resetFormState()
+    onClose?.()
+  }
 
   if (!isOpen) {
     return null
@@ -72,9 +75,7 @@ function MasterMaterialForm({ isOpen, onClose }) {
           normalizedCurrentStock.length > 0 ? normalizedCurrentStock : 0,
       })
 
-      setFormData(createInitialFormData())
-      setLocalError(null)
-      onClose?.()
+      handleClose()
     } catch (submitError) {
       const message =
         submitError instanceof Error
@@ -90,7 +91,7 @@ function MasterMaterialForm({ isOpen, onClose }) {
       className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 px-3 py-4 sm:items-center"
       onClick={(event) => {
         if (event.target === event.currentTarget) {
-          onClose?.()
+          handleClose()
         }
       }}
     >
@@ -110,7 +111,7 @@ function MasterMaterialForm({ isOpen, onClose }) {
 
           <button
             className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white/80 text-[var(--app-text-color)] transition hover:bg-white"
-            onClick={onClose}
+            onClick={handleClose}
             type="button"
           >
             <X className="h-4 w-4" />
@@ -180,7 +181,7 @@ function MasterMaterialForm({ isOpen, onClose }) {
           <div className="grid gap-3 sm:grid-cols-2">
             <button
               className="inline-flex items-center justify-center rounded-[22px] border border-slate-200 bg-white/85 px-5 py-4 text-base font-semibold text-[var(--app-text-color)] transition hover:bg-white"
-              onClick={onClose}
+              onClick={handleClose}
               type="button"
             >
               Batal

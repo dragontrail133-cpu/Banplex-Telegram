@@ -7,6 +7,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+stitch_telegram_finance_dashboard
 node_modules
 dist
 dist-ssr
@@ -29,3 +30,4 @@ dist-ssr
 
 .vercel
 .env*.local
+.gemini/

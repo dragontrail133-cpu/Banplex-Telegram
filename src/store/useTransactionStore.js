@@ -134,6 +134,78 @@ function buildNotificationPayload(data = {}, transactionId, amount) {
   }
 }
 
+function buildExpensePayload(data = {}) {
+  const telegramUserId = resolveTelegramUserId(data.telegram_user_id)
+  const createdByUserId = resolveProfileId(data.created_by_user_id)
+  const teamId = resolveTeamId(data.team_id)
+  const projectId = normalizeText(data.project_id)
+  const categoryId = normalizeText(data.category_id ?? data.expense_category_id)
+  const supplierId = normalizeText(data.supplier_id)
+  const expenseType = normalizeText(data.expense_type, 'operasional')
+  const expenseDate = normalizeText(data.expense_date ?? data.transaction_date)
+  const status = normalizeText(data.status, 'unpaid')
+  const description = normalizeText(data.description)
+  const notes = normalizeText(data.notes)
+  const amount = Number(data.amount)
+  const projectNameSnapshot = normalizeText(data.project_name)
+  const supplierNameSnapshot = normalizeText(data.supplier_name)
+
+  if (!telegramUserId) {
+    throw new Error('ID pengguna Telegram tidak ditemukan.')
+  }
+
+  if (!teamId) {
+    throw new Error('Akses workspace tidak ditemukan.')
+  }
+
+  if (!projectId) {
+    throw new Error('Proyek wajib dipilih.')
+  }
+
+  if (!categoryId) {
+    throw new Error('Kategori pengeluaran wajib dipilih.')
+  }
+
+  if (!['operasional', 'lainnya'].includes(expenseType)) {
+    throw new Error('Tipe pengeluaran tidak valid.')
+  }
+
+  if (!expenseDate) {
+    throw new Error('Tanggal pengeluaran wajib diisi.')
+  }
+
+  if (!['unpaid', 'paid'].includes(status)) {
+    throw new Error('Status pembayaran pengeluaran tidak valid.')
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Nominal pengeluaran harus lebih dari 0.')
+  }
+
+  if (!description) {
+    throw new Error('Deskripsi pengeluaran wajib diisi.')
+  }
+
+  return {
+    telegram_user_id: telegramUserId,
+    created_by_user_id: createdByUserId,
+    team_id: teamId,
+    project_id: projectId,
+    category_id: categoryId,
+    supplier_id: supplierId,
+    expense_type: expenseType,
+    document_type: 'faktur',
+    status,
+    expense_date: expenseDate,
+    amount,
+    total_amount: amount,
+    description,
+    notes,
+    project_name_snapshot: projectNameSnapshot,
+    supplier_name_snapshot: supplierNameSnapshot,
+  }
+}
+
 function buildMaterialInvoicePayload(headerData = {}, itemsData = []) {
   const telegramUserId = resolveTelegramUserId(headerData.telegram_user_id)
   const createdByUserId = resolveProfileId(headerData.created_by_user_id)
@@ -358,6 +430,53 @@ const useTransactionStore = create((set) => ({
   isSubmitting: false,
   error: null,
   clearError: () => set({ error: null }),
+  submitExpense: async (data = {}) => {
+    set({ isSubmitting: true, error: null })
+
+    try {
+      if (!supabase) {
+        throw new Error('Client Supabase belum dikonfigurasi.')
+      }
+
+      const payload = buildExpensePayload(data)
+      const { data: insertedExpense, error } = await supabase
+        .from('expenses')
+        .insert(payload)
+        .select('id')
+        .single()
+
+      if (error) {
+        throw error
+      }
+
+      notifyTelegram(
+        buildNotificationPayload(
+          {
+            ...data,
+            type: 'expense',
+            transaction_date: payload.expense_date,
+          },
+          insertedExpense?.id ?? null,
+          payload.amount
+        )
+      )
+
+      set({ error: null })
+
+      return {
+        ...payload,
+        id: insertedExpense?.id ?? null,
+      }
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    } finally {
+      set({ isSubmitting: false })
+    }
+  },
   submitTransaction: async (data) => {
     set({ isSubmitting: true, error: null })
 

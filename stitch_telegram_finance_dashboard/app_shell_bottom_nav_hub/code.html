@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+
+<html class="light" lang="id"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
+<title>Financial Atelier - Quick Action</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "tertiary-container": "#823f3a",
+                        "on-surface": "#191c1d",
+                        "surface-tint": "#1b6b51",
+                        "surface-container-highest": "#e1e3e4",
+                        "on-tertiary": "#ffffff",
+                        "surface-bright": "#f8f9fa",
+                        "on-secondary-fixed-variant": "#324c41",
+                        "on-primary": "#ffffff",
+                        "surface-container": "#edeeef",
+                        "surface-dim": "#d9dadb",
+                        "secondary-container": "#c8e7d7",
+                        "surface-container-lowest": "#ffffff",
+                        "inverse-primary": "#8bd6b6",
+                        "tertiary": "#652925",
+                        "secondary": "#496458",
+                        "error-container": "#ffdad6",
+                        "on-secondary-fixed": "#052016",
+                        "on-error-container": "#93000a",
+                        "outline": "#6f7973",
+                        "on-secondary-container": "#4d685c",
+                        "primary-fixed-dim": "#8bd6b6",
+                        "secondary-fixed-dim": "#afcdbe",
+                        "primary-fixed": "#a6f2d1",
+                        "tertiary-fixed": "#ffdad6",
+                        "surface-container-high": "#e7e8e9",
+                        "on-primary-fixed-variant": "#00513b",
+                        "on-tertiary-fixed-variant": "#73332f",
+                        "secondary-fixed": "#cbe9da",
+                        "on-tertiary-container": "#ffb4ad",
+                        "outline-variant": "#bec9c2",
+                        "on-secondary": "#ffffff",
+                        "inverse-on-surface": "#f0f1f2",
+                        "inverse-surface": "#2e3132",
+                        "background": "#f8f9fa",
+                        "primary-container": "#065f46",
+                        "surface-variant": "#e1e3e4",
+                        "surface": "#f8f9fa",
+                        "primary": "#004532",
+                        "on-primary-fixed": "#002116",
+                        "error": "#ba1a1a",
+                        "on-surface-variant": "#3f4944",
+                        "on-primary-container": "#8bd6b7",
+                        "tertiary-fixed-dim": "#ffb3ac",
+                        "on-error": "#ffffff",
+                        "surface-container-low": "#f3f4f5",
+                        "on-tertiary-fixed": "#3b0908",
+                        "on-background": "#191c1d"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "2xl": "1.5rem",
+                        "3xl": "2rem",
+                        "full": "9999px"
+                    },
+                    fontFamily: {
+                        headline: ["Manrope", "sans-serif"],
+                        body: ["Manrope", "sans-serif"],
+                        label: ["Manrope", "sans-serif"]
+                    },
+                    boxShadow: {
+                        'ambient': '0 4px 20px rgba(25, 28, 29, 0.04), 0 12px 40px rgba(25, 28, 29, 0.08)',
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
+        .pt-safe { padding-top: env(safe-area-inset-top, 20px); }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24; }
+        .material-symbols-outlined.filled { font-variation-settings: 'FILL' 1, 'wght' 300, 'GRAD' 0, 'opsz' 24; }
+        
+        /* Telegram-style gradient blur background */
+        .bg-blur-blobs {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: -1;
+            background-color: #f8f9fa; /* surface */
+            overflow: hidden;
+        }
+        .bg-blur-blobs::before, .bg-blur-blobs::after {
+            content: '';
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.4;
+        }
+        .bg-blur-blobs::before {
+            width: 400px; height: 400px;
+            background: #c8e7d7; /* secondary-container */
+            top: -100px; right: -100px;
+        }
+        .bg-blur-blobs::after {
+            width: 300px; height: 300px;
+            background: #a6f2d1; /* primary-fixed */
+            bottom: 20%; left: -50px;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="font-body text-on-surface antialiased overflow-hidden select-none bg-transparent">
+<!-- Ambient Background -->
+<div class="bg-blur-blobs"></div>
+<!-- App Shell Container -->
+<div class="relative h-screen w-full flex flex-col md:max-w-md md:mx-auto md:shadow-ambient md:bg-surface-container-low overflow-hidden">
+<!-- Main Content Canvas (Scrollable) -->
+<main class="flex-1 overflow-y-auto pb-32 pt-safe px-6 scroll-smooth">
+<!-- Simulated Content to show scrolling context -->
+<div class="py-8 space-y-6">
+<!-- Greeting -->
+<div>
+<p class="text-sm text-on-surface-variant mb-1">Selamat datang kembali,</p>
+<h1 class="text-3xl font-headline font-bold text-on-surface tracking-tight">Atelier Keuangan</h1>
+</div>
+<!-- Ledger Card: Total Balance -->
+<div class="bg-primary-container text-on-primary rounded-2xl p-6 shadow-sm relative overflow-hidden">
+<div class="absolute -right-10 -top-10 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
+<p class="text-xs font-label uppercase tracking-widest text-on-primary-container mb-2">Total Saldo Aktif</p>
+<h2 class="text-4xl font-headline font-bold tracking-tight mb-6">Rp 4.250M</h2>
+<div class="flex justify-between items-end border-t border-white/20 pt-4">
+<div>
+<p class="text-[10px] text-on-primary-container uppercase tracking-wider mb-1">Bulan Ini</p>
+<p class="text-sm font-medium flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">trending_up</span>
+                                +12.5%
+                            </p>
+</div>
+<button class="bg-white/20 hover:bg-white/30 transition-colors text-white text-xs px-4 py-2 rounded-xl backdrop-blur-sm">
+                            Detail Laporan
+                        </button>
+</div>
+</div>
+<!-- Recent Activities (Bento-ish) -->
+<div class="grid grid-cols-2 gap-4">
+<div class="bg-surface-container-lowest p-4 rounded-xl shadow-[0_2px_10px_rgba(25,28,29,0.02)]">
+<div class="w-10 h-10 rounded-full bg-secondary-container flex items-center justify-center mb-3 text-on-secondary-container">
+<span class="material-symbols-outlined">receipt_long</span>
+</div>
+<h3 class="text-sm font-bold text-on-surface mb-1">Tagihan Aktif</h3>
+<p class="text-xl font-headline font-bold text-primary">12</p>
+<p class="text-[10px] text-on-surface-variant mt-1">Menunggu pembayaran</p>
+</div>
+<div class="bg-surface-container-lowest p-4 rounded-xl shadow-[0_2px_10px_rgba(25,28,29,0.02)]">
+<div class="w-10 h-10 rounded-full bg-error-container flex items-center justify-center mb-3 text-on-error-container">
+<span class="material-symbols-outlined">warning</span>
+</div>
+<h3 class="text-sm font-bold text-on-surface mb-1">Kasbon Telat</h3>
+<p class="text-xl font-headline font-bold text-error">3</p>
+<p class="text-[10px] text-on-surface-variant mt-1">Perlu tindak lanjut</p>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Navigation (Aligned with repo `src/components/ui/BottomNav.jsx`) -->
+<nav
+  class="absolute inset-x-0 bottom-0 z-40 mx-auto w-full max-w-md px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2"
+  style="
+    --app-nav-bg: rgba(255, 255, 255, 0.84);
+    --app-nav-border: rgba(190, 201, 194, 0.38);
+    --app-nav-shadow: 0 4px 20px rgba(25, 28, 29, 0.04), 0 20px 50px rgba(25, 28, 29, 0.12);
+    --app-nav-active-bg: rgba(6, 95, 70, 0.1);
+    --app-fab-shadow: 0 10px 24px rgba(25, 28, 29, 0.08), 0 24px 40px rgba(25, 28, 29, 0.16);
+    --app-brand-accent: #065f46;
+    --app-brand-accent-contrast: #ffffff;
+    --app-text-color: #191c1d;
+    --app-hint-color: #5f6964;
+  "
+>
+  <div class="relative grid grid-cols-5 items-end gap-1 rounded-[30px] border border-[var(--app-nav-border)] bg-[var(--app-nav-bg)] px-2 pb-2 pt-3 shadow-[var(--app-nav-shadow)] backdrop-blur-2xl">
+    <!-- Item 1: Beranda (Active) -->
+    <button
+      class="relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-[20px] bg-[var(--app-nav-active-bg)] px-1 py-2 text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--app-brand-accent)] transition active:scale-95"
+      type="button"
+      aria-current="page"
+    >
+      <span class="material-symbols-outlined text-[20px] leading-none transition-transform scale-[1.12]">home</span>
+      <span class="truncate leading-none">Beranda</span>
+      <span class="h-1 w-1 rounded-full bg-[var(--app-brand-accent)]" aria-hidden="true"></span>
+    </button>
+
+    <!-- Item 2: Transaksi -->
+    <button
+      class="relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-[20px] px-1 py-2 text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--app-hint-color)] transition hover:text-[var(--app-text-color)] active:scale-95"
+      type="button"
+    >
+      <span class="material-symbols-outlined text-[20px] leading-none transition-transform">receipt_long</span>
+      <span class="truncate leading-none">Transaksi</span>
+      <span class="h-1 w-1 rounded-full bg-transparent" aria-hidden="true"></span>
+    </button>
+
+    <!-- Item 3: FAB -->
+    <div class="flex items-center justify-center">
+      <button
+        class="relative -mt-10 inline-flex h-16 w-16 items-center justify-center rounded-[26px] bg-[var(--app-brand-accent)] text-[var(--app-brand-accent-contrast)] shadow-[var(--app-fab-shadow)] transition active:scale-[0.97]"
+        type="button"
+        aria-label="Buka aksi cepat"
+      >
+        <span class="material-symbols-outlined text-[26px] leading-none">add</span>
+      </button>
+    </div>
+
+    <!-- Item 4: Proyek -->
+    <button
+      class="relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-[20px] px-1 py-2 text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--app-hint-color)] transition hover:text-[var(--app-text-color)] active:scale-95"
+      type="button"
+    >
+      <span class="material-symbols-outlined text-[20px] leading-none transition-transform">architecture</span>
+      <span class="truncate leading-none">Proyek</span>
+      <span class="h-1 w-1 rounded-full bg-transparent" aria-hidden="true"></span>
+    </button>
+
+    <!-- Item 5: Master -->
+    <button
+      class="relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-[20px] px-1 py-2 text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--app-hint-color)] transition hover:text-[var(--app-text-color)] active:scale-95"
+      type="button"
+    >
+      <span class="material-symbols-outlined text-[20px] leading-none transition-transform">database</span>
+      <span class="truncate leading-none">Master</span>
+      <span class="h-1 w-1 rounded-full bg-transparent" aria-hidden="true"></span>
+    </button>
+  </div>
+</nav>
+<!-- Overlay / Scrim -->
+<div class="absolute inset-0 bg-on-surface/20 backdrop-blur-[2px] z-50 transition-opacity"></div>
+<!-- Quick Action Sheet (Modal) -->
+<div class="absolute bottom-0 w-full bg-surface-container-lowest rounded-t-3xl shadow-ambient z-50 pb-safe transition-transform duration-300 ease-out translate-y-0">
+<!-- Handle -->
+<div class="w-full flex justify-center py-4">
+<div class="w-12 h-1.5 bg-surface-dim rounded-full"></div>
+</div>
+<!-- Header -->
+<div class="px-6 pb-4 border-b border-surface-container">
+<h2 class="text-xl font-headline font-bold text-on-surface">Aksi Cepat</h2>
+<p class="text-sm text-on-surface-variant mt-1">Buat transaksi tanpa keluar dari halaman</p>
+</div>
+<!-- Action List (No dividers rule applied) -->
+<div class="px-4 py-4 space-y-2">
+<!-- Action: Uang Masuk -->
+<button class="w-full flex items-center p-3 rounded-xl hover:bg-surface-container-low transition-colors group text-left">
+<div class="w-12 h-12 rounded-xl bg-secondary-container/50 text-secondary flex items-center justify-center mr-4 group-hover:bg-secondary-container transition-colors">
+<span class="material-symbols-outlined">arrow_upward</span>
+</div>
+<div class="flex-1">
+<h3 class="text-base font-bold text-on-surface">Uang Masuk</h3>
+<p class="text-xs text-on-surface-variant mt-0.5">Catat termin proyek</p>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors">chevron_right</span>
+</button>
+<!-- Action: Uang Keluar -->
+<button class="w-full flex items-center p-3 rounded-xl hover:bg-surface-container-low transition-colors group text-left">
+<div class="w-12 h-12 rounded-xl bg-error-container/50 text-error flex items-center justify-center mr-4 group-hover:bg-error-container transition-colors">
+<span class="material-symbols-outlined">arrow_downward</span>
+</div>
+<div class="flex-1">
+<h3 class="text-base font-bold text-on-surface">Uang Keluar</h3>
+<p class="text-xs text-on-surface-variant mt-0.5">Catat pengeluaran</p>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors">chevron_right</span>
+</button>
+<!-- Action: Kasbon -->
+<button class="w-full flex items-center p-3 rounded-xl hover:bg-surface-container-low transition-colors group text-left">
+<div class="w-12 h-12 rounded-xl bg-surface-container text-on-surface-variant flex items-center justify-center mr-4 group-hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined">account_balance_wallet</span>
+</div>
+<div class="flex-1">
+<h3 class="text-base font-bold text-on-surface">Kasbon</h3>
+<p class="text-xs text-on-surface-variant mt-0.5">Tambah pinjaman</p>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors">chevron_right</span>
+</button>
+<!-- Action: Absensi -->
+<button class="w-full flex items-center p-3 rounded-xl hover:bg-surface-container-low transition-colors group text-left">
+<div class="w-12 h-12 rounded-xl bg-surface-container text-on-surface-variant flex items-center justify-center mr-4 group-hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined">how_to_reg</span>
+</div>
+<div class="flex-1">
+<h3 class="text-base font-bold text-on-surface">Absensi</h3>
+<p class="text-xs text-on-surface-variant mt-0.5">Kehadiran harian</p>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors">chevron_right</span>
+</button>
+<!-- Action: Faktur -->
+<button class="w-full flex items-center p-3 rounded-xl hover:bg-surface-container-low transition-colors group text-left">
+<div class="w-12 h-12 rounded-xl bg-surface-container text-on-surface-variant flex items-center justify-center mr-4 group-hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined">receipt</span>
+</div>
+<div class="flex-1">
+<h3 class="text-base font-bold text-on-surface">Faktur</h3>
+<p class="text-xs text-on-surface-variant mt-0.5">Material invoice</p>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors">chevron_right</span>
+</button>
+</div>
+<!-- Bottom padding for aesthetics inside modal -->
+<div class="h-6"></div>
+</div>
+</div>
+</body></html>

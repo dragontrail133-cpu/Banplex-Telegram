@@ -33,21 +33,46 @@ function getTelegramUserId(user, authUser) {
   return normalizedValue.length > 0 ? normalizedValue : null
 }
 
-function createInitialFormData() {
+function createInitialFormData(initialData = null) {
   return {
-    creditorId: '',
-    date: new Date().toISOString().slice(0, 10),
-    principalAmount: '',
-    repaymentAmount: '',
-    interestType: 'none',
-    interestRate: '',
-    tenorMonths: '',
-    notes: '',
+    creditorId: initialData?.creditor_id ?? initialData?.creditorId ?? '',
+    date:
+      initialData?.transaction_date ??
+      initialData?.transactionDate ??
+      initialData?.date ??
+      new Date().toISOString().slice(0, 10),
+    principalAmount:
+      initialData?.principal_amount === 0 || initialData?.principal_amount
+        ? String(initialData.principal_amount)
+        : initialData?.principalAmount === 0 || initialData?.principalAmount
+          ? String(initialData.principalAmount)
+          : '',
+    repaymentAmount:
+      initialData?.repayment_amount === 0 || initialData?.repayment_amount
+        ? String(initialData.repayment_amount)
+        : initialData?.repaymentAmount === 0 || initialData?.repaymentAmount
+          ? String(initialData.repaymentAmount)
+          : '',
+    interestType:
+      initialData?.interest_type ?? initialData?.interestType ?? 'none',
+    interestRate:
+      initialData?.interest_rate === 0 || initialData?.interest_rate
+        ? String(initialData.interest_rate)
+        : initialData?.interestRate === 0 || initialData?.interestRate
+          ? String(initialData.interestRate)
+          : '',
+    tenorMonths:
+      initialData?.tenor_months === 0 || initialData?.tenor_months
+        ? String(initialData.tenor_months)
+        : initialData?.tenorMonths === 0 || initialData?.tenorMonths
+          ? String(initialData.tenorMonths)
+          : '',
+    notes: initialData?.notes ?? initialData?.description ?? '',
   }
 }
 
-function LoanForm({ onSuccess }) {
-  const [formData, setFormData] = useState(createInitialFormData)
+function LoanForm({ onSuccess, initialData = null, recordId = null }) {
+  const [formData, setFormData] = useState(() => createInitialFormData(initialData))
   const [creditorNameDraft, setCreditorNameDraft] = useState('')
   const [successMessage, setSuccessMessage] = useState(null)
   const { user } = useTelegram()
@@ -58,9 +83,11 @@ function LoanForm({ onSuccess }) {
   const fetchMasters = useMasterStore((state) => state.fetchMasters)
   const addFundingCreditor = useMasterStore((state) => state.addFundingCreditor)
   const addLoan = useIncomeStore((state) => state.addLoan)
+  const updateLoan = useIncomeStore((state) => state.updateLoan)
   const isSubmitting = useIncomeStore((state) => state.isSubmitting)
   const error = useIncomeStore((state) => state.error)
   const clearError = useIncomeStore((state) => state.clearError)
+  const isEditMode = Boolean(recordId)
   const telegramUserId = getTelegramUserId(user, authUser)
   const userName = getUserDisplayName(user, authUser)
   const selectedCreditor = fundingCreditors.find(
@@ -130,7 +157,7 @@ function LoanForm({ onSuccess }) {
     }
 
     try {
-      await addLoan({
+      const payload = {
         telegram_user_id: telegramUserId,
         userName,
         creditor_id: formData.creditorId,
@@ -143,7 +170,13 @@ function LoanForm({ onSuccess }) {
         tenor_months: formData.tenorMonths,
         description: formData.notes,
         notes: formData.notes,
-      })
+      }
+
+      if (isEditMode) {
+        await updateLoan(recordId, payload)
+      } else {
+        await addLoan(payload)
+      }
 
       try {
         await onSuccess?.()
@@ -151,8 +184,13 @@ function LoanForm({ onSuccess }) {
         console.error('Gagal memperbarui ringkasan setelah pinjaman:', refreshError)
       }
 
-      setFormData(createInitialFormData())
-      setSuccessMessage('Pinjaman berhasil disimpan.')
+      if (!isEditMode) {
+        setFormData(createInitialFormData())
+      }
+
+      setSuccessMessage(
+        isEditMode ? 'Pinjaman berhasil diperbarui.' : 'Pinjaman berhasil disimpan.'
+      )
     } catch (submitError) {
       const message =
         submitError instanceof Error
@@ -170,9 +208,6 @@ function LoanForm({ onSuccess }) {
           <div className="space-y-1">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
               Pinjaman / Modal
-            </p>
-            <p className="text-sm text-[var(--app-hint-color)]">
-              Catat dana masuk dari kreditur agar mutasi kas tetap seimbang.
             </p>
           </div>
 
@@ -376,7 +411,11 @@ function LoanForm({ onSuccess }) {
           disabled={isSubmitting || !isMasterDataReady}
           type="submit"
         >
-          {isSubmitting ? 'Menyimpan...' : 'Simpan Pinjaman'}
+          {isSubmitting
+            ? 'Menyimpan...'
+            : isEditMode
+              ? 'Perbarui Pinjaman'
+              : 'Simpan Pinjaman'}
         </button>
       </fieldset>
     </form>

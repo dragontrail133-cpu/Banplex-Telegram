@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BarChart3, FileText, RefreshCcw } from 'lucide-react'
+import { BarChart3, FileText, RefreshCcw, Sparkles, WalletCards } from 'lucide-react'
 import useReportStore from '../store/useReportStore'
+import {
+  AppBadge,
+  AppButton,
+  AppCard,
+  AppCardDashed,
+  AppCardStrong,
+  AppEmptyState,
+  AppErrorState,
+  SectionHeader,
+} from './ui/AppPrimitives'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -37,17 +47,17 @@ function formatDate(value) {
 function getProfitStyles(value) {
   if (value >= 0) {
     return {
-      cardClassName: 'border-emerald-200 bg-emerald-50/85 text-emerald-950',
-      amountClassName: 'text-emerald-700',
-      badgeClassName: 'border-emerald-200 bg-emerald-100 text-emerald-700',
+      cardClassName: 'app-tone-success',
+      amountClassName: 'text-[var(--app-tone-success-text)]',
+      badgeTone: 'success',
       label: 'Untung',
     }
   }
 
   return {
-    cardClassName: 'border-rose-200 bg-rose-50/85 text-rose-950',
-    amountClassName: 'text-rose-700',
-    badgeClassName: 'border-rose-200 bg-rose-100 text-rose-700',
+    cardClassName: 'app-tone-danger',
+    amountClassName: 'text-[var(--app-tone-danger-text)]',
+    badgeTone: 'danger',
     label: 'Rugi',
   }
 }
@@ -75,6 +85,10 @@ function buildCompactSummary(projectSummaries) {
   )
 }
 
+function getProjectName(summary) {
+  return summary.project_name ?? 'Proyek tanpa nama'
+}
+
 function ProjectReport() {
   const [expandedProjectId, setExpandedProjectId] = useState(null)
   const projectSummaries = useReportStore((state) => state.projectSummaries)
@@ -83,7 +97,6 @@ function ProjectReport() {
   const isDetailLoading = useReportStore((state) => state.isDetailLoading)
   const error = useReportStore((state) => state.error)
   const detailError = useReportStore((state) => state.detailError)
-  const lastUpdatedAt = useReportStore((state) => state.lastUpdatedAt)
   const fetchProjectSummaries = useReportStore((state) => state.fetchProjectSummaries)
   const fetchProjectDetail = useReportStore((state) => state.fetchProjectDetail)
 
@@ -109,318 +122,296 @@ function ProjectReport() {
   }
 
   return (
-    <section className="space-y-6 rounded-[28px] border border-white/70 bg-white/75 p-4 shadow-sm backdrop-blur sm:p-5">
-      <div className="space-y-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-2">
-            <p className="text-sm font-medium uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
-              Laporan Proyek
-            </p>
-            <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
-              Project Financial Summary
-            </h2>
-            <p className="max-w-2xl text-sm leading-6 text-[var(--app-hint-color)]">
-              Lihat kesehatan keuangan tiap proyek dari pemasukan, biaya material,
-              biaya gaji, biaya operasional, sampai laba atau rugi bersih.
-            </p>
+    <section className="space-y-4">
+      <AppCardStrong className="space-y-4 p-4 sm:p-5">
+        <SectionHeader
+          eyebrow="Laporan Proyek"
+          action={
+            <AppButton
+              variant="secondary"
+              disabled={isLoading}
+              leadingIcon={<RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />}
+              onClick={() => {
+                void fetchProjectSummaries({ force: true }).catch((fetchError) => {
+                  console.error('Gagal memuat ulang laporan proyek:', fetchError)
+                })
+              }}
+              type="button"
+            >
+              Sinkronkan
+            </AppButton>
+          }
+        />
+
+        <AppCard className="space-y-4 bg-[var(--app-accent-color)]/8">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-2">
+              <AppBadge tone="info" icon={Sparkles}>
+                Portfolio Overview
+              </AppBadge>
+              <div>
+                <p className="text-sm font-medium text-[var(--app-hint-color)]">
+                  Laba bersih seluruh proyek
+                </p>
+                <p className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-[var(--app-text-color)]">
+                  {formatCurrency(compactSummary.netProfit)}
+                </p>
+              </div>
+            </div>
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] bg-white/85 text-[var(--app-accent-color)] shadow-sm">
+              <WalletCards className="h-5 w-5" />
+            </span>
           </div>
 
-          <button
-            className="inline-flex items-center justify-center gap-2 rounded-[20px] border border-slate-200 bg-white/90 px-4 py-3 text-sm font-semibold text-[var(--app-text-color)] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isLoading}
-            onClick={() => {
-              void fetchProjectSummaries({ force: true }).catch((fetchError) => {
-                console.error('Gagal memuat ulang laporan proyek:', fetchError)
-              })
-            }}
-            type="button"
-          >
-            <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <article className="rounded-[24px] border border-slate-200 bg-slate-950 px-5 py-5 text-white shadow-lg shadow-slate-950/15">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-300">
-              Total Pemasukan
-            </p>
-            <p className="mt-3 text-2xl font-semibold tracking-[-0.03em]">
-              {formatCurrency(compactSummary.totalIncome)}
-            </p>
-          </article>
-          <article className="rounded-[24px] border border-slate-200 bg-white/90 px-5 py-5 shadow-sm">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
-              Total Biaya
-            </p>
-            <p className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-950">
-              {formatCurrency(
-                compactSummary.materialExpense +
-                  compactSummary.operatingExpense +
-                  compactSummary.salaryExpense
-              )}
-            </p>
-          </article>
-          <article className="rounded-[24px] border border-sky-200 bg-sky-50/80 px-5 py-5 shadow-sm">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-sky-700">
-              Laba Bersih
-            </p>
-            <p className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-sky-800">
-              {formatCurrency(compactSummary.netProfit)}
-            </p>
-          </article>
-        </div>
-      </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
+              <p className="app-meta">Total Pemasukan</p>
+              <p className="text-lg font-semibold text-[var(--app-text-color)]">
+                {formatCurrency(compactSummary.totalIncome)}
+              </p>
+            </AppCard>
+            <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
+              <p className="app-meta">Total Biaya</p>
+              <p className="text-lg font-semibold text-[var(--app-text-color)]">
+                {formatCurrency(
+                  compactSummary.materialExpense +
+                    compactSummary.operatingExpense +
+                    compactSummary.salaryExpense
+                )}
+              </p>
+            </AppCard>
+          </div>
+        </AppCard>
+      </AppCardStrong>
 
       {error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
-          {error}
-        </div>
+        <AppErrorState
+          title="Laporan proyek gagal dimuat"
+          description={error}
+        />
       ) : null}
 
       {projectSummaries.length > 0 ? (
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="space-y-4">
           {projectSummaries.map((summary) => {
             const profitStyles = getProfitStyles(summary.net_profit)
             const isActive = expandedProjectId === summary.project_id
-            const summaryProjectName = summary.project_name ?? 'Proyek tanpa nama'
+            const summaryProjectName = getProjectName(summary)
 
             return (
-              <article
-                key={`${summary.project_id}-${summary.team_id ?? 'no-team'}`}
-                className={`overflow-hidden rounded-[28px] border px-5 py-5 shadow-sm transition ${
-                  profitStyles.cardClassName
-                }`}
+              <AppCardStrong
+                className="space-y-4 overflow-hidden p-4 sm:p-5"
               >
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="space-y-2">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 space-y-3">
                     <div className="flex items-center gap-2">
-                      <BarChart3 className="h-4 w-4 text-current/70" />
-                      <p className="text-lg font-semibold tracking-[-0.02em]">
-                        {summaryProjectName}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
-                      <span className={`rounded-full border px-3 py-1.5 ${profitStyles.badgeClassName}`}>
-                        {summary.project_status}
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
+                        <BarChart3 className="h-4 w-4" />
                       </span>
-                      {summary.team_id ? (
-                        <span className="rounded-full border border-slate-200 bg-white/75 px-3 py-1.5 text-slate-600">
-                          Team {summary.team_id}
-                        </span>
-                      ) : null}
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-[var(--app-hint-color)]">
+                          {summary.project_status || 'Status belum diisi'}
+                        </p>
+                        <p className="truncate text-lg font-semibold tracking-[-0.02em] text-[var(--app-text-color)]">
+                          {summaryProjectName}
+                        </p>
+                      </div>
                     </div>
+
                   </div>
 
-                  <div className="text-right">
-                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-current/55">
-                      Laba / Rugi Bersih
-                    </p>
-                    <p className={`mt-2 text-2xl font-semibold tracking-[-0.03em] ${profitStyles.amountClassName}`}>
+                  <AppCard className={`${profitStyles.cardClassName} min-w-0 space-y-2 px-4 py-3 lg:min-w-[220px]`}>
+                    <p className="app-meta">Laba / Rugi Bersih</p>
+                    <p className={`text-2xl font-semibold tracking-[-0.03em] ${profitStyles.amountClassName}`}>
                       {formatCurrency(summary.net_profit)}
                     </p>
-                  </div>
+                    <p className="text-sm leading-6 opacity-80">
+                      Gross profit {formatCurrency(summary.gross_profit)}
+                    </p>
+                  </AppCard>
                 </div>
 
-                <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-white/60 bg-white/75 px-4 py-3">
-                    <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                      Pemasukan
-                    </p>
-                    <p className="mt-2 text-base font-semibold text-slate-950">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
+                    <p className="app-meta">Pemasukan</p>
+                    <p className="text-base font-semibold text-[var(--app-text-color)]">
                       {formatCurrency(summary.total_income)}
                     </p>
-                  </div>
-                  <div className="rounded-2xl border border-white/60 bg-white/75 px-4 py-3">
-                    <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                      Biaya Material
-                    </p>
-                    <p className="mt-2 text-base font-semibold text-slate-950">
+                  </AppCard>
+                  <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
+                    <p className="app-meta">Biaya Material</p>
+                    <p className="text-base font-semibold text-[var(--app-text-color)]">
                       {formatCurrency(summary.material_expense)}
                     </p>
-                  </div>
-                  <div className="rounded-2xl border border-white/60 bg-white/75 px-4 py-3">
-                    <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                      Biaya Gaji
-                    </p>
-                    <p className="mt-2 text-base font-semibold text-slate-950">
+                  </AppCard>
+                  <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
+                    <p className="app-meta">Biaya Gaji</p>
+                    <p className="text-base font-semibold text-[var(--app-text-color)]">
                       {formatCurrency(summary.salary_expense)}
                     </p>
-                  </div>
-                  <div className="rounded-2xl border border-white/60 bg-white/75 px-4 py-3">
-                    <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                      Biaya Ops
-                    </p>
-                    <p className="mt-2 text-base font-semibold text-slate-950">
+                  </AppCard>
+                  <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
+                    <p className="app-meta">Biaya Ops</p>
+                    <p className="text-base font-semibold text-[var(--app-text-color)]">
                       {formatCurrency(summary.operating_expense)}
                     </p>
-                  </div>
+                  </AppCard>
                 </div>
 
-                <div className="mt-5 flex flex-wrap items-center gap-3">
-                  <div className="rounded-full border border-current/15 bg-white/80 px-3 py-1.5 text-xs font-medium text-current/70">
-                    Gross Profit {formatCurrency(summary.gross_profit)}
-                  </div>
-                  <div className="rounded-full border border-current/15 bg-white/80 px-3 py-1.5 text-xs font-medium text-current/70">
-                    Net Profit {summary.net_profit >= 0 ? 'positif' : 'negatif'}
-                  </div>
-                  <button
-                    className="inline-flex items-center gap-2 rounded-full border border-current/20 bg-white/80 px-4 py-2 text-sm font-semibold text-current transition hover:bg-white"
+                <div className="flex flex-wrap items-center gap-3">
+                  <AppButton
+                    variant="secondary"
+                    leadingIcon={<FileText className="h-4 w-4" />}
                     onClick={() => void handleToggleDetail(summary.project_id)}
                     type="button"
                   >
-                    <FileText className="h-4 w-4" />
                     {isActive ? 'Tutup Breakdown' : 'Lihat Breakdown'}
-                  </button>
+                  </AppButton>
                 </div>
 
                 {isActive ? (
-                  <div className="mt-5 space-y-4 rounded-[24px] border border-current/10 bg-white/80 p-4">
+                  <AppCard className="space-y-4 bg-[var(--app-surface-strong-color)]">
                     {isDetailLoading ? (
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
-                        Memuat breakdown proyek...
-                      </div>
+                      <AppCardDashed className="space-y-4 p-4">
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <div className="h-20 animate-pulse rounded-[20px] bg-[var(--app-border-color)]" />
+                          <div className="h-20 animate-pulse rounded-[20px] bg-[var(--app-border-color)]" />
+                          <div className="h-20 animate-pulse rounded-[20px] bg-[var(--app-border-color)]" />
+                        </div>
+                        <div className="h-36 animate-pulse rounded-[20px] bg-[var(--app-border-color)]" />
+                      </AppCardDashed>
                     ) : detailError ? (
-                      <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
-                        {detailError}
-                      </div>
+                      <AppErrorState
+                        title="Breakdown proyek gagal dimuat"
+                        description={detailError}
+                      />
                     ) : selectedProjectDetail?.summary ? (
                       <>
                         <div className="grid gap-3 sm:grid-cols-3">
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                            <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                              Pemasukan Total
-                            </p>
-                            <p className="mt-2 font-semibold text-slate-950">
+                          <AppCard className="space-y-2 bg-white">
+                            <p className="app-meta">Pemasukan Total</p>
+                            <p className="text-base font-semibold text-[var(--app-text-color)]">
                               {formatCurrency(selectedProjectDetail.summary.total_income)}
                             </p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                            <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                              Gross Profit
-                            </p>
-                            <p className="mt-2 font-semibold text-slate-950">
+                          </AppCard>
+                          <AppCard className="space-y-2 bg-white">
+                            <p className="app-meta">Gross Profit</p>
+                            <p className="text-base font-semibold text-[var(--app-text-color)]">
                               {formatCurrency(selectedProjectDetail.summary.gross_profit)}
                             </p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                            <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                              Net Profit
-                            </p>
-                            <p className="mt-2 font-semibold text-slate-950">
+                          </AppCard>
+                          <AppCard className="space-y-2 bg-white">
+                            <p className="app-meta">Net Profit</p>
+                            <p className="text-base font-semibold text-[var(--app-text-color)]">
                               {formatCurrency(selectedProjectDetail.summary.net_profit)}
                             </p>
-                          </div>
+                          </AppCard>
                         </div>
 
                         <div className="grid gap-4 lg:grid-cols-3">
                           <div className="space-y-2">
-                            <p className="text-sm font-semibold text-slate-900">
-                              Pemasukan
-                            </p>
+                            <p className="app-meta">Pemasukan</p>
                             <div className="space-y-2">
                               {selectedProjectDetail.incomes.length > 0 ? (
                                 selectedProjectDetail.incomes.map((income) => (
-                                  <div
+                                  <AppCard
                                     key={income.id}
-                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
+                                    className="space-y-1 bg-white px-4 py-3 text-sm"
                                   >
-                                    <p className="font-medium text-slate-900">
+                                    <p className="font-medium text-[var(--app-text-color)]">
                                       {formatDate(income.transaction_date)}
                                     </p>
-                                    <p className="text-slate-500">
+                                    <p className="text-[var(--app-hint-color)]">
                                       {income.description ?? '-'}
                                     </p>
-                                    <p className="mt-1 font-semibold text-emerald-700">
+                                    <p className="font-semibold text-emerald-700">
                                       {formatCurrency(income.amount)}
                                     </p>
-                                  </div>
+                                  </AppCard>
                                 ))
                               ) : (
-                                <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+                                <AppCardDashed className="px-4 py-3 text-sm text-[var(--app-hint-color)]">
                                   Tidak ada pemasukan proyek.
-                                </div>
+                                </AppCardDashed>
                               )}
                             </div>
                           </div>
 
                           <div className="space-y-2">
-                            <p className="text-sm font-semibold text-slate-900">
-                              Biaya Material
-                            </p>
+                            <p className="app-meta">Biaya Material</p>
                             <div className="space-y-2">
                               {selectedProjectDetail.expenses.length > 0 ? (
                                 selectedProjectDetail.expenses.map((expense) => (
-                                  <div
+                                  <AppCard
                                     key={expense.id}
-                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
+                                    className="space-y-1 bg-white px-4 py-3 text-sm"
                                   >
-                                    <p className="font-medium text-slate-900">
+                                    <p className="font-medium text-[var(--app-text-color)]">
                                       {formatDate(expense.expense_date)}
                                     </p>
-                                    <p className="text-slate-500">
+                                    <p className="text-[var(--app-hint-color)]">
                                       {expense.expense_type ?? '-'} - {expense.description ?? '-'}
                                     </p>
-                                    <p className="mt-1 font-semibold text-rose-700">
+                                    <p className="font-semibold text-rose-700">
                                       {formatCurrency(expense.total_amount)}
                                     </p>
-                                  </div>
+                                  </AppCard>
                                 ))
                               ) : (
-                                <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+                                <AppCardDashed className="px-4 py-3 text-sm text-[var(--app-hint-color)]">
                                   Tidak ada pengeluaran proyek.
-                                </div>
+                                </AppCardDashed>
                               )}
                             </div>
                           </div>
 
                           <div className="space-y-2">
-                            <p className="text-sm font-semibold text-slate-900">
-                              Biaya Gaji
-                            </p>
+                            <p className="app-meta">Biaya Gaji</p>
                             <div className="space-y-2">
                               {selectedProjectDetail.salaries.length > 0 ? (
                                 selectedProjectDetail.salaries.map((salary) => (
-                                  <div
+                                  <AppCard
                                     key={salary.id}
-                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
+                                    className="space-y-1 bg-white px-4 py-3 text-sm"
                                   >
-                                    <p className="font-medium text-slate-900">
+                                    <p className="font-medium text-[var(--app-text-color)]">
                                       {formatDate(salary.attendance_date)}
                                     </p>
-                                    <p className="text-slate-500">
+                                    <p className="text-[var(--app-hint-color)]">
                                       {salary.workers?.name ?? 'Pekerja'} - {salary.attendance_status ?? '-'}
                                     </p>
-                                    <p className="mt-1 font-semibold text-amber-700">
+                                    <p className="font-semibold text-amber-700">
                                       {formatCurrency(salary.total_pay)}
                                     </p>
-                                  </div>
+                                  </AppCard>
                                 ))
                               ) : (
-                                <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+                                <AppCardDashed className="px-4 py-3 text-sm text-[var(--app-hint-color)]">
                                   Tidak ada biaya gaji yang sudah dibundel.
-                                </div>
+                                </AppCardDashed>
                               )}
                             </div>
                           </div>
                         </div>
                       </>
                     ) : null}
-                  </div>
+                  </AppCard>
                 ) : null}
-              </article>
+              </AppCardStrong>
             )
           })}
         </div>
       ) : isLoading ? (
-        <div className="rounded-3xl border border-slate-200 bg-white/80 px-4 py-5 text-sm text-[var(--app-hint-color)]">
-          Memuat laporan proyek...
+        <div className="space-y-3">
+          <div className="h-32 w-full animate-pulse rounded-[28px] border border-[var(--app-border-color)] bg-[var(--app-surface-color)]/70" />
+          <div className="h-32 w-full animate-pulse rounded-[28px] border border-[var(--app-border-color)] bg-[var(--app-surface-color)]/70" />
         </div>
       ) : (
-        <div className="rounded-3xl border border-dashed border-slate-200 bg-white/70 px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
-          Belum ada laporan proyek yang bisa ditampilkan. Tambahkan pemasukan,
-          pengeluaran, atau absensi gaji untuk memunculkan ringkasan.
-        </div>
+        <AppEmptyState
+          icon={<BarChart3 className="h-5 w-5" />}
+          title="Belum ada laporan proyek"
+          description="Tambahkan pemasukan, pengeluaran, atau absensi gaji untuk memunculkan ringkasan."
+        />
       )}
     </section>
   )

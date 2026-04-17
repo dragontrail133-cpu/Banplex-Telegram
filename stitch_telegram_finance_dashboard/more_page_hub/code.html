@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>More - The Financial Atelier</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-error": "#ffffff",
+                      "secondary-fixed": "#cbe9da",
+                      "on-primary-fixed-variant": "#00513b",
+                      "on-surface": "#191c1d",
+                      "on-error-container": "#93000a",
+                      "surface-variant": "#e1e3e4",
+                      "on-primary": "#ffffff",
+                      "primary": "#004532",
+                      "on-surface-variant": "#3f4944",
+                      "on-secondary-fixed": "#052016",
+                      "on-secondary-fixed-variant": "#324c41",
+                      "on-tertiary-fixed": "#3b0908",
+                      "primary-fixed-dim": "#8bd6b6",
+                      "inverse-on-surface": "#f0f1f2",
+                      "surface-container-highest": "#e1e3e4",
+                      "tertiary": "#652925",
+                      "background": "#f8f9fa",
+                      "on-tertiary-fixed-variant": "#73332f",
+                      "surface-container": "#edeeef",
+                      "tertiary-fixed-dim": "#ffb3ac",
+                      "secondary-fixed-dim": "#afcdbe",
+                      "error-container": "#ffdad6",
+                      "surface-container-low": "#f3f4f5",
+                      "primary-container": "#065f46",
+                      "on-tertiary": "#ffffff",
+                      "on-primary-fixed": "#002116",
+                      "surface": "#f8f9fa",
+                      "on-tertiary-container": "#ffb4ad",
+                      "on-secondary-container": "#4d685c",
+                      "outline": "#6f7973",
+                      "surface-container-lowest": "#ffffff",
+                      "error": "#ba1a1a",
+                      "outline-variant": "#bec9c2",
+                      "surface-bright": "#f8f9fa",
+                      "secondary": "#496458",
+                      "surface-container-high": "#e7e8e9",
+                      "primary-fixed": "#a6f2d1",
+                      "on-background": "#191c1d",
+                      "tertiary-container": "#823f3a",
+                      "secondary-container": "#c8e7d7",
+                      "on-primary-container": "#8bd6b7",
+                      "inverse-surface": "#2e3132",
+                      "on-secondary": "#ffffff",
+                      "surface-tint": "#1b6b51",
+                      "inverse-primary": "#8bd6b6",
+                      "surface-dim": "#d9dadb",
+                      "tertiary-fixed": "#ffdad6"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px",
+                      "2xl": "1rem",
+                      "3xl": "1.5rem"
+              },
+              "spacing": {},
+              "fontFamily": {
+                      "headline": [
+                              "Manrope"
+                      ],
+                      "body": [
+                              "Manrope"
+                      ],
+                      "label": [
+                              "Manrope"
+                      ]
+              }
+      },
+          },
+        }
+      </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface-container-low font-body text-on-surface antialiased min-h-screen selection:bg-primary-container selection:text-on-primary">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full z-50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-sm dark:shadow-none transition-all flex justify-between items-center px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-surface-container-high overflow-hidden flex items-center justify-center">
+<img alt="User Profile Photo" class="w-full h-full object-cover" data-alt="close up headshot of a professional man in a tailored suit smiling subtly against a neutral studio background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuACYdDX4Q2P8bYkrcU1nSZC3zg2kSH5aD-oc8g1nSM6CbBJAkSYDSU0UFTB_3T90kLeuteel7UcAAODHBCTzMiVpU8IWrWv7M7LZv3YEQyOhJgdgW_XyqXL7E_eLYshxY0N1BJnkATK6dn9lEnNQQ6IM0C5x5ZDECwvIGHZqY1nSxRW6x1-3IsPHOLTfxUKeLvkPpQ9yKEYngmM0y-aSLgPa2wa660q1S20o2BRuM5Xf7bxczXDYnTUthXKEsD89emq8kFk3pBQqEg"/>
+</div>
+<span class="font-manrope font-bold text-lg tracking-tight text-emerald-900 dark:text-emerald-100">The Financial Atelier</span>
+</div>
+<button class="w-10 h-10 rounded-full flex items-center justify-center text-emerald-900 dark:text-emerald-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors scale-95 duration-200">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0; font-weight: 300;">notifications</span>
+</button>
+</header>
+<!-- Main Content Canvas -->
+<main class="pt-24 pb-32 px-4 md:px-8 max-w-7xl mx-auto space-y-8">
+<!-- Hero Section -->
+<section class="mb-10 mt-4">
+<h1 class="text-[2.75rem] font-headline font-bold leading-tight tracking-[-0.02em] text-on-surface mb-2">Operations Hub</h1>
+<p class="text-on-surface-variant font-medium text-lg">Manage your enterprise resources and team performance.</p>
+</section>
+<!-- Quick Actions Bento -->
+<section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+<button class="bg-surface-container-lowest rounded-3xl p-6 flex flex-col items-center justify-center gap-3 hover:bg-surface-container transition-colors shadow-[0_4px_20px_rgba(25,28,29,0.02)] group">
+<div class="w-12 h-12 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0; font-weight: 300;">receipt_long</span>
+</div>
+<span class="font-semibold text-on-surface tracking-tight">Faktur</span>
+</button>
+<button class="bg-surface-container-lowest rounded-3xl p-6 flex flex-col items-center justify-center gap-3 hover:bg-surface-container transition-colors shadow-[0_4px_20px_rgba(25,28,29,0.02)] group">
+<div class="w-12 h-12 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0; font-weight: 300;">event_available</span>
+</div>
+<span class="font-semibold text-on-surface tracking-tight">Absensi</span>
+</button>
+<button class="bg-surface-container-lowest rounded-3xl p-6 flex flex-col items-center justify-center gap-3 hover:bg-surface-container transition-colors shadow-[0_4px_20px_rgba(25,28,29,0.02)] group">
+<div class="w-12 h-12 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0; font-weight: 300;">assignment</span>
+</div>
+<span class="font-semibold text-on-surface tracking-tight">Tugas</span>
+</button>
+<button class="bg-surface-container-lowest rounded-3xl p-6 flex flex-col items-center justify-center gap-3 hover:bg-surface-container transition-colors shadow-[0_4px_20px_rgba(25,28,29,0.02)] group">
+<div class="w-12 h-12 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0; font-weight: 300;">more_horiz</span>
+</div>
+<span class="font-semibold text-on-surface tracking-tight">Lainnya</span>
+</button>
+</section>
+<!-- Module Stacks -->
+<section class="space-y-6">
+<h2 class="text-xl font-bold text-on-surface tracking-tight px-2">Enterprise Modules</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- HRD Module -->
+<div class="bg-surface-container-lowest rounded-3xl p-8 shadow-[0_4px_20px_rgba(25,28,29,0.02)] relative overflow-hidden group hover:shadow-[0_12px_40px_rgba(25,28,29,0.06)] transition-shadow">
+<div class="absolute -right-10 -top-10 w-40 h-40 bg-surface-container-high rounded-full opacity-50 group-hover:scale-110 transition-transform duration-500 pointer-events-none"></div>
+<div class="flex items-start justify-between mb-8 relative z-10">
+<div>
+<div class="w-14 h-14 rounded-2xl bg-primary-container text-on-primary flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-3xl" style="font-variation-settings: 'FILL' 0; font-weight: 300;">groups</span>
+</div>
+<h3 class="text-2xl font-bold text-on-surface tracking-tight">HRD</h3>
+<p class="text-on-surface-variant mt-1">Human Resources Dept</p>
+</div>
+<button class="w-10 h-10 rounded-full bg-surface-container-low text-on-surface flex items-center justify-center hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0; font-weight: 300;">arrow_forward</span>
+</button>
+</div>
+<div class="space-y-3 relative z-10">
+<div class="flex items-center justify-between py-2 border-b border-surface-container-high/50">
+<span class="text-sm font-medium text-on-surface-variant">Active Employees</span>
+<span class="text-sm font-bold text-on-surface">142</span>
+</div>
+<div class="flex items-center justify-between py-2">
+<span class="text-sm font-medium text-on-surface-variant">Pending Approvals</span>
+<span class="text-sm font-bold text-primary">12</span>
+</div>
+</div>
+</div>
+<!-- SDM Module -->
+<div class="bg-surface-container-lowest rounded-3xl p-8 shadow-[0_4px_20px_rgba(25,28,29,0.02)] relative overflow-hidden group hover:shadow-[0_12px_40px_rgba(25,28,29,0.06)] transition-shadow">
+<div class="absolute -right-10 -top-10 w-40 h-40 bg-surface-container-high rounded-full opacity-50 group-hover:scale-110 transition-transform duration-500 pointer-events-none"></div>
+<div class="flex items-start justify-between mb-8 relative z-10">
+<div>
+<div class="w-14 h-14 rounded-2xl bg-secondary-container text-on-secondary-container flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-3xl" style="font-variation-settings: 'FILL' 0; font-weight: 300;">engineering</span>
+</div>
+<h3 class="text-2xl font-bold text-on-surface tracking-tight">SDM</h3>
+<p class="text-on-surface-variant mt-1">Sumber Daya Manusia</p>
+</div>
+<button class="w-10 h-10 rounded-full bg-surface-container-low text-on-surface flex items-center justify-center hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0; font-weight: 300;">arrow_forward</span>
+</button>
+</div>
+<div class="space-y-3 relative z-10">
+<div class="flex items-center justify-between py-2 border-b border-surface-container-high/50">
+<span class="text-sm font-medium text-on-surface-variant">Training Sessions</span>
+<span class="text-sm font-bold text-on-surface">4</span>
+</div>
+<div class="flex items-center justify-between py-2">
+<span class="text-sm font-medium text-on-surface-variant">Performance Reviews</span>
+<span class="text-sm font-bold text-primary">28</span>
+</div>
+</div>
+</div>
+<!-- Settings/Config -->
+<div class="bg-surface-container-lowest rounded-3xl p-8 shadow-[0_4px_20px_rgba(25,28,29,0.02)] relative overflow-hidden group hover:shadow-[0_12px_40px_rgba(25,28,29,0.06)] transition-shadow md:col-span-2">
+<div class="flex items-center justify-between relative z-10">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-2xl bg-surface-container-high text-on-surface-variant flex items-center justify-center">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0; font-weight: 300;">settings</span>
+</div>
+<div>
+<h3 class="text-lg font-bold text-on-surface tracking-tight">System Configuration</h3>
+<p class="text-sm text-on-surface-variant">Manage global preferences and roles.</p>
+</div>
+</div>
+<button class="px-6 py-3 rounded-full bg-surface-container-low text-on-surface font-medium hover:bg-surface-container-high transition-colors text-sm tracking-wide">
+                            Configure
+                        </button>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 rounded-t-[24px] bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl shadow-[0_-4px_20px_rgba(25,28,29,0.04)] pb-6 pt-3 px-4 flex justify-around items-end md:hidden">
+<button class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 p-2 hover:text-emerald-700 dark:hover:text-emerald-300 active:scale-90 transition-all gap-1">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0; font-weight: 300;">home</span>
+<span class="font-manrope text-[10px] font-semibold uppercase tracking-widest">Beranda</span>
+</button>
+<button class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 p-2 hover:text-emerald-700 dark:hover:text-emerald-300 active:scale-90 transition-all gap-1">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0; font-weight: 300;">account_balance_wallet</span>
+<span class="font-manrope text-[10px] font-semibold uppercase tracking-widest">Mutasi</span>
+</button>
+<button class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 p-2 hover:text-emerald-700 dark:hover:text-emerald-300 active:scale-90 transition-all gap-1">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0; font-weight: 300;">add_circle</span>
+<span class="font-manrope text-[10px] font-semibold uppercase tracking-widest">Proyek</span>
+</button>
+<button class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 p-2 hover:text-emerald-700 dark:hover:text-emerald-300 active:scale-90 transition-all gap-1">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0; font-weight: 300;">analytics</span>
+<span class="font-manrope text-[10px] font-semibold uppercase tracking-widest">Master</span>
+</button>
+<button class="flex flex-col items-center justify-center bg-emerald-800 text-white dark:bg-emerald-400 dark:text-emerald-950 rounded-2xl px-3 py-1.5 active:scale-90 transition-all gap-1">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1; font-weight: 300;">menu</span>
+<span class="font-manrope text-[10px] font-semibold uppercase tracking-widest">Menu</span>
+</button>
+</nav>
+</body></html>

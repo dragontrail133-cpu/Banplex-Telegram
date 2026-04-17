@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import FormLayout from '../components/layouts/FormLayout'
 import useAuthStore from '../store/useAuthStore'
 import useBillStore from '../store/useBillStore'
+import useIncomeStore from '../store/useIncomeStore'
 import usePaymentStore from '../store/usePaymentStore'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
@@ -11,70 +12,130 @@ const currencyFormatter = new Intl.NumberFormat('id-ID', {
   maximumFractionDigits: 0,
 })
 
+function getUserDisplayName(user, authUser) {
+  const fullName = [user?.first_name, user?.last_name].filter(Boolean).join(' ').trim()
+
+  if (fullName) {
+    return fullName
+  }
+
+  if (user?.username) {
+    return `@${user.username}`
+  }
+
+  if (authUser?.name) {
+    return authUser.name
+  }
+
+  if (authUser?.telegram_user_id) {
+    return authUser.telegram_user_id
+  }
+
+  return 'Pengguna Telegram'
+}
+
 function formatCurrency(value) {
   const amount = Number(value)
 
   return currencyFormatter.format(Number.isFinite(amount) ? amount : 0)
 }
 
-function createInitialForm(bill) {
+function getRemainingAmount(record) {
+  const amount = Number(record?.remainingAmount ?? record?.remaining_amount)
+
+  return Number.isFinite(amount) ? amount : 0
+}
+
+function createInitialForm(record) {
   return {
-    amount: bill?.remainingAmount ? String(bill.remainingAmount) : '',
+    amount: getRemainingAmount(record) > 0 ? String(getRemainingAmount(record)) : '',
     paymentDate: new Date().toISOString().slice(0, 10),
     notes: '',
   }
 }
 
-function PaymentPage() {
+function getContextLabel(record, isLoanPayment) {
+  if (!record) {
+    return isLoanPayment ? 'Pinjaman' : 'Tagihan'
+  }
+
+  if (isLoanPayment) {
+    return record.creditor_name_snapshot || 'Kreditur'
+  }
+
+  return record.supplierName || 'Tagihan'
+}
+
+function PaymentPage({ paymentType = 'bill' }) {
   const navigate = useNavigate()
-  const { id: billId } = useParams()
+  const { id } = useParams()
   const authUser = useAuthStore((state) => state.user)
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
   const fetchBillById = useBillStore((state) => state.fetchBillById)
-  const [bill, setBill] = useState(null)
-  const [isLoadingBill, setIsLoadingBill] = useState(true)
+  const fetchLoanById = useIncomeStore((state) => state.fetchLoanById)
+  const [record, setRecord] = useState(null)
+  const [isLoadingRecord, setIsLoadingRecord] = useState(true)
   const [formData, setFormData] = useState(() => createInitialForm(null))
   const submitBillPayment = usePaymentStore((state) => state.submitBillPayment)
+  const submitLoanPayment = usePaymentStore((state) => state.submitLoanPayment)
   const isSubmitting = usePaymentStore((state) => state.isSubmitting)
   const error = usePaymentStore((state) => state.error)
   const clearError = usePaymentStore((state) => state.clearError)
+  const isLoanPayment = paymentType === 'loan'
+  const pageTitle = isLoanPayment ? 'Pembayaran Pinjaman' : 'Pembayaran Tagihan'
+  const entityLabel = isLoanPayment ? 'pinjaman' : 'tagihan'
+  const formId = 'payment-form'
+  const userName = getUserDisplayName(null, authUser)
+  const remainingAmount = getRemainingAmount(record)
+  const totalAmount = Number(
+    isLoanPayment ? record?.repayment_amount : record?.amount
+  ) || 0
+  const paidAmount = Number(
+    isLoanPayment ? record?.paid_amount : record?.paidAmount
+  ) || 0
+  const contextLabel = useMemo(
+    () => getContextLabel(record, isLoanPayment),
+    [record, isLoanPayment]
+  )
 
   useEffect(() => {
     let isActive = true
 
-    async function loadBill() {
-      setIsLoadingBill(true)
+    async function loadRecord() {
+      setIsLoadingRecord(true)
 
       try {
-        const nextBill = await fetchBillById(billId)
+        const nextRecord = isLoanPayment
+          ? await fetchLoanById(id)
+          : await fetchBillById(id)
 
         if (!isActive) {
           return
         }
 
-        setBill(nextBill)
-        setFormData(createInitialForm(nextBill))
+        setRecord(nextRecord)
+        setFormData(createInitialForm(nextRecord))
       } catch (loadError) {
-        console.error('Gagal memuat detail tagihan:', loadError)
+        console.error(`Gagal memuat detail ${entityLabel}:`, loadError)
 
         if (!isActive) {
           return
         }
 
-        setBill(null)
+        setRecord(null)
       } finally {
         if (isActive) {
-          setIsLoadingBill(false)
+          setIsLoadingRecord(false)
         }
       }
     }
 
-    void loadBill()
+    void loadRecord()
 
     return () => {
       isActive = false
     }
-  }, [billId, fetchBillById])
+  }, [entityLabel, fetchBillById, fetchLoanById, id, isLoanPayment])
 
   useEffect(() => () => clearError(), [clearError])
 
@@ -98,26 +159,45 @@ function PaymentPage() {
   const handleSubmit = async (event) => {
     event.preventDefault()
 
-    if (!bill || isSubmitting) {
+    if (!record || isSubmitting) {
       return
     }
 
     try {
-      await submitBillPayment({
-        bill_id: bill.id,
-        telegram_user_id: authUser?.telegram_user_id ?? null,
-        team_id: currentTeamId ?? bill.teamId,
-        amount: formData.amount,
-        maxAmount: bill.remainingAmount,
-        payment_date: formData.paymentDate,
-        notes: formData.notes,
-        supplierName: bill.supplierName,
-        projectName: bill.projectName,
-        remainingAmount: Math.max(
-          Number(bill.remainingAmount ?? 0) - Number(formData.amount ?? 0),
-          0
-        ),
-      })
+      if (isLoanPayment) {
+        await submitLoanPayment({
+          loan_id: record.id,
+          telegram_user_id: authUser?.telegram_user_id ?? null,
+          userName,
+          team_id: currentTeamId ?? record.team_id,
+          amount: formData.amount,
+          maxAmount: remainingAmount,
+          payment_date: formData.paymentDate,
+          notes: formData.notes,
+          creditorName: record.creditor_name_snapshot,
+          remainingAmount: Math.max(
+            remainingAmount - Number(formData.amount ?? 0),
+            0
+          ),
+        })
+      } else {
+        await submitBillPayment({
+          bill_id: record.id,
+          telegram_user_id: authUser?.telegram_user_id ?? null,
+          userName,
+          team_id: currentTeamId ?? record.teamId,
+          amount: formData.amount,
+          maxAmount: remainingAmount,
+          payment_date: formData.paymentDate,
+          notes: formData.notes,
+          supplierName: record.supplierName,
+          projectName: record.projectName,
+          remainingAmount: Math.max(
+            remainingAmount - Number(formData.amount ?? 0),
+            0
+          ),
+        })
+      }
 
       navigate(-1)
     } catch (submitError) {
@@ -128,112 +208,143 @@ function PaymentPage() {
   return (
     <FormLayout
       actionLabel="Simpan Pembayaran"
+      formId={record ? formId : null}
       isSubmitting={isSubmitting}
       onBack={handleBack}
-      onSubmit={handleSubmit}
-      submitDisabled={!bill || isLoadingBill}
-      title="Pembayaran Tagihan"
+      submitDisabled={!record || isLoadingRecord}
+      title={pageTitle}
     >
-      {isLoadingBill ? (
-        <div className="app-section-surface border-dashed px-4 py-5 text-sm text-[var(--app-hint-color)]">
-          Memuat tagihan...
+      {isLoadingRecord ? (
+        <div className="space-y-4 px-4 py-6">
+          <div className="h-6 w-3/4 animate-pulse rounded-full bg-[var(--app-border-color)]" />
+          <div className="h-4 w-1/2 animate-pulse rounded-full bg-[var(--app-border-color)]" />
+          
+          <div className="mt-6 grid gap-2 sm:grid-cols-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-20 animate-pulse rounded-2xl bg-[var(--app-border-color)]" />
+            ))}
+          </div>
         </div>
-      ) : bill ? (
+      ) : record ? (
         <div className="space-y-4">
-          <section className="app-section-surface p-4">
-            <div className="flex flex-col gap-3">
+          <section className="app-card px-4 py-4">
+            <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="app-kicker">
-                  {bill.billType || 'Salary Bill'}
+                  {isLoanPayment ? 'Pinjaman Aktif' : record.billType || 'Tagihan'}
                 </p>
-                <h2 className="app-title">
-                  {bill.supplierName}
-                </h2>
-                <p className="app-copy">{bill.projectName}</p>
+                <h2 className="app-title">{contextLabel}</h2>
+                <p className="app-copy">
+                  {isLoanPayment
+                    ? `Status ${record.status ?? 'unpaid'}`
+                    : record.projectName || 'Tanpa proyek terkait'}
+                </p>
+              </div>
+              <div className="rounded-full bg-[var(--app-tone-neutral-bg)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--app-tone-neutral-text)]">
+                #{String(id ?? '').slice(0, 8)}
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              <div className="app-card rounded-[22px] px-3 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+                  Total
+                </p>
+                <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
+                  {formatCurrency(totalAmount)}
+                </p>
               </div>
 
-              <div className="grid gap-2 sm:grid-cols-3">
-                <div className="rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-3 py-3">
-                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--app-hint-color)]">
-                    Total
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-[var(--app-text-color)]">
-                    {formatCurrency(bill.amount)}
-                  </p>
-                </div>
+              <div className="app-card rounded-[22px] px-3 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+                  Terbayar
+                </p>
+                <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
+                  {formatCurrency(paidAmount)}
+                </p>
+              </div>
 
-                <div className="rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-3 py-3">
-                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--app-hint-color)]">
-                    Terbayar
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-[var(--app-text-color)]">
-                    {formatCurrency(bill.paidAmount)}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3">
-                  <p className="text-xs uppercase tracking-[0.18em] text-amber-700">
-                    Sisa
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-amber-800">
-                    {formatCurrency(bill.remainingAmount)}
-                  </p>
-                </div>
+              <div className="app-tone-warning rounded-[22px] px-3 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-current">
+                  Sisa
+                </p>
+                <p className="mt-2 text-sm font-semibold text-current">
+                  {formatCurrency(remainingAmount)}
+                </p>
               </div>
             </div>
           </section>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-slate-900">
-              Nominal Pembayaran
-            </span>
-            <input
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              inputMode="decimal"
-              max={bill.remainingAmount}
-              min="0.01"
-              name="amount"
-              onChange={handleChange}
-              required
-              step="0.01"
-              type="number"
-              value={formData.amount}
-            />
-          </label>
+          <form id={formId} className="space-y-4" onSubmit={handleSubmit}>
+            <label className="block space-y-2">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+                Nominal Pembayaran
+              </span>
+              <input
+                className="app-input w-full rounded-[20px] px-4 py-4 text-xl font-bold"
+                inputMode="decimal"
+                max={remainingAmount}
+                min="0.01"
+                name="amount"
+                onChange={handleChange}
+                required
+                step="0.01"
+                type="number"
+                value={formData.amount}
+              />
+            </label>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-slate-900">
-              Tanggal Pembayaran
-            </span>
-            <input
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              name="paymentDate"
-              onChange={handleChange}
-              required
-              type="date"
-              value={formData.paymentDate}
-            />
-          </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block space-y-2">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+                  Tanggal Pembayaran
+                </span>
+                <input
+                  className="app-input w-full rounded-[20px] px-4 py-3.5 text-base"
+                  name="paymentDate"
+                  onChange={handleChange}
+                  required
+                  type="date"
+                  value={formData.paymentDate}
+                />
+              </label>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-slate-900">Catatan</span>
-            <textarea
-              className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              name="notes"
-              onChange={handleChange}
-              value={formData.notes}
-            />
-          </label>
+              <div className="app-card rounded-[20px] px-4 py-3.5">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+                  Ringkasan
+                </p>
+                <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
+                  {isLoanPayment ? 'Pembayaran cicilan pinjaman' : 'Pembayaran tagihan operasional'}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-[var(--app-hint-color)]">
+                  Setelah tersimpan, nominal tersisa akan dihitung ulang otomatis.
+                </p>
+              </div>
+            </div>
+
+            <label className="block space-y-2">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+                Catatan
+              </span>
+              <textarea
+                className="app-input min-h-28 w-full resize-none rounded-[20px] px-4 py-3 text-base"
+                name="notes"
+                onChange={handleChange}
+                placeholder="Tambahkan catatan pembayaran jika perlu"
+                value={formData.notes}
+              />
+            </label>
+          </form>
 
           {error ? (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            <div className="app-tone-danger rounded-[20px] px-4 py-3 text-sm">
               {error}
             </div>
           ) : null}
         </div>
       ) : (
-          <div className="app-section-surface border-dashed px-4 py-5 text-sm text-[var(--app-hint-color)]">
-          Tagihan tidak ditemukan.
+        <div className="app-card-dashed px-4 py-5 text-sm text-[var(--app-hint-color)]">
+          {isLoanPayment ? 'Pinjaman tidak ditemukan.' : 'Tagihan tidak ditemukan.'}
         </div>
       )}
     </FormLayout>

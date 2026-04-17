@@ -1,4 +1,14 @@
 import { useState } from 'react'
+import { CheckSquare2, FileText, Layers3 } from 'lucide-react'
+import {
+  AppBadge,
+  AppButton,
+  AppCard,
+  AppErrorState,
+  AppInput,
+  AppSelect,
+  AppTextarea,
+} from '../ui/AppPrimitives'
 
 function normalizeText(value, fallback = '') {
   const normalizedValue = String(value ?? '').trim()
@@ -64,6 +74,18 @@ function parseFormValues(fields, formState) {
   return payload
 }
 
+function getFieldIcon(fieldType) {
+  if (fieldType === 'textarea') {
+    return FileText
+  }
+
+  if (fieldType === 'checkbox') {
+    return CheckSquare2
+  }
+
+  return Layers3
+}
+
 function GenericMasterForm({
   config,
   initialData = null,
@@ -102,117 +124,171 @@ function GenericMasterForm({
   }
 
   return (
-    <form id={formId ?? undefined} className="space-y-5" onSubmit={handleSubmit}>
-      <div className="grid gap-4 sm:grid-cols-2">
-        {config.fields.map((field) => {
-          if (field.type === 'textarea') {
+    <form id={formId ?? undefined} className="space-y-4" onSubmit={handleSubmit}>
+      <AppCard className="space-y-4 bg-[var(--app-surface-strong-color)]">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <p className="app-meta">Field Master</p>
+            <p className="text-base font-semibold text-[var(--app-text-color)]">
+              Lengkapi data {config.label.toLowerCase()}
+            </p>
+          </div>
+          <AppBadge>{config.fields.length} field</AppBadge>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          {config.fields.map((field) => {
+            const FieldIcon = getFieldIcon(field.type)
+
+            if (field.type === 'textarea') {
+              return (
+                <AppCard
+                  key={field.name}
+                  className={`space-y-3 bg-white ${field.fullWidth ? 'sm:col-span-2' : ''}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-[14px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
+                      <FieldIcon className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                        {field.label}
+                      </p>
+                      {field.placeholder ? (
+                        <p className="text-xs text-[var(--app-hint-color)]">
+                          {field.placeholder}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <AppTextarea
+                    name={field.name}
+                    onChange={(event) => handleChange(field.name, event.target.value)}
+                    placeholder={field.placeholder}
+                    value={formState[field.name] ?? ''}
+                  />
+                </AppCard>
+              )
+            }
+
+            if (field.type === 'select') {
+              return (
+                <AppCard key={field.name} className="space-y-3 bg-white">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-[14px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
+                      <FieldIcon className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                        {field.label}
+                      </p>
+                      <p className="text-xs text-[var(--app-hint-color)]">
+                        Pilih opsi yang sesuai.
+                      </p>
+                    </div>
+                  </div>
+                  <AppSelect
+                    name={field.name}
+                    onChange={(event) => handleChange(field.name, event.target.value)}
+                    value={formState[field.name] ?? ''}
+                  >
+                    {field.options?.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </AppSelect>
+                </AppCard>
+              )
+            }
+
+            if (field.type === 'checkbox') {
+              return (
+                <AppCard
+                  key={field.name}
+                  className={`space-y-3 bg-white ${field.fullWidth ? 'sm:col-span-2' : ''}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-[14px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
+                      <FieldIcon className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                        {field.label}
+                      </p>
+                      <p className="text-xs text-[var(--app-hint-color)]">
+                        Aktifkan jika opsi ini perlu dipakai dalam flow operasional.
+                      </p>
+                    </div>
+                  </div>
+                  <label className="inline-flex items-center gap-3 rounded-[20px] border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-4 py-3 text-sm font-medium text-[var(--app-text-color)]">
+                    <input
+                      checked={Boolean(formState[field.name])}
+                      className="h-4 w-4 rounded border-slate-300 text-[var(--app-accent-color)] focus:ring-[var(--app-accent-color)]"
+                      name={field.name}
+                      onChange={(event) =>
+                        handleChange(field.name, event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    {field.label}
+                  </label>
+                </AppCard>
+              )
+            }
+
             return (
-              <label
+              <AppCard
                 key={field.name}
-                className={`block space-y-2 ${field.fullWidth ? 'sm:col-span-2' : ''}`}
+                className={`space-y-3 bg-white ${field.fullWidth ? 'sm:col-span-2' : ''}`}
               >
-                <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                  {field.label}
-                </span>
-                <textarea
-                  className="min-h-24 w-full resize-none rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                <div className="flex items-center gap-2">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-[14px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
+                    <FieldIcon className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                      {field.label}
+                    </p>
+                    {field.placeholder ? (
+                      <p className="text-xs text-[var(--app-hint-color)]">
+                        {field.placeholder}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+                <AppInput
+                  inputMode={field.inputMode}
+                  min={field.min}
                   name={field.name}
                   onChange={(event) => handleChange(field.name, event.target.value)}
                   placeholder={field.placeholder}
+                  step={field.step}
+                  type={field.type === 'number' ? 'number' : 'text'}
                   value={formState[field.name] ?? ''}
                 />
-              </label>
+              </AppCard>
             )
-          }
-
-          if (field.type === 'select') {
-            return (
-              <label key={field.name} className="block space-y-2">
-                <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                  {field.label}
-                </span>
-                <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                  name={field.name}
-                  onChange={(event) => handleChange(field.name, event.target.value)}
-                  value={formState[field.name] ?? ''}
-                >
-                  {field.options?.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )
-          }
-
-          if (field.type === 'checkbox') {
-            return (
-              <label
-                key={field.name}
-                className={`inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 ${field.fullWidth ? 'sm:col-span-2' : ''}`}
-              >
-                <input
-                  checked={Boolean(formState[field.name])}
-                  className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-                  name={field.name}
-                  onChange={(event) =>
-                    handleChange(field.name, event.target.checked)
-                  }
-                  type="checkbox"
-                />
-                {field.label}
-              </label>
-            )
-          }
-
-          return (
-            <label
-              key={field.name}
-              className={`block space-y-2 ${field.fullWidth ? 'sm:col-span-2' : ''}`}
-            >
-              <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                {field.label}
-              </span>
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                inputMode={field.inputMode}
-                min={field.min}
-                name={field.name}
-                onChange={(event) => handleChange(field.name, event.target.value)}
-                placeholder={field.placeholder}
-                step={field.step}
-                type={field.type === 'number' ? 'number' : 'text'}
-                value={formState[field.name] ?? ''}
-              />
-            </label>
-          )
-        })}
-      </div>
+          })}
+        </div>
+      </AppCard>
 
       {localError ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
-          {localError}
-        </div>
+        <AppErrorState
+          title="Form master belum valid"
+          description={localError}
+        />
       ) : null}
 
       {hideActions ? null : (
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button
-            className="inline-flex items-center justify-center rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-[var(--app-text-color)]"
-            type="button"
-          >
+          <AppButton type="button" variant="secondary">
             Batal
-          </button>
+          </AppButton>
 
-          <button
-            className="inline-flex items-center justify-center rounded-[20px] bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isSubmitting}
-            type="submit"
-          >
+          <AppButton disabled={isSubmitting} type="submit">
             {isSubmitting ? 'Menyimpan...' : 'Simpan'}
-          </button>
+          </AppButton>
         </div>
       )}
     </form>

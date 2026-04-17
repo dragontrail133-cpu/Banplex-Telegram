@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { FileText, Package } from 'lucide-react'
 import ProtectedRoute from '../components/ProtectedRoute'
 import FormLayout from '../components/layouts/FormLayout'
 import MaterialInvoiceForm from '../components/MaterialInvoiceForm'
@@ -18,26 +19,16 @@ function MaterialInvoicePage() {
         onBack={() => navigate(-1)}
         title="Faktur Material"
       >
-        <section className="space-y-4">
-          <div className="app-page-surface p-4">
-            <p className="app-kicker">
-              Material Invoice
-            </p>
-            <h2 className="app-title">
-              Buat faktur material atau surat jalan
-            </h2>
-            <p className="app-copy">
-              Form ini terhubung langsung ke store transaksi material dan tetap aman
-              dipakai di mobile webview.
-            </p>
-          </div>
+        <div className=" ">
+          <section className=" ">
+          </section>
 
           <MaterialInvoiceForm
             formId={formId}
             hideActions
             onSuccess={() => navigate(-1)}
           />
-        </section>
+        </div>
       </FormLayout>
     </ProtectedRoute>
   )

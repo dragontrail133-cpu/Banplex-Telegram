@@ -1,10 +1,17 @@
 import { useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { BadgePlus, BriefcaseBusiness, FilePenLine, FolderTree, UserRoundCog } from 'lucide-react'
 import FormLayout from '../components/layouts/FormLayout'
 import ProtectedRoute from '../components/ProtectedRoute'
 import WorkerForm from '../components/WorkerForm'
 import GenericMasterForm from '../components/master/GenericMasterForm'
 import { masterTabs } from '../components/master/masterTabs'
+import {
+  AppBadge,
+  AppCard,
+  AppCardStrong,
+  AppErrorState,
+} from '../components/ui/AppPrimitives'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
 
@@ -18,6 +25,24 @@ function getRouteTab(routeTab) {
         tab.key === normalizedValue ||
         tab.key.replace(/s$/, '') === normalizedValue
     ) ?? null
+  )
+}
+
+function getRecordTitle(record, tabConfig) {
+  if (!record) {
+    return tabConfig?.label ?? 'Master'
+  }
+
+  return (
+    record.name ||
+    record.project_name ||
+    record.supplier_name ||
+    record.creditor_name ||
+    record.profession_name ||
+    record.staff_name ||
+    record.worker_name ||
+    tabConfig?.label ||
+    'Master'
   )
 }
 
@@ -53,7 +78,7 @@ function MasterFormPage() {
   const isEditMode = recordId.length > 0
   const formId = `${tabConfig?.key ?? 'master'}-form`
   const formKey = `${tabConfig?.key ?? 'master'}-${recordId || 'new'}-${
-    (currentTeamId ?? 'workspace')
+    currentTeamId ?? 'workspace'
   }`
 
   const collections = useMemo(
@@ -93,6 +118,8 @@ function MasterFormPage() {
   const currentRecord = tabConfig
     ? collections[tabConfig.stateKey]?.find((record) => String(record.id) === recordId) ?? null
     : null
+
+  const recordTitle = getRecordTitle(currentRecord, tabConfig)
 
   useEffect(() => {
     void Promise.all([
@@ -150,9 +177,10 @@ function MasterFormPage() {
     return (
       <ProtectedRoute allowedRoles={['Owner', 'Admin']} description="Master form tidak tersedia.">
         <section className="app-page-surface px-4 py-4">
-          <p className="text-sm font-semibold text-[var(--app-text-color)]">
-            Form master tidak ditemukan.
-          </p>
+          <AppErrorState
+            title="Form master tidak ditemukan"
+            description="Konfigurasi route master tidak cocok dengan daftar tab yang tersedia."
+          />
         </section>
       </ProtectedRoute>
     )
@@ -171,20 +199,41 @@ function MasterFormPage() {
         submitDisabled={Boolean(masterError)}
         title={`${isEditMode ? 'Edit' : 'Tambah'} ${tabConfig.label}`}
       >
-        <section className="space-y-4">
-          <div className="app-page-surface p-4">
-            <p className="app-kicker">
-              Master Data
-            </p>
-            <h2 className="app-title">
-              {tabConfig.description}
-            </h2>
-            <p className="app-copy">
-              {isEditMode
-                ? 'Ubah data yang sudah tersimpan tanpa modal.'
-                : 'Tambahkan data baru dalam layar penuh yang aman di mobile.'}
-            </p>
-          </div>
+        <div className="space-y-4">
+          <AppCardStrong className="space-y-4 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-2">
+                <AppBadge tone="info" icon={isEditMode ? FilePenLine : BadgePlus}>
+                  {isEditMode ? 'Mode Edit' : 'Data Baru'}
+                </AppBadge>
+                <div>
+                  <p className="text-lg font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
+                    {isEditMode ? recordTitle : `Buat ${tabConfig.label.toLowerCase()} baru`}
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-[var(--app-hint-color)]">
+                    {tabConfig.description}
+                  </p>
+                </div>
+              </div>
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
+                {tabConfig.key === 'workers' ? (
+                  <UserRoundCog className="h-5 w-5" />
+                ) : tabConfig.key === 'projects' ? (
+                  <BriefcaseBusiness className="h-5 w-5" />
+                ) : (
+                  <FolderTree className="h-5 w-5" />
+                )}
+              </span>
+            </div>
+
+          </AppCardStrong>
+
+          {masterError ? (
+            <AppErrorState
+              title="Sinkronisasi master bermasalah"
+              description={masterError}
+            />
+          ) : null}
 
           {tabConfig.customForm === 'worker' ? (
             <WorkerForm
@@ -207,7 +256,7 @@ function MasterFormPage() {
               onSubmit={handleSubmit}
             />
           )}
-        </section>
+        </div>
       </FormLayout>
     </ProtectedRoute>
   )

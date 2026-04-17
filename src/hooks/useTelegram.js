@@ -1,4 +1,4 @@
-﻿function useTelegram() {
+function useTelegram() {
   const tg =
     typeof window !== 'undefined' ? window.Telegram?.WebApp ?? null : null
 
@@ -9,6 +9,7 @@
     ready: () => tg?.ready?.(),
     expand: () => tg?.expand?.(),
     MainButton: tg?.MainButton ?? null,
+    haptic: tg?.HapticFeedback ?? null,
   }
 }
 

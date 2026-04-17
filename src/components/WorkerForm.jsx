@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { BriefcaseBusiness, CircleDollarSign, Plus, Trash2, UserRound } from 'lucide-react'
+import {
+  AppBadge,
+  AppButton,
+  AppCard,
+  AppErrorState,
+  AppInput,
+  AppSelect,
+  AppTextarea,
+} from './ui/AppPrimitives'
 import useMasterStore from '../store/useMasterStore'
 
 function normalizeText(value, fallback = '') {
@@ -40,6 +49,14 @@ function buildInitialState(worker, wageRates = []) {
   }
 }
 
+function getProjectName(project) {
+  return project?.project_name ?? project?.name ?? 'Proyek'
+}
+
+function getProfessionName(profession) {
+  return profession?.profession_name ?? profession?.name ?? 'Profesi'
+}
+
 function WorkerForm({
   initialWorker = null,
   initialWageRates = [],
@@ -71,7 +88,10 @@ function WorkerForm({
 
   const selectedDefaultProjectName = useMemo(() => {
     return (
-      projects.find((project) => project.id === formState.defaultProjectId)?.name ?? null
+      projects.find((project) => project.id === formState.defaultProjectId)
+        ?.project_name ??
+      projects.find((project) => project.id === formState.defaultProjectId)?.name ??
+      null
     )
   }, [formState.defaultProjectId, projects])
 
@@ -180,255 +200,276 @@ function WorkerForm({
   }
 
   return (
-    <form id={formId ?? undefined} className="space-y-5" onSubmit={handleSubmit}>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block space-y-2">
-          <span className="text-sm font-semibold text-[var(--app-text-color)]">
-            Nama Pekerja
-          </span>
-          <input
-            className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-            name="name"
-            onChange={handleFieldChange}
-            placeholder="Contoh: Budi Santoso"
-            value={formState.name}
-          />
-        </label>
-
-        <label className="block space-y-2">
-          <span className="text-sm font-semibold text-[var(--app-text-color)]">
-            Telegram User ID
-          </span>
-          <input
-            className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-            name="telegramUserId"
-            onChange={handleFieldChange}
-            placeholder="Opsional"
-            value={formState.telegramUserId}
-          />
-        </label>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block space-y-2">
-          <span className="text-sm font-semibold text-[var(--app-text-color)]">
-            Profesi
-          </span>
-          <select
-            className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-            name="professionId"
-            onChange={handleFieldChange}
-            value={formState.professionId}
-          >
-            <option value="">Pilih profesi</option>
-            {professions.map((profession) => (
-              <option key={profession.id} value={profession.id}>
-                {profession.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="block space-y-2">
-          <span className="text-sm font-semibold text-[var(--app-text-color)]">
-            Status
-          </span>
-          <select
-            className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-            name="status"
-            onChange={handleFieldChange}
-            value={formState.status}
-          >
-            <option value="active">Aktif</option>
-            <option value="inactive">Nonaktif</option>
-          </select>
-        </label>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block space-y-2">
-          <span className="text-sm font-semibold text-[var(--app-text-color)]">
-            Proyek Default
-          </span>
-          <select
-            className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-            name="defaultProjectId"
-            onChange={handleFieldChange}
-            value={formState.defaultProjectId}
-          >
-            <option value="">Pilih proyek default</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="block space-y-2">
-          <span className="text-sm font-semibold text-[var(--app-text-color)]">
-            Role Default
-          </span>
-          <input
-            className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-            name="defaultRoleName"
-            onChange={handleFieldChange}
-            placeholder={
-              selectedDefaultProjectName
-                ? `Contoh role di ${selectedDefaultProjectName}`
-                : 'Contoh: Tukang Besi'
-            }
-            value={formState.defaultRoleName}
-          />
-        </label>
-      </div>
-
-      <label className="block space-y-2">
-        <span className="text-sm font-semibold text-[var(--app-text-color)]">
-          Catatan
-        </span>
-        <textarea
-          className="min-h-24 w-full resize-none rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-          name="notes"
-          onChange={handleFieldChange}
-          placeholder="Tambahkan catatan jika diperlukan."
-          value={formState.notes}
-        />
-      </label>
-
-      <section className="space-y-4 rounded-[24px] border border-slate-200 bg-slate-50/80 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-700">
-              Upah Per Proyek
+    <form id={formId ?? undefined} className="space-y-4" onSubmit={handleSubmit}>
+      <AppCard className="space-y-4 bg-[var(--app-surface-strong-color)]">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <p className="app-meta">Profil Pekerja</p>
+            <p className="text-base font-semibold text-[var(--app-text-color)]">
+              Identitas dan penugasan default
             </p>
-            <p className="mt-1 text-sm leading-6 text-slate-600">
-              Tambahkan role dan upah pekerja untuk proyek yang berbeda.
+          </div>
+          <AppBadge tone="info" icon={UserRound}>
+            Worker Profile
+          </AppBadge>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <AppCard className="space-y-3 bg-white">
+            <p className="text-sm font-semibold text-[var(--app-text-color)]">
+              Nama Pekerja
+            </p>
+            <AppInput
+              name="name"
+              onChange={handleFieldChange}
+              placeholder="Contoh: Budi Santoso"
+              value={formState.name}
+            />
+          </AppCard>
+
+          <AppCard className="space-y-3 bg-white">
+            <p className="text-sm font-semibold text-[var(--app-text-color)]">
+              Telegram User ID
+            </p>
+            <AppInput
+              name="telegramUserId"
+              onChange={handleFieldChange}
+              placeholder="Opsional"
+              value={formState.telegramUserId}
+            />
+          </AppCard>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <AppCard className="space-y-3 bg-white">
+            <p className="text-sm font-semibold text-[var(--app-text-color)]">
+              Profesi
+            </p>
+            <AppSelect
+              name="professionId"
+              onChange={handleFieldChange}
+              value={formState.professionId}
+            >
+              <option value="">Pilih profesi</option>
+              {professions.map((profession) => (
+                <option key={profession.id} value={profession.id}>
+                  {getProfessionName(profession)}
+                </option>
+              ))}
+            </AppSelect>
+          </AppCard>
+
+          <AppCard className="space-y-3 bg-white">
+            <p className="text-sm font-semibold text-[var(--app-text-color)]">
+              Status
+            </p>
+            <AppSelect
+              name="status"
+              onChange={handleFieldChange}
+              value={formState.status}
+            >
+              <option value="active">Aktif</option>
+              <option value="inactive">Nonaktif</option>
+            </AppSelect>
+          </AppCard>
+        </div>
+      </AppCard>
+
+      <AppCard className="space-y-4 bg-[var(--app-surface-strong-color)]">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <p className="app-meta">Penugasan Default</p>
+            <p className="text-base font-semibold text-[var(--app-text-color)]">
+              Proyek dan role utama
+            </p>
+          </div>
+          <AppBadge icon={BriefcaseBusiness}>Assignment</AppBadge>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <AppCard className="space-y-3 bg-white">
+            <p className="text-sm font-semibold text-[var(--app-text-color)]">
+              Proyek Default
+            </p>
+            <AppSelect
+              name="defaultProjectId"
+              onChange={handleFieldChange}
+              value={formState.defaultProjectId}
+            >
+              <option value="">Pilih proyek default</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {getProjectName(project)}
+                </option>
+              ))}
+            </AppSelect>
+          </AppCard>
+
+          <AppCard className="space-y-3 bg-white">
+            <p className="text-sm font-semibold text-[var(--app-text-color)]">
+              Role Default
+            </p>
+            <AppInput
+              name="defaultRoleName"
+              onChange={handleFieldChange}
+              placeholder={
+                selectedDefaultProjectName
+                  ? `Contoh role di ${selectedDefaultProjectName}`
+                  : 'Contoh: Tukang Besi'
+              }
+              value={formState.defaultRoleName}
+            />
+          </AppCard>
+        </div>
+
+        <AppCard className="space-y-3 bg-white">
+          <p className="text-sm font-semibold text-[var(--app-text-color)]">
+            Catatan
+          </p>
+          <AppTextarea
+            name="notes"
+            onChange={handleFieldChange}
+            placeholder="Tambahkan catatan jika diperlukan."
+            value={formState.notes}
+          />
+        </AppCard>
+      </AppCard>
+
+      <AppCard className="space-y-4 bg-[var(--app-surface-strong-color)]">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1">
+            <p className="app-meta">Skema Upah</p>
+            <p className="text-base font-semibold text-[var(--app-text-color)]">
+              Upah per proyek dan role
+            </p>
+            <p className="text-sm leading-6 text-[var(--app-hint-color)]">
+              Tambahkan kombinasi proyek-role dengan nominal yang berlaku untuk pekerja ini.
             </p>
           </div>
 
-          <button
-            className="inline-flex items-center justify-center gap-2 rounded-[18px] bg-slate-950 px-4 py-3 text-sm font-semibold text-white"
+          <AppButton
+            leadingIcon={<Plus className="h-4 w-4" />}
             onClick={handleAddWageRate}
             type="button"
           >
-            <Plus className="h-4 w-4" />
             Tambah Upah
-          </button>
+          </AppButton>
         </div>
 
         <div className="space-y-3">
           {formState.wageRates.map((rate, index) => (
-            <article
+            <AppCard
               key={rate.id}
-              className="rounded-[20px] border border-slate-200 bg-white px-4 py-4 shadow-sm"
+              className="space-y-4 bg-white px-4 py-4"
             >
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <p className="text-sm font-semibold text-[var(--app-text-color)]">
-                  Upah #{index + 1}
-                </p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                    Upah #{index + 1}
+                  </p>
+                  <p className="text-xs text-[var(--app-hint-color)]">
+                    Atur proyek, role, dan nominal.
+                  </p>
+                </div>
 
-                <button
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
+                <AppButton
+                  iconOnly
+                  variant="secondary"
+                  className="rounded-[18px]"
                   disabled={formState.wageRates.length === 1}
                   onClick={() => handleRemoveWageRate(rate.id)}
                   type="button"
                 >
                   <Trash2 className="h-4 w-4" />
-                </button>
+                </AppButton>
               </div>
 
-              <div className="grid gap-3">
-                <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-700">Proyek</span>
-                  <select
-                    className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+              <AppCard className="space-y-3 bg-[var(--app-surface-strong-color)]">
+                <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                  Proyek
+                </p>
+                <AppSelect
+                  onChange={(event) =>
+                    handleWageRateChange(rate.id, 'projectId', event.target.value)
+                  }
+                  value={rate.projectId}
+                >
+                  <option value="">Pilih proyek</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {getProjectName(project)}
+                    </option>
+                  ))}
+                </AppSelect>
+              </AppCard>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <AppCard className="space-y-3 bg-[var(--app-surface-strong-color)]">
+                  <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                    Role
+                  </p>
+                  <AppInput
                     onChange={(event) =>
-                      handleWageRateChange(rate.id, 'projectId', event.target.value)
+                      handleWageRateChange(rate.id, 'roleName', event.target.value)
                     }
-                    value={rate.projectId}
-                  >
-                    <option value="">Pilih proyek</option>
-                    {projects.map((project) => (
-                      <option key={project.id} value={project.id}>
-                        {project.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block space-y-2">
-                    <span className="text-sm font-medium text-slate-700">Role</span>
-                    <input
-                      className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                      onChange={(event) =>
-                        handleWageRateChange(rate.id, 'roleName', event.target.value)
-                      }
-                      placeholder="Contoh: Tukang"
-                      value={rate.roleName}
-                    />
-                  </label>
-
-                  <label className="block space-y-2">
-                    <span className="text-sm font-medium text-slate-700">
-                      Nominal Upah
-                    </span>
-                    <input
-                      className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                      inputMode="decimal"
-                      min="0"
-                      onChange={(event) =>
-                        handleWageRateChange(rate.id, 'wageAmount', event.target.value)
-                      }
-                      placeholder="0"
-                      step="0.01"
-                      type="number"
-                      value={rate.wageAmount}
-                    />
-                  </label>
-                </div>
-
-                <label className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                  <input
-                    checked={rate.isDefault}
-                    className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-                    onChange={(event) =>
-                      handleWageRateChange(rate.id, 'isDefault', event.target.checked)
-                    }
-                    type="checkbox"
+                    placeholder="Contoh: Tukang"
+                    value={rate.roleName}
                   />
-                  Jadikan default untuk kombinasi proyek-role ini
-                </label>
+                </AppCard>
+
+                <AppCard className="space-y-3 bg-[var(--app-surface-strong-color)]">
+                  <div className="flex items-center gap-2">
+                    <CircleDollarSign className="h-4 w-4 text-[var(--app-accent-color)]" />
+                    <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                      Nominal Upah
+                    </p>
+                  </div>
+                  <AppInput
+                    inputMode="decimal"
+                    min="0"
+                    onChange={(event) =>
+                      handleWageRateChange(rate.id, 'wageAmount', event.target.value)
+                    }
+                    placeholder="0"
+                    step="0.01"
+                    type="number"
+                    value={rate.wageAmount}
+                  />
+                </AppCard>
               </div>
-            </article>
+
+              <label className="inline-flex items-center gap-3 rounded-[20px] border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-4 py-3 text-sm font-medium text-[var(--app-text-color)]">
+                <input
+                  checked={rate.isDefault}
+                  className="h-4 w-4 rounded border-slate-300 text-[var(--app-accent-color)] focus:ring-[var(--app-accent-color)]"
+                  onChange={(event) =>
+                    handleWageRateChange(rate.id, 'isDefault', event.target.checked)
+                  }
+                  type="checkbox"
+                />
+                Jadikan default untuk kombinasi proyek-role ini
+              </label>
+            </AppCard>
           ))}
         </div>
-      </section>
+      </AppCard>
 
       {localError ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
-          {localError}
-        </div>
+        <AppErrorState
+          title="Form pekerja belum valid"
+          description={localError}
+        />
       ) : null}
 
       {hideActions ? null : (
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button
-            className="inline-flex items-center justify-center rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-[var(--app-text-color)]"
-            onClick={onCancel}
-            type="button"
-          >
+          <AppButton onClick={onCancel} type="button" variant="secondary">
             Batal
-          </button>
+          </AppButton>
 
-          <button
-            className="inline-flex items-center justify-center rounded-[20px] bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isSubmitting}
-            type="submit"
-          >
+          <AppButton disabled={isSubmitting} type="submit">
             {isSubmitting ? 'Menyimpan...' : 'Simpan Pekerja'}
-          </button>
+          </AppButton>
         </div>
       )}
     </form>

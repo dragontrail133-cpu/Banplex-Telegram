@@ -1,4 +1,7 @@
-import { ArrowLeft } from 'lucide-react'
+// eslint-disable-next-line no-unused-vars
+import { motion } from 'framer-motion'
+import FormHeader from './FormHeader'
+import { AppButton } from '../ui/AppPrimitives'
 
 function FormLayout({
   title,
@@ -10,41 +13,34 @@ function FormLayout({
   children,
 }) {
   return (
-    <div className="fixed left-0 top-0 z-[100] h-screen w-full bg-[var(--app-bg-color)]">
-      <div className="flex h-full w-full flex-col">
-        <header className="flex shrink-0 items-center border-b border-[var(--app-border-color)] bg-[var(--app-surface-color)] px-4 py-3">
-          <button
-            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[var(--app-border-color)] bg-transparent text-[var(--app-text-color)] transition hover:bg-black/5"
-            onClick={onBack}
-            type="button"
-            aria-label="Kembali"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </button>
+    <motion.div
+      initial={{ y: '100%', opacity: 0.8 }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={{ y: '100%', opacity: 0.8 }}
+      transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+      className="fixed inset-0 z-[100] flex flex-col bg-[var(--app-surface-strong-color)] sm:justify-end"
+    >
+      <div className="flex h-full w-full flex-col sm:mx-auto sm:h-[95vh] sm:max-w-md sm:rounded-t-[32px] sm:border sm:border-[var(--app-outline-soft)] sm:shadow-telegram">
+        <FormHeader onBack={onBack} title={title} />
 
-          <h1 className="min-w-0 flex-1 px-2 text-center text-base font-semibold text-[var(--app-text-color)]">
-            {title}
-          </h1>
-
-          <div className="h-11 w-11 shrink-0" aria-hidden="true" />
-        </header>
-
-        <div className="flex-1 overflow-y-auto p-4">{children}</div>
+        <div className="flex-1 overflow-y-auto px-4 py-4">{children}</div>
 
         {formId ? (
-          <footer className="shrink-0 border-t border-[var(--app-border-color)] bg-[var(--app-surface-color)] p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
-            <button
-              className="w-full rounded-2xl bg-[var(--app-button-color)] px-4 py-3 text-sm font-semibold text-[var(--app-button-text-color)] transition disabled:cursor-not-allowed disabled:opacity-60"
+          <footer className="shrink-0 bg-[color-mix(in_srgb,var(--app-surface-strong-color)_88%,transparent)] p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-[0_-1px_0_var(--app-outline-soft)] backdrop-blur-xl">
+            <AppButton
+              fullWidth
+              size="lg"
               disabled={submitDisabled || isSubmitting}
               form={formId}
               type="submit"
+              variant="primary"
             >
               {isSubmitting ? 'Menyimpan...' : actionLabel}
-            </button>
+            </AppButton>
           </footer>
         ) : null}
       </div>
-    </div>
+    </motion.div>
   )
 }
 

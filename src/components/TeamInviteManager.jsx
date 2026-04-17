@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Copy, Link2, RefreshCcw, Shield, UserX } from 'lucide-react'
 import ProtectedRoute from './ProtectedRoute'
+import ActionCard from './ui/ActionCard'
 import useAuthStore from '../store/useAuthStore'
 import useTeamStore, { inviteRoleOptions } from '../store/useTeamStore'
 
@@ -228,85 +229,53 @@ function TeamInviteManagerContent() {
                   member.role === 'Owner'
 
                 return (
-                  <article
+                  <ActionCard
                     key={member.id}
-                    className="rounded-[24px] border border-slate-200 bg-white/90 p-4 shadow-sm"
-                  >
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-white">
-                            {member.role === 'Owner' ? (
-                              <Shield className="h-5 w-5" />
-                            ) : (
-                              <span className="text-xs font-semibold">
-                                {member.role?.slice(0, 2) ?? 'TM'}
-                              </span>
-                            )}
+                    title={`Telegram ID ${member.telegram_user_id || '-'}`}
+                    subtitle={`Aktif sejak ${formatApprovedAt(member.approved_at)}`}
+                    badge={member.status}
+                    badges={[
+                      member.is_default ? 'Workspace utama' : '',
+                      isCurrentOwner ? 'Owner Bypass' : '',
+                    ].filter(Boolean)}
+                    details={[
+                      `Role saat ini: ${member.role || 'Viewer'}`,
+                      `Telegram: ${member.telegram_user_id || '-'}`,
+                    ]}
+                    leadingIcon={
+                      <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-white">
+                        {member.role === 'Owner' ? (
+                          <Shield className="h-5 w-5" />
+                        ) : (
+                          <span className="text-xs font-semibold">
+                            {member.role?.slice(0, 2) ?? 'TM'}
                           </span>
-                          <div>
-                            <p className="text-sm font-semibold text-[var(--app-text-color)]">
-                              Telegram ID {member.telegram_user_id || '-'}
-                            </p>
-                            <p className="text-sm text-[var(--app-hint-color)]">
-                              Aktif sejak {formatApprovedAt(member.approved_at)}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
-                          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-700">
-                            {member.status}
-                          </span>
-                          {member.is_default ? (
-                            <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 font-semibold text-sky-700">
-                              Workspace utama
-                            </span>
-                          ) : null}
-                          {isCurrentOwner ? (
-                            <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 font-semibold text-violet-700">
-                              Owner Bypass
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="grid gap-3 lg:min-w-[280px]">
-                        <label className="grid gap-2 text-sm font-medium text-[var(--app-text-color)]">
-                          Role aktif
-                          <select
-                            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-[var(--app-text-color)] outline-none transition focus:border-sky-400 disabled:cursor-not-allowed disabled:bg-slate-100"
-                            disabled={isLoading || isCurrentOwner}
-                            onChange={(event) => {
-                              void handleRoleChange(member.id, event.target.value)
-                            }}
-                            value={member.role || 'Viewer'}
-                          >
-                            {member.role === 'Owner' ? (
-                              <option value="Owner">Owner</option>
-                            ) : null}
-                            {inviteRoleOptions.map((role) => (
-                              <option key={role} value={role}>
-                                {role}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <button
-                          className="inline-flex items-center justify-center gap-2 rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                          disabled={isLoading || isCurrentOwner}
-                          onClick={() => {
-                            void handleSuspend(member.id)
-                          }}
-                          type="button"
-                        >
-                          <UserX className="h-4 w-4" />
-                          Suspend
-                        </button>
-                      </div>
-                    </div>
-                  </article>
+                        )}
+                      </span>
+                    }
+                    actions={[
+                      ...inviteRoleOptions
+                        .filter((role) => role !== member.role || role === 'Owner')
+                        .map((role) => ({
+                          id: `role-${role}`,
+                          label: role === member.role ? `Aktif: ${role}` : `Set ${role}`,
+                          disabled: isLoading || isCurrentOwner || role === member.role,
+                          onClick: () => {
+                            void handleRoleChange(member.id, role)
+                          },
+                        })),
+                      {
+                        id: 'suspend',
+                        label: 'Suspend',
+                        icon: <UserX className="h-3.5 w-3.5" />,
+                        destructive: true,
+                        disabled: isLoading || isCurrentOwner,
+                        onClick: () => {
+                          void handleSuspend(member.id)
+                        },
+                      },
+                    ]}
+                  />
                 )
               })
             ) : (

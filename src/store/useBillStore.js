@@ -40,9 +40,11 @@ function mapBillRow(bill) {
   return {
     id: bill?.id ?? null,
     expenseId: bill?.expense_id ?? null,
+    projectIncomeId: bill?.project_income_id ?? null,
     telegramUserId: bill?.telegram_user_id ?? null,
     teamId: bill?.team_id ?? null,
     supplierId: bill?.supplier_id ?? null,
+    staffId: bill?.staff_id ?? null,
     billType: bill?.bill_type ?? null,
     description: bill?.description ?? null,
     amount,
@@ -53,6 +55,7 @@ function mapBillRow(bill) {
     paidAt: bill?.paid_at ?? null,
     supplierName:
       supplier?.name ??
+      bill?.worker_name_snapshot ??
       bill?.supplier_name_snapshot ??
       'Supplier belum terhubung',
     projectName:
@@ -76,7 +79,7 @@ async function loadBillById(billId) {
   const { data, error } = await supabase
     .from('bills')
     .select(
-      'id, expense_id, telegram_user_id, team_id, supplier_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, supplier_name_snapshot, project_name_snapshot, suppliers:supplier_id ( id, name ), projects:project_id ( id, name )'
+      'id, expense_id, project_income_id, telegram_user_id, team_id, supplier_id, staff_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, worker_name_snapshot, supplier_name_snapshot, project_name_snapshot, suppliers:supplier_id ( id, name ), projects:project_id ( id, name )'
     )
     .eq('id', normalizedBillId)
     .is('deleted_at', null)
@@ -98,6 +101,21 @@ async function softDeleteBill(billId) {
 
   if (!normalizedBillId) {
     throw new Error('Bill ID tidak valid.')
+  }
+
+  const { data: payments, error: paymentsError } = await supabase
+    .from('bill_payments')
+    .select('id')
+    .eq('bill_id', normalizedBillId)
+    .is('deleted_at', null)
+    .limit(1)
+
+  if (paymentsError) {
+    throw paymentsError
+  }
+
+  if ((payments ?? []).length > 0) {
+    throw new Error('Tagihan yang sudah memiliki pembayaran tidak bisa dihapus.')
   }
 
   const { error } = await supabase
@@ -176,7 +194,7 @@ const useBillStore = create((set) => ({
       const { data, error } = await supabase
         .from('bills')
         .select(
-          'id, expense_id, telegram_user_id, team_id, supplier_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, supplier_name_snapshot, project_name_snapshot, suppliers:supplier_id ( id, name ), projects:project_id ( id, name )'
+          'id, expense_id, project_income_id, telegram_user_id, team_id, supplier_id, staff_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, worker_name_snapshot, supplier_name_snapshot, project_name_snapshot, suppliers:supplier_id ( id, name ), projects:project_id ( id, name )'
         )
         .is('deleted_at', null)
         .in('status', ['unpaid', 'partial'])

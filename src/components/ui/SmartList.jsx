@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { AppButton } from './AppPrimitives'
 
 function getItemKey(item, index, keyExtractor) {
   if (typeof keyExtractor === 'function') {
@@ -69,13 +70,16 @@ function SmartList({
       })}
       {canLoadMore ? (
         <div className={`pt-2 ${footerClassName}`}>
-          <button
-            className={`w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-[var(--app-text-color)] transition hover:bg-slate-50 ${loadMoreClassName}`}
+          <AppButton
+            className={`w-full ${loadMoreClassName}`}
             onClick={handleLoadMore}
+            fullWidth
+            size="lg"
             type="button"
+            variant="secondary"
           >
             {loadMoreLabel}
-          </button>
+          </AppButton>
         </div>
       ) : null}
     </ContainerTag>

@@ -39,12 +39,19 @@ function getTelegramUserId(user, authUser) {
   return normalizedValue.length > 0 ? normalizedValue : null
 }
 
-function createInitialFormData() {
+function createInitialFormData(initialData = null) {
   return {
-    projectId: '',
-    date: new Date().toISOString().slice(0, 10),
-    amount: '',
-    description: '',
+    projectId: initialData?.project_id ?? initialData?.projectId ?? '',
+    date:
+      initialData?.transaction_date ??
+      initialData?.transactionDate ??
+      initialData?.date ??
+      new Date().toISOString().slice(0, 10),
+    amount:
+      initialData?.amount === 0 || initialData?.amount
+        ? String(initialData.amount)
+        : '',
+    description: initialData?.description ?? '',
   }
 }
 
@@ -97,8 +104,8 @@ function buildStaffFeePreview(staffMembers = [], terminAmount = 0) {
   })
 }
 
-function IncomeForm({ onSuccess }) {
-  const [formData, setFormData] = useState(createInitialFormData)
+function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
+  const [formData, setFormData] = useState(() => createInitialFormData(initialData))
   const [successMessage, setSuccessMessage] = useState(null)
   const { user } = useTelegram()
   const authUser = useAuthStore((state) => state.user)
@@ -108,9 +115,11 @@ function IncomeForm({ onSuccess }) {
   const masterError = useMasterStore((state) => state.error)
   const fetchMasters = useMasterStore((state) => state.fetchMasters)
   const addProjectIncome = useIncomeStore((state) => state.addProjectIncome)
+  const updateProjectIncome = useIncomeStore((state) => state.updateProjectIncome)
   const isSubmitting = useIncomeStore((state) => state.isSubmitting)
   const error = useIncomeStore((state) => state.error)
   const clearError = useIncomeStore((state) => state.clearError)
+  const isEditMode = Boolean(recordId)
   const telegramUserId = getTelegramUserId(user, authUser)
   const userName = getUserDisplayName(user, authUser)
   const selectedProject = projects.find((project) => project.id === formData.projectId)
@@ -156,7 +165,7 @@ function IncomeForm({ onSuccess }) {
     }
 
     try {
-      await addProjectIncome({
+      const payload = {
         telegram_user_id: telegramUserId,
         userName,
         project_id: formData.projectId,
@@ -164,7 +173,13 @@ function IncomeForm({ onSuccess }) {
         transaction_date: formData.date,
         amount: formData.amount,
         description: formData.description,
-      })
+      }
+
+      if (isEditMode) {
+        await updateProjectIncome(recordId, payload)
+      } else {
+        await addProjectIncome(payload)
+      }
 
       try {
         await onSuccess?.()
@@ -172,8 +187,15 @@ function IncomeForm({ onSuccess }) {
         console.error('Gagal memperbarui ringkasan setelah termin proyek:', refreshError)
       }
 
-      setFormData(createInitialFormData())
-      setSuccessMessage('Termin proyek berhasil disimpan.')
+      if (!isEditMode) {
+        setFormData(createInitialFormData())
+      }
+
+      setSuccessMessage(
+        isEditMode
+          ? 'Pemasukan proyek berhasil diperbarui.'
+          : 'Termin proyek berhasil disimpan.'
+      )
     } catch (submitError) {
       const message =
         submitError instanceof Error
@@ -191,9 +213,6 @@ function IncomeForm({ onSuccess }) {
           <div className="space-y-1">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
               Pemasukan Proyek
-            </p>
-            <p className="text-sm text-[var(--app-hint-color)]">
-              Catat termin proyek agar kas masuk ikut terhitung di saldo akhir.
             </p>
           </div>
 
@@ -348,11 +367,15 @@ function IncomeForm({ onSuccess }) {
         ) : null}
 
         <button
-          className="flex w-full items-center justify-center rounded-[22px] bg-slate-950 px-5 py-4 text-base font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex w-full items-center justify-center rounded-[22px] bg-slate-950 px-5 py-4 text-base font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
           disabled={isSubmitting || !isMasterDataReady}
           type="submit"
         >
-          {isSubmitting ? 'Menyimpan...' : 'Simpan Termin Proyek'}
+          {isSubmitting
+            ? 'Menyimpan...'
+            : isEditMode
+              ? 'Perbarui Pemasukan Proyek'
+              : 'Simpan Termin Proyek'}
         </button>
       </fieldset>
     </form>

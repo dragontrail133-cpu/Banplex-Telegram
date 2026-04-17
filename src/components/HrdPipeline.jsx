@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { EyeOff, Plus, RefreshCcw, Trash2, Users } from 'lucide-react'
+import { AppSheet } from './ui/AppPrimitives'
 import useHrStore, { applicantStatusOptions } from '../store/useHrStore'
 
 function normalizeText(value, fallback = '') {
@@ -77,13 +78,21 @@ function HrdPipeline() {
     })
   }, [fetchApplicants])
 
-  useEffect(() => {
-    if (!isModalOpen) {
-      setFormData(createInitialFormData())
-      setLocalError(null)
-      clearError()
-    }
-  }, [clearError, isModalOpen])
+  const resetModalState = () => {
+    setFormData(createInitialFormData())
+    setLocalError(null)
+    clearError()
+  }
+
+  const openCreateModal = () => {
+    resetModalState()
+    setIsModalOpen(true)
+  }
+
+  const handleCloseModal = () => {
+    resetModalState()
+    setIsModalOpen(false)
+  }
 
   const groupedApplicants = useMemo(
     () =>
@@ -158,8 +167,7 @@ function HrdPipeline() {
 
       await fetchApplicants({ force: true })
 
-      setIsModalOpen(false)
-      setFormData(createInitialFormData())
+      handleCloseModal()
     } catch (submitError) {
       const message =
         submitError instanceof Error
@@ -203,7 +211,7 @@ function HrdPipeline() {
 
           <button
             className="inline-flex items-center justify-center gap-2 rounded-[20px] bg-gradient-to-r from-sky-600 via-cyan-500 to-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-500/20 transition active:scale-[0.99]"
-            onClick={() => setIsModalOpen(true)}
+            onClick={openCreateModal}
             type="button"
           >
             <Plus className="h-4 w-4" />
@@ -374,32 +382,12 @@ function HrdPipeline() {
       )}
 
       {isModalOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 px-3 py-4 sm:items-center"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              setIsModalOpen(false)
-            }
-          }}
+        <AppSheet
+          open={isModalOpen}
+          onClose={handleCloseModal}
+          title="Tambah Pelamar Baru"
         >
-          <div className="w-full max-w-xl overflow-hidden rounded-[28px] border border-white/60 bg-[var(--app-surface-color)] shadow-telegram backdrop-blur-xl">
-            <div className="border-b border-white/70 px-5 py-5">
-              <p className="text-sm font-medium uppercase tracking-[0.22em] text-[var(--app-accent-color)]">
-                HRD Pipeline
-              </p>
-              <h3 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
-                Tambah Pelamar Baru
-              </h3>
-              <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">
-                Gunakan form ini untuk memasukkan data kandidat dan file CV/KTP.
-              </p>
-            </div>
-
-            <form
-              className="space-y-5 px-5 py-5"
-              encType="multipart/form-data"
-              onSubmit={handleSubmit}
-            >
+          <form className="space-y-5" encType="multipart/form-data" onSubmit={handleSubmit}>
               <label className="block space-y-2">
                 <span className="text-sm font-semibold text-[var(--app-text-color)]">
                   Nama
@@ -502,7 +490,7 @@ function HrdPipeline() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <button
                   className="inline-flex items-center justify-center rounded-[22px] border border-slate-200 bg-white/85 px-5 py-4 text-base font-semibold text-[var(--app-text-color)] transition hover:bg-white"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={handleCloseModal}
                   type="button"
                 >
                   Batal
@@ -516,9 +504,8 @@ function HrdPipeline() {
                   {isSubmitting ? 'Menyimpan...' : 'Simpan Pelamar'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </AppSheet>
       ) : null}
     </section>
   )
