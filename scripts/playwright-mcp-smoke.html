@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Playwright MCP Smoke</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        margin: 24px;
+        line-height: 1.4;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin: 12px 0;
+      }
+      input {
+        padding: 8px 10px;
+        border: 1px solid #cfd6e4;
+        border-radius: 8px;
+        min-width: 280px;
+      }
+      button {
+        padding: 8px 12px;
+        border: 1px solid #cfd6e4;
+        border-radius: 8px;
+        background: #fff;
+        cursor: pointer;
+      }
+      button:active {
+        transform: translateY(1px);
+      }
+      #status {
+        padding: 8px 10px;
+        border: 1px dashed #cfd6e4;
+        border-radius: 8px;
+        background: #f7f9ff;
+      }
+      .muted {
+        color: #586174;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Playwright MCP Smoke</h1>
+    <p class="muted">Local test page for MCP-driven browser automation.</p>
+
+    <div class="row">
+      <label for="name">Name</label>
+      <input id="name" name="name" placeholder="Type your name" />
+      <button id="helloBtn" type="button">Say hello</button>
+    </div>
+
+    <div class="row">
+      <button id="toggleBtn" type="button" aria-pressed="false">Toggle</button>
+      <span id="toggleState">OFF</span>
+    </div>
+
+    <div id="status" role="status">Ready</div>
+
+    <script>
+      const statusEl = document.getElementById('status')
+      const nameEl = document.getElementById('name')
+      const helloBtn = document.getElementById('helloBtn')
+      const toggleBtn = document.getElementById('toggleBtn')
+      const toggleState = document.getElementById('toggleState')
+
+      helloBtn.addEventListener('click', () => {
+        const name = String(nameEl.value || '').trim()
+        statusEl.textContent = name ? `Hello, ${name}!` : 'Hello!'
+      })
+
+      toggleBtn.addEventListener('click', () => {
+        const next = toggleBtn.getAttribute('aria-pressed') !== 'true'
+        toggleBtn.setAttribute('aria-pressed', String(next))
+        toggleState.textContent = next ? 'ON' : 'OFF'
+        statusEl.textContent = `Toggled: ${next ? 'ON' : 'OFF'}`
+      })
+    </script>
+  </body>
+</html>
+

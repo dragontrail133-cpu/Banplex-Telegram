@@ -11,6 +11,48 @@ const inviteRoleOptions = [
   'Viewer',
 ]
 
+function getMemberStatusLabel(status) {
+  const normalizedStatus = normalizeText(status, 'active')
+
+  if (normalizedStatus === 'active') {
+    return 'Aktif'
+  }
+
+  if (normalizedStatus === 'suspended') {
+    return 'Ditangguhkan'
+  }
+
+  return normalizedStatus
+}
+
+function getInviteLifecycleStatus(invite) {
+  if (invite?.is_used) {
+    return 'used'
+  }
+
+  const expiresAt = invite?.expires_at ? new Date(invite.expires_at) : null
+
+  if (expiresAt && !Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() < Date.now()) {
+    return 'expired'
+  }
+
+  return 'active'
+}
+
+function getInviteLifecycleLabel(invite) {
+  const lifecycleStatus = getInviteLifecycleStatus(invite)
+
+  if (lifecycleStatus === 'used') {
+    return 'Dipakai'
+  }
+
+  if (lifecycleStatus === 'expired') {
+    return 'Kedaluwarsa'
+  }
+
+  return 'Aktif'
+}
+
 function normalizeText(value, fallback = null) {
   const normalizedValue = String(value ?? '').trim()
 
@@ -57,14 +99,36 @@ function buildInviteLink(token) {
 }
 
 function mapTeamMember(member) {
+  const team = Array.isArray(member?.teams)
+    ? member.teams[0] ?? null
+    : member?.teams ?? null
+
   return {
     id: member?.id ?? null,
     team_id: normalizeText(member?.team_id, null),
     telegram_user_id: normalizeText(member?.telegram_user_id, null),
     role: normalizeRole(member?.role),
     status: normalizeText(member?.status, 'active'),
+    status_label: getMemberStatusLabel(member?.status),
     approved_at: normalizeText(member?.approved_at, null),
     is_default: Boolean(member?.is_default),
+    team_name: normalizeText(team?.name, null),
+    team_slug: normalizeText(team?.slug, null),
+    team_is_active: team?.is_active !== false,
+  }
+}
+
+function mapInviteToken(invite) {
+  return {
+    id: invite?.id ?? null,
+    team_id: normalizeText(invite?.team_id, null),
+    token: normalizeText(invite?.token, null),
+    role: normalizeRole(invite?.role),
+    expires_at: normalizeText(invite?.expires_at, null),
+    is_used: Boolean(invite?.is_used),
+    created_at: normalizeText(invite?.created_at, null),
+    lifecycle_status: getInviteLifecycleStatus(invite),
+    lifecycle_status_label: getInviteLifecycleLabel(invite),
   }
 }
 
@@ -79,7 +143,9 @@ async function loadActiveTeam(teamId) {
 
   const { data, error } = await supabase
     .from('team_members')
-    .select('id, team_id, telegram_user_id, role, status, approved_at, is_default')
+    .select(
+      'id, team_id, telegram_user_id, role, status, approved_at, is_default, teams:team_id ( id, name, slug, is_active )'
+    )
     .eq('team_id', teamId)
     .eq('status', 'active')
     .order('is_default', { ascending: false })
@@ -90,10 +156,36 @@ async function loadActiveTeam(teamId) {
     throw error
   }
 
-  return (data ?? []).map(mapTeamMember)
+  return (data ?? [])
+    .map(mapTeamMember)
+    .filter((member) => member.team_is_active !== false)
 }
 
-const useTeamStore = create((set) => ({
+async function loadLatestInvite(teamId) {
+  if (!supabase) {
+    throw new Error('Client Supabase belum dikonfigurasi.')
+  }
+
+  if (!teamId) {
+    return null
+  }
+
+  const { data, error } = await supabase
+    .from('invite_tokens')
+    .select('id, team_id, token, role, expires_at, is_used, created_at')
+    .eq('team_id', teamId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  return data ? mapInviteToken(data) : null
+}
+
+const useTeamStore = create((set, get) => ({
   activeTeam: [],
   latestInvite: null,
   isLoading: false,
@@ -104,10 +196,15 @@ const useTeamStore = create((set) => ({
 
     try {
       const teamId = resolveTeamId()
-      const activeTeam = await loadActiveTeam(teamId)
+      const previousLatestInvite = get().latestInvite
+      const [activeTeam, latestInvite] = await Promise.all([
+        loadActiveTeam(teamId),
+        loadLatestInvite(teamId).catch(() => previousLatestInvite),
+      ])
 
       set({
         activeTeam,
+        latestInvite,
         isLoading: false,
         error: null,
       })
@@ -165,7 +262,7 @@ const useTeamStore = create((set) => ({
       }
 
       const nextInvite = {
-        ...data,
+        ...mapInviteToken(data),
         invite_link: buildInviteLink(token),
       }
 

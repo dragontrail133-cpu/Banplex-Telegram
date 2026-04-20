@@ -1,21 +1,8 @@
 import { create } from 'zustand'
-import { supabase } from '../lib/supabase'
-
-function normalizeText(value, fallback = null) {
-  const normalizedValue = String(value ?? '').trim()
-
-  return normalizedValue.length > 0 ? normalizedValue : fallback
-}
-
-function normalizeProjectType(value) {
-  return String(value ?? '').trim().toLowerCase() === 'internal' ? 'Internal' : 'Utama'
-}
-
-function toNumber(value) {
-  const parsedValue = Number(value)
-
-  return Number.isFinite(parsedValue) ? parsedValue : 0
-}
+import {
+  fetchProjectDetailFromApi,
+  fetchProjectSummariesFromApi,
+} from '../lib/reports-api'
 
 function toError(error, fallbackMessage) {
   const message =
@@ -26,162 +13,16 @@ function toError(error, fallbackMessage) {
   return error instanceof Error ? error : new Error(message)
 }
 
-function normalizeSummaryRow(row) {
-  return {
-    ...row,
-    project_type: normalizeProjectType(row?.project_type),
-    total_income: toNumber(row?.total_income),
-    material_expense: toNumber(row?.material_expense),
-    operating_expense: toNumber(row?.operating_expense),
-    salary_expense: toNumber(row?.salary_expense),
-    gross_profit: toNumber(row?.gross_profit),
-    net_profit: toNumber(row?.net_profit),
-    net_profit_project: toNumber(row?.net_profit_project ?? row?.net_profit),
-    company_overhead: toNumber(row?.company_overhead),
-    project_status: normalizeText(row?.project_status, 'inactive'),
-  }
-}
-
-function normalizeIncomeRow(row) {
-  return {
-    ...row,
-    amount: toNumber(row?.amount),
-  }
-}
-
-function normalizeExpenseRow(row) {
-  return {
-    ...row,
-    total_amount: toNumber(row?.total_amount),
-  }
-}
-
-function normalizeSalaryRow(row) {
-  return {
-    ...row,
-    total_pay: toNumber(row?.total_pay),
-  }
-}
-
-function combineSummaryRows(rows = []) {
-  if (rows.length === 0) {
-    return null
-  }
-
-  const firstRow = rows[0]
-
-  return normalizeSummaryRow({
-    ...firstRow,
-    total_income: rows.reduce((sum, row) => sum + toNumber(row.total_income), 0),
-    material_expense: rows.reduce((sum, row) => sum + toNumber(row.material_expense), 0),
-    operating_expense: rows.reduce((sum, row) => sum + toNumber(row.operating_expense), 0),
-    salary_expense: rows.reduce((sum, row) => sum + toNumber(row.salary_expense), 0),
-    gross_profit: rows.reduce((sum, row) => sum + toNumber(row.gross_profit), 0),
-    net_profit: rows.reduce((sum, row) => sum + toNumber(row.net_profit), 0),
-    net_profit_project: rows.reduce((sum, row) => sum + toNumber(row.net_profit_project ?? row.net_profit), 0),
-    company_overhead: rows.reduce((sum, row) => sum + toNumber(row.company_overhead), 0),
-  })
-}
-
 function createPortfolioSummary(rows = []) {
-  const totalProjectProfit = rows.reduce(
-    (sum, row) => sum + toNumber(row.net_profit_project ?? row.net_profit),
-    0
-  )
-  const totalCompanyOverhead = rows.reduce((sum, row) => sum + toNumber(row.company_overhead), 0)
-
   return {
-    total_project_profit: totalProjectProfit,
-    total_company_overhead: totalCompanyOverhead,
-    net_consolidated_profit: totalProjectProfit - totalCompanyOverhead,
-  }
-}
-
-async function loadProjectSummaries() {
-  if (!supabase) {
-    throw new Error('Client Supabase belum dikonfigurasi.')
-  }
-
-  const { data, error } = await supabase
-    .from('vw_project_financial_summary')
-    .select(
-      'project_id, team_id, project_name, project_type, project_status, total_income, material_expense, operating_expense, salary_expense, gross_profit, net_profit, net_profit_project, company_overhead'
-    )
-    .order('project_name', { ascending: true })
-
-  if (error) {
-    throw error
-  }
-
-  return (data ?? []).map(normalizeSummaryRow)
-}
-
-async function loadProjectDetail(projectId) {
-  if (!supabase) {
-    throw new Error('Client Supabase belum dikonfigurasi.')
-  }
-
-  const normalizedProjectId = normalizeText(projectId)
-
-  if (!normalizedProjectId) {
-    throw new Error('Project ID wajib diisi.')
-  }
-
-  const [
-    summariesResult,
-    incomesResult,
-    expensesResult,
-    salariesResult,
-  ] = await Promise.all([
-    supabase
-      .from('vw_project_financial_summary')
-      .select(
-        'project_id, team_id, project_name, project_type, project_status, total_income, material_expense, operating_expense, salary_expense, gross_profit, net_profit, net_profit_project, company_overhead'
-      )
-      .eq('project_id', normalizedProjectId),
-    supabase
-      .from('project_incomes')
-      .select('id, project_id, team_id, transaction_date, amount, description, created_at')
-      .eq('project_id', normalizedProjectId)
-      .is('deleted_at', null)
-      .order('transaction_date', { ascending: false }),
-    supabase
-      .from('expenses')
-      .select(
-        'id, project_id, team_id, expense_date, expense_type, status, total_amount, description, created_at'
-      )
-      .eq('project_id', normalizedProjectId)
-      .is('deleted_at', null)
-      .order('expense_date', { ascending: false }),
-    supabase
-      .from('attendance_records')
-      .select(
-        'id, project_id, team_id, worker_id, attendance_date, attendance_status, total_pay, billing_status, salary_bill_id, notes, created_at, workers:worker_id ( id, name ), bills:salary_bill_id ( id, bill_type, amount, due_date, status, description )'
-      )
-      .eq('project_id', normalizedProjectId)
-      .is('deleted_at', null)
-      .eq('billing_status', 'billed')
-      .order('attendance_date', { ascending: false }),
-  ])
-
-  const [summaries, incomes, expenses, salaries] = [
-    summariesResult,
-    incomesResult,
-    expensesResult,
-    salariesResult,
-  ].map((result) => {
-    if (result.error) {
-      throw result.error
-    }
-
-    return result.data ?? []
-  })
-
-  return {
-    summary: combineSummaryRows(summaries),
-    incomes: incomes.map(normalizeIncomeRow),
-    expenses: expenses.map(normalizeExpenseRow),
-    salaries: salaries.map(normalizeSalaryRow),
+    total_income: rows.total_income ?? 0,
+    total_material_expense: rows.total_material_expense ?? 0,
+    total_operating_expense: rows.total_operating_expense ?? 0,
+    total_salary_expense: rows.total_salary_expense ?? 0,
+    total_expense: rows.total_expense ?? 0,
+    total_project_profit: rows.total_project_profit ?? 0,
+    total_company_overhead: rows.total_company_overhead ?? 0,
+    net_consolidated_profit: rows.net_consolidated_profit ?? 0,
   }
 }
 
@@ -205,11 +46,12 @@ const useReportStore = create((set, get) => ({
     set({ isLoading: true, error: null })
 
     try {
-      const nextSummaries = await loadProjectSummaries()
+      const { projectSummaries: nextSummaries, portfolioSummary } =
+        await fetchProjectSummariesFromApi()
 
       set({
         projectSummaries: nextSummaries,
-        portfolioSummary: createPortfolioSummary(nextSummaries),
+        portfolioSummary,
         isLoading: false,
         error: null,
         lastUpdatedAt: new Date().toISOString(),
@@ -233,7 +75,7 @@ const useReportStore = create((set, get) => ({
     set({ isDetailLoading: true, detailError: null })
 
     try {
-      const detail = await loadProjectDetail(projectId)
+      const detail = await fetchProjectDetailFromApi(projectId)
 
       set({
         selectedProjectDetail: detail,

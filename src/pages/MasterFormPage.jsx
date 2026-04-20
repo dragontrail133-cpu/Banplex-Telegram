@@ -175,7 +175,7 @@ function MasterFormPage() {
 
   if (!tabConfig) {
     return (
-      <ProtectedRoute allowedRoles={['Owner', 'Admin']} description="Master form tidak tersedia.">
+      <ProtectedRoute requiredCapability="master_data_admin" description="Master form tidak tersedia.">
         <section className="app-page-surface px-4 py-4">
           <AppErrorState
             title="Form master tidak ditemukan"
@@ -188,7 +188,7 @@ function MasterFormPage() {
 
   return (
     <ProtectedRoute
-      allowedRoles={['Owner', 'Admin']}
+      requiredCapability="master_data_admin"
       description="Form master hanya tersedia untuk Owner dan Admin."
     >
       <FormLayout
@@ -200,7 +200,7 @@ function MasterFormPage() {
         title={`${isEditMode ? 'Edit' : 'Tambah'} ${tabConfig.label}`}
       >
         <div className="space-y-4">
-          <AppCardStrong className="space-y-4 p-4">
+          <AppCardStrong className="space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 space-y-2">
                 <AppBadge tone="info" icon={isEditMode ? FilePenLine : BadgePlus}>

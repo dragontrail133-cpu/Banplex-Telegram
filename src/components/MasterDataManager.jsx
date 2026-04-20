@@ -36,6 +36,7 @@ function MasterDataManager() {
   const professions = useMasterStore((state) => state.professions)
   const workers = useMasterStore((state) => state.workers)
   const workerWageRates = useMasterStore((state) => state.workerWageRates)
+  const materials = useMasterStore((state) => state.materials)
   const staffMembers = useMasterStore((state) => state.staffMembers)
   const fetchProjects = useMasterStore((state) => state.fetchProjects)
   const fetchExpenseCategories = useMasterStore(
@@ -48,6 +49,7 @@ function MasterDataManager() {
   const fetchProfessions = useMasterStore((state) => state.fetchProfessions)
   const fetchWorkers = useMasterStore((state) => state.fetchWorkers)
   const fetchWorkerWageRates = useMasterStore((state) => state.fetchWorkerWageRates)
+  const fetchMaterials = useMasterStore((state) => state.fetchMaterials)
   const fetchStaff = useMasterStore((state) => state.fetchStaff)
   const isLoading = useMasterStore((state) => state.isLoading)
   const error = useMasterStore((state) => state.error)
@@ -63,6 +65,7 @@ function MasterDataManager() {
       fetchProfessions(),
       fetchWorkers(),
       fetchWorkerWageRates(),
+      fetchMaterials(),
       fetchStaff(),
     ]).catch((masterError) => {
       console.error('Gagal memuat master data universal:', masterError)
@@ -70,6 +73,7 @@ function MasterDataManager() {
   }, [
     fetchExpenseCategories,
     fetchFundingCreditors,
+    fetchMaterials,
     fetchProfessions,
     fetchProjects,
     fetchStaff,
@@ -86,17 +90,28 @@ function MasterDataManager() {
       fundingCreditors,
       professions,
       workers,
+      materials,
       staffMembers,
     }),
     [
       categories,
       fundingCreditors,
+      materials,
       professions,
       projects,
       staffMembers,
       suppliers,
       workers,
     ]
+  )
+
+  const projectsById = useMemo(
+    () =>
+      projects.reduce((map, project) => {
+        map[project.id] = project
+        return map
+      }, {}),
+    [projects]
   )
 
   const professionMap = useMemo(
@@ -106,6 +121,90 @@ function MasterDataManager() {
         return map
       }, {}),
     [professions]
+  )
+
+  const projectWageRateUsageById = useMemo(
+    () =>
+      workerWageRates.reduce((map, rate) => {
+        if (!rate.project_id) {
+          return map
+        }
+
+        map[rate.project_id] = (map[rate.project_id] ?? 0) + 1
+        return map
+      }, {}),
+    [workerWageRates]
+  )
+
+  const projectWorkerUsageById = useMemo(
+    () =>
+      workers.reduce((map, worker) => {
+        if (!worker.default_project_id) {
+          return map
+        }
+
+        map[worker.default_project_id] = (map[worker.default_project_id] ?? 0) + 1
+        return map
+      }, {}),
+    [workers]
+  )
+
+  const categoryUsageById = useMemo(
+    () =>
+      materials.reduce((map, material) => {
+        if (!material.category_id) {
+          return map
+        }
+
+        map[material.category_id] = (map[material.category_id] ?? 0) + 1
+        return map
+      }, {}),
+    [materials]
+  )
+
+  const professionUsageById = useMemo(
+    () =>
+      workers.reduce((map, worker) => {
+        if (!worker.profession_id) {
+          return map
+        }
+
+        map[worker.profession_id] = (map[worker.profession_id] ?? 0) + 1
+        return map
+      }, {}),
+    [workers]
+  )
+
+  const workerRateUsageById = useMemo(
+    () =>
+      workerWageRates.reduce((map, rate) => {
+        if (!rate.worker_id) {
+          return map
+        }
+
+        map[rate.worker_id] = (map[rate.worker_id] ?? 0) + 1
+        return map
+      }, {}),
+    [workerWageRates]
+  )
+
+  const masterUsageContext = useMemo(
+    () => ({
+      projectsById,
+      projectWageRateUsageById,
+      projectWorkerUsageById,
+      categoryUsageById,
+      professionUsageById,
+      workerRateUsageById,
+    }),
+    [
+      categoryUsageById,
+      professionUsageById,
+      projectsById,
+      projectWageRateUsageById,
+      projectWorkerUsageById,
+      workerRateUsageById,
+    ]
   )
 
   const workerRatesByWorkerId = useMemo(
@@ -135,17 +234,24 @@ function MasterDataManager() {
   }
 
   const handleDelete = async (record) => {
+    const action = useMasterStore.getState()[currentConfig.deleteAction]
+
+    if (typeof action !== 'function') {
+      return
+    }
+
+    const deleteGuard = currentConfig.getDeleteGuard?.(record, masterUsageContext)
+
+    if (deleteGuard?.blocked) {
+      setFeedbackMessage(deleteGuard.reason)
+      return
+    }
+
     const confirmed = window.confirm(
       `Yakin ingin menghapus ${currentConfig.label.toLowerCase()} ini?`
     )
 
     if (!confirmed) {
-      return
-    }
-
-    const action = useMasterStore.getState()[currentConfig.deleteAction]
-
-    if (typeof action !== 'function') {
       return
     }
 
@@ -166,7 +272,7 @@ function MasterDataManager() {
   if (!currentTeamId) {
     return (
       <ProtectedRoute
-        allowedRoles={['Owner', 'Admin']}
+        requiredCapability="master_data_admin"
         description="Master data hanya tersedia untuk Owner dan Admin."
       >
         <AppCard className="app-tone-warning space-y-3">
@@ -185,11 +291,11 @@ function MasterDataManager() {
 
   return (
     <ProtectedRoute
-      allowedRoles={['Owner', 'Admin']}
+      requiredCapability="master_data_admin"
       description="Master data universal hanya tersedia untuk Owner dan Admin."
     >
       <section className="space-y-4">
-        <AppCardStrong className="space-y-4 p-4 sm:p-5">
+        <AppCardStrong className="space-y-4 sm:p-5">
           <SectionHeader
             eyebrow="Master Data Manager"
             action={
@@ -230,7 +336,7 @@ function MasterDataManager() {
           </div>
         </AppCardStrong>
 
-        <AppCardStrong className="space-y-4 p-4 sm:p-5">
+        <AppCardStrong className="space-y-4 sm:p-5">
           <SectionHeader
             eyebrow={currentConfig.label}
             title={currentConfig.description}
@@ -246,7 +352,13 @@ function MasterDataManager() {
           />
 
           {feedbackMessage ? (
-            <AppCard className="app-tone-success p-4">
+            <AppCard
+              className={`p-4 ${
+                feedbackMessage.toLowerCase().includes('dipakai')
+                  ? 'app-tone-warning'
+                  : 'app-tone-success'
+              }`}
+            >
               <p className="text-sm leading-6">{feedbackMessage}</p>
             </AppCard>
           ) : null}
@@ -278,6 +390,16 @@ function MasterDataManager() {
                   currentConfig.key === 'workers'
                     ? renderWorkerDescription(record)
                     : currentConfig.getDescription?.(record)
+                const detailLines =
+                  currentConfig.getDetails?.(record, masterUsageContext) ?? []
+                const deleteGuard = currentConfig.getDeleteGuard?.(record, masterUsageContext)
+                const workerDetailLines =
+                  currentConfig.key === 'workers'
+                    ? workerRates.map(
+                        (rate) =>
+                          `${rate.project_name || 'Proyek'} | ${rate.role_name} | ${formatCurrency(rate.wage_amount)}`
+                      )
+                    : []
 
                 return (
                   <ActionCard
@@ -290,10 +412,7 @@ function MasterDataManager() {
                     }
                     badge={primaryBadge}
                     badges={hiddenBadges}
-                    details={workerRates.map(
-                      (rate) =>
-                        `${rate.project_name || 'Proyek'} | ${rate.role_name} | ${formatCurrency(rate.wage_amount)}`
-                    )}
+                    details={[...detailLines, ...workerDetailLines]}
                     className="bg-[var(--app-surface-strong-color)] px-4 py-4"
                     leadingIcon={
                       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
@@ -314,6 +433,8 @@ function MasterDataManager() {
                         id: 'delete',
                         label: 'Hapus',
                         destructive: true,
+                        disabled: Boolean(deleteGuard?.blocked),
+                        meta: deleteGuard?.label ?? null,
                         onClick: async () => {
                           try {
                             await handleDelete(record)

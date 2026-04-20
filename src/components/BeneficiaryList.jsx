@@ -1,7 +1,18 @@
 import { useEffect, useState } from 'react'
 import { Plus, RefreshCcw } from 'lucide-react'
 import ActionCard from './ui/ActionCard'
-import { AppButton, AppInput, AppSelect, AppSheet, AppTextarea } from './ui/AppPrimitives'
+import {
+  AppButton,
+  AppCardDashed,
+  AppCardStrong,
+  AppInput,
+  AppSelect,
+  AppSheet,
+  AppWrapToggleGroup,
+  AppTextarea,
+  PageSection,
+} from './ui/AppPrimitives'
+import { formatAppDateLabel } from '../lib/date-time'
 import useHrStore, { beneficiaryStatusOptions } from '../store/useHrStore'
 
 function normalizeText(value, fallback = '') {
@@ -11,23 +22,7 @@ function normalizeText(value, fallback = '') {
 }
 
 function formatDate(value) {
-  const normalizedValue = String(value ?? '').trim()
-
-  if (!normalizedValue) {
-    return '-'
-  }
-
-  const parsedDate = new Date(`${normalizedValue}T00:00:00`)
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return normalizedValue
-  }
-
-  return new Intl.DateTimeFormat('id-ID', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(parsedDate)
+  return formatAppDateLabel(value)
 }
 
 function createInitialFormData() {
@@ -155,59 +150,49 @@ function BeneficiaryList() {
   }
 
   return (
-    <section className="space-y-6 rounded-[28px] border border-white/70 bg-white/75 p-4 shadow-sm backdrop-blur sm:p-5">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-2">
-          <p className="text-sm font-medium uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
-            Data Penerima Manfaat
-          </p>
-          <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
-            Daftar penerima manfaat
-          </h2>
-          <p className="max-w-2xl text-sm leading-6 text-[var(--app-hint-color)]">
-            Kelola data penerima manfaat secara sederhana dengan tabel, tambah,
-            edit, dan hapus langsung dari modal ini.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-3">
-          <button
-            className="inline-flex items-center justify-center gap-2 rounded-[20px] border border-slate-200 bg-white/90 px-4 py-3 text-sm font-semibold text-[var(--app-text-color)] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+    <PageSection
+      eyebrow="Data Penerima Manfaat"
+      title="Daftar penerima manfaat"
+      description="Kelola data penerima manfaat secara sederhana dengan tabel, tambah, edit, dan hapus langsung dari modal ini."
+      action={
+        <div className="flex flex-wrap justify-end gap-3">
+          <AppButton
             disabled={isLoading}
             onClick={() => {
               void fetchBeneficiaries({ force: true }).catch((fetchError) => {
                 console.error('Gagal memuat ulang penerima manfaat:', fetchError)
               })
             }}
+            variant="secondary"
             type="button"
           >
             <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
-          </button>
+          </AppButton>
 
-          <button
-            className="inline-flex items-center justify-center gap-2 rounded-[20px] bg-gradient-to-r from-sky-600 via-cyan-500 to-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-500/20 transition active:scale-[0.99]"
+          <AppButton
             onClick={openCreateModal}
+            leadingIcon={<Plus className="h-4 w-4" />}
             type="button"
           >
-            <Plus className="h-4 w-4" />
             Tambah Data
-          </button>
+          </AppButton>
         </div>
-      </div>
+      }
+    >
 
       {error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+        <AppCardDashed className="app-tone-danger text-sm leading-6 text-rose-700">
           {error}
-        </div>
+        </AppCardDashed>
       ) : null}
 
       {isLoading && beneficiaries.length === 0 ? (
-        <div className="rounded-3xl border border-slate-200 bg-white/80 px-4 py-5 text-sm text-[var(--app-hint-color)]">
+        <AppCardDashed className="px-4 py-5 text-sm text-[var(--app-hint-color)]">
           Memuat data penerima manfaat...
-        </div>
+        </AppCardDashed>
       ) : beneficiaries.length > 0 ? (
-        <div className="space-y-3">
+        <AppCardStrong padded={false} className="overflow-hidden">
           {beneficiaries.map((beneficiary) => (
             <ActionCard
               key={beneficiary.id}
@@ -238,11 +223,11 @@ function BeneficiaryList() {
               ]}
             />
           ))}
-        </div>
+        </AppCardStrong>
       ) : (
-        <div className="rounded-3xl border border-dashed border-slate-200 bg-white/70 px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
+        <AppCardDashed className="px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
           Belum ada data penerima manfaat. Tambahkan data pertama untuk memulai.
-        </div>
+        </AppCardDashed>
       )}
 
       {isModalOpen ? (
@@ -295,22 +280,21 @@ function BeneficiaryList() {
               </label>
             </div>
 
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                Status
-              </span>
-              <AppSelect
-                name="status"
-                onChange={handleChange}
-                value={formData.status}
-              >
-                {beneficiaryStatusOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </AppSelect>
-            </label>
+            <AppWrapToggleGroup
+              buttonSize="sm"
+              description="Status penerima manfaat memakai opsi statis."
+              label="Status"
+              onChange={(nextValue) =>
+                handleChange({
+                  target: {
+                    name: 'status',
+                    value: nextValue,
+                  },
+                })
+              }
+              options={beneficiaryStatusOptions}
+              value={formData.status}
+            />
 
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-[var(--app-text-color)]">
@@ -348,7 +332,7 @@ function BeneficiaryList() {
           </form>
         </AppSheet>
       ) : null}
-    </section>
+    </PageSection>
   )
 }
 

@@ -47,6 +47,20 @@ function getMembershipPriority(membership) {
   return 6
 }
 
+function getMembershipStatusLabel(status) {
+  const normalizedStatus = normalizeText(status, 'active')
+
+  if (normalizedStatus === 'active') {
+    return 'Aktif'
+  }
+
+  if (normalizedStatus === 'suspended') {
+    return 'Ditangguhkan'
+  }
+
+  return normalizedStatus
+}
+
 function sortMemberships(memberships = []) {
   return [...memberships].sort((left, right) => {
     return getMembershipPriority(left) - getMembershipPriority(right)
@@ -65,14 +79,20 @@ function mapMembership(member) {
     role: normalizeRole(member?.role),
     is_default: Boolean(member?.is_default),
     status: normalizeText(member?.status, 'active'),
+    status_label: getMembershipStatusLabel(member?.status),
     approved_at: normalizeText(member?.approved_at, null),
     team_name: normalizeText(team?.name, null),
     team_slug: normalizeText(team?.slug, null),
+    team_is_active: team?.is_active !== false,
   }
 }
 
 function normalizeServerMemberships(memberships = []) {
-  return sortMemberships((memberships ?? []).map(mapMembership))
+  return sortMemberships(
+    (memberships ?? [])
+      .map(mapMembership)
+      .filter((membership) => membership.team_is_active !== false)
+  )
 }
 
 async function fetchTeamMemberships() {
@@ -142,162 +162,167 @@ const defaultState = {
   error: null,
 }
 
+let activeTelegramAuthPromise = null
+let activeTelegramAuthKey = null
+
 const useAuthStore = create((set, get) => ({
   ...defaultState,
   clearError: () => set({ error: null }),
   initializeTelegramAuth: async (authPayload) => {
+    const normalizedInitData =
+      typeof authPayload === 'string'
+        ? normalizeText(authPayload)
+        : normalizeText(authPayload?.initData)
+    const startParam =
+      typeof authPayload === 'string'
+        ? null
+        : normalizeStartParam(authPayload?.startParam)
+    const authKey = `${normalizedInitData ?? ''}::${startParam ?? ''}`
+
+    if (activeTelegramAuthPromise && activeTelegramAuthKey === authKey) {
+      return activeTelegramAuthPromise
+    }
+
     set({
       isLoading: true,
       error: null,
     })
 
-    try {
-      if (!supabase) {
-        throw new Error('Client Supabase belum dikonfigurasi.')
-      }
+    activeTelegramAuthKey = authKey
+    activeTelegramAuthPromise = (async () => {
+      try {
+        if (!supabase) {
+          throw new Error('Client Supabase belum dikonfigurasi.')
+        }
 
-      const normalizedInitData =
-        typeof authPayload === 'string'
-          ? normalizeText(authPayload)
-          : normalizeText(authPayload?.initData)
-      const startParam =
-        typeof authPayload === 'string'
-          ? null
-          : normalizeStartParam(authPayload?.startParam)
+        if (!normalizedInitData) {
+          throw new Error('Aplikasi ini hanya bisa diakses dari Telegram Mini App.')
+        }
 
-      if (!normalizedInitData) {
-        throw new Error('Aplikasi ini hanya bisa diakses dari Telegram Mini App.')
-      }
+        const response = await fetch('/api/auth', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            initData: normalizedInitData,
+          }),
+        })
 
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          initData: normalizedInitData,
-        }),
-      })
+        const result = await response.json().catch(() => ({}))
 
-      const result = await response.json().catch(() => ({}))
+        if (!response.ok || !result?.success) {
+          throw new Error(
+            normalizeText(result?.error, 'Gagal memverifikasi sesi Telegram.')
+          )
+        }
 
-      if (!response.ok || !result?.success) {
-        throw new Error(
-          normalizeText(result?.error, 'Gagal memverifikasi sesi Telegram.')
+        const accessToken = normalizeText(result?.session?.access_token)
+        const refreshToken = normalizeText(result?.session?.refresh_token)
+
+        if (!accessToken || !refreshToken) {
+          throw new Error('Session Supabase dari Telegram auth tidak lengkap.')
+        }
+
+        const { error: setSessionError } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        })
+
+        if (setSessionError) {
+          throw setSessionError
+        }
+
+        const telegramUserId = normalizeText(
+          result?.profile?.telegram_user_id ?? result?.telegramUser?.id,
+          null
         )
-      }
 
-      const accessToken = normalizeText(result?.session?.access_token)
-      const refreshToken = normalizeText(result?.session?.refresh_token)
+        const ownerBypassMemberships = result?.isOwnerBypass
+          ? normalizeServerMemberships(result?.memberships)
+          : []
+        let memberships =
+          ownerBypassMemberships.length > 0
+            ? ownerBypassMemberships
+            : await fetchTeamMemberships()
+        let currentMembership = memberships[0] ?? null
+        let role =
+          result?.isOwnerBypass
+            ? 'Owner'
+            : normalizeRole(currentMembership?.role) ??
+              normalizeRole(result?.role) ??
+              normalizeRole(result?.profile?.role)
 
-      if (!accessToken || !refreshToken) {
-        throw new Error('Session Supabase dari Telegram auth tidak lengkap.')
-      }
+        if (startParam && !result?.isOwnerBypass && role !== 'Owner') {
+          try {
+            await redeemInviteToken(startParam, telegramUserId)
+            memberships = await fetchTeamMemberships()
+            currentMembership = memberships[0] ?? null
+            role = normalizeRole(currentMembership?.role)
+          } catch (redeemError) {
+            if (memberships.length === 0) {
+              throw redeemError
+            }
 
-      const { error: setSessionError } = await supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      })
-
-      if (setSessionError) {
-        throw setSessionError
-      }
-
-      const telegramUserId = normalizeText(
-        result?.profile?.telegram_user_id ?? result?.telegramUser?.id,
-        null
-      )
-
-      const ownerBypassMemberships = result?.isOwnerBypass
-        ? normalizeServerMemberships(result?.memberships)
-        : []
-      let memberships =
-        ownerBypassMemberships.length > 0
-          ? ownerBypassMemberships
-          : await fetchTeamMemberships()
-      let currentMembership = memberships[0] ?? null
-      let role =
-        result?.isOwnerBypass
-          ? 'Owner'
-          : normalizeRole(currentMembership?.role) ??
-            normalizeRole(result?.role) ??
-            normalizeRole(result?.profile?.role)
-
-      if (startParam && !result?.isOwnerBypass && role !== 'Owner') {
-        try {
-          await redeemInviteToken(startParam, telegramUserId)
-          memberships = await fetchTeamMemberships()
-          currentMembership = memberships[0] ?? null
-          role = normalizeRole(currentMembership?.role)
-        } catch (redeemError) {
-          if (memberships.length === 0) {
-            throw redeemError
+            console.warn('Redeem invite token dilewati:', redeemError)
           }
-
-          console.warn('Redeem invite token dilewati:', redeemError)
-        }
-      }
-
-      if (result?.isOwnerBypass) {
-        const refreshedMemberships = await fetchTeamMemberships().catch(() => [])
-
-        if (refreshedMemberships.some((membership) => membership.role === 'Owner')) {
-          memberships = refreshedMemberships
-          currentMembership = memberships[0] ?? null
         }
 
-        role = 'Owner'
+        const fullName = [
+          result?.telegramUser?.first_name,
+          result?.telegramUser?.last_name,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .trim()
+        const name =
+          normalizeText(fullName, null) ??
+          normalizeText(result?.telegramUser?.username, null) ??
+          telegramUserId
+
+        set({
+          user: {
+            id: result?.profile?.id ?? null,
+            telegram_user_id: telegramUserId,
+            name,
+          },
+          memberships,
+          currentTeamId: normalizeText(currentMembership?.team_id, null),
+          role,
+          isRegistered: memberships.length > 0,
+          isLoading: false,
+          error:
+            memberships.length > 0
+              ? null
+              : 'Akun Telegram Anda belum memiliki akses ke workspace mana pun.',
+        })
+
+        return {
+          memberships,
+          role,
+        }
+      } catch (error) {
+        const normalizedError = toError(
+          error,
+          'Gagal memverifikasi Telegram auth.'
+        )
+
+        await supabase?.auth.signOut().catch(() => {})
+
+        set({
+          ...defaultState,
+          isLoading: false,
+          error: normalizedError.message,
+        })
+
+        throw normalizedError
+      } finally {
+        activeTelegramAuthPromise = null
+        activeTelegramAuthKey = null
       }
+    })()
 
-      const fullName = [
-        result?.telegramUser?.first_name,
-        result?.telegramUser?.last_name,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .trim()
-      const name =
-        normalizeText(fullName, null) ??
-        normalizeText(result?.telegramUser?.username, null) ??
-        telegramUserId
-
-      set({
-        user: {
-          id: result?.profile?.id ?? null,
-          telegram_user_id: telegramUserId,
-          name,
-        },
-        memberships,
-        currentTeamId: normalizeText(currentMembership?.team_id, null),
-        role,
-        isRegistered: memberships.length > 0,
-        isLoading: false,
-        error:
-          memberships.length > 0
-            ? null
-            : 'Akun Telegram Anda belum memiliki akses ke workspace mana pun.',
-      })
-
-      return {
-        memberships,
-        role,
-      }
-    } catch (error) {
-      const normalizedError = toError(
-        error,
-        'Gagal memverifikasi Telegram auth.'
-      )
-
-      await supabase?.auth.signOut().catch(() => {})
-
-      set({
-        ...defaultState,
-        isLoading: false,
-        error: normalizedError.message,
-      })
-
-      throw normalizedError
-    }
+    return activeTelegramAuthPromise
   },
   refreshMemberships: async () => {
     try {

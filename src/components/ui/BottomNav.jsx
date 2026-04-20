@@ -8,12 +8,12 @@ import {
   ArrowUpRight,
   CalendarCheck2,
   FileText,
-  FolderKanban,
   Home,
   LayoutGrid,
   MoreHorizontal,
   Plus,
   ReceiptText,
+  Users2,
   Wallet,
   X,
 } from 'lucide-react'
@@ -22,7 +22,7 @@ import useTelegram from '../../hooks/useTelegram'
 const navItems = [
   { to: '/', label: 'Beranda', icon: Home, end: true },
   { to: '/transactions', label: 'Transaksi', icon: ReceiptText },
-  { to: '/projects', label: 'Proyek', icon: FolderKanban },
+  { to: '/payroll', label: 'Payroll', icon: Users2 },
   { to: '/more', label: 'Menu', icon: MoreHorizontal },
 ]
 

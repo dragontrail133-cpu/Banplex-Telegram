@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { EyeOff, Plus, RefreshCcw, Trash2, Users } from 'lucide-react'
-import { AppSheet } from './ui/AppPrimitives'
+import {
+  AppButton,
+  AppCardDashed,
+  AppSheet,
+  AppWrapToggleGroup,
+  PageSection,
+} from './ui/AppPrimitives'
+import { formatAppDateLabel } from '../lib/date-time'
 import useHrStore, { applicantStatusOptions } from '../store/useHrStore'
 
 function normalizeText(value, fallback = '') {
@@ -10,23 +17,7 @@ function normalizeText(value, fallback = '') {
 }
 
 function formatDate(value) {
-  const normalizedValue = String(value ?? '').trim()
-
-  if (!normalizedValue) {
-    return '-'
-  }
-
-  const parsedDate = new Date(`${normalizedValue}T00:00:00`)
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return normalizedValue
-  }
-
-  return new Intl.DateTimeFormat('id-ID', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(parsedDate)
+  return formatAppDateLabel(value)
 }
 
 function getStatusColor(status) {
@@ -179,57 +170,47 @@ function HrdPipeline() {
   }
 
   return (
-    <section className="space-y-6 rounded-[28px] border border-white/70 bg-white/75 p-4 shadow-sm backdrop-blur sm:p-5">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-2">
-          <p className="text-sm font-medium uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
-            HRD & Rekrutmen
-          </p>
-          <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
-            Pipeline pelamar berbasis status
-          </h2>
-          <p className="max-w-2xl text-sm leading-6 text-[var(--app-hint-color)]">
-            Lihat pergerakan pelamar dari screening sampai diterima atau ditolak,
-            lalu kelola dokumen CV dan KTP langsung dari form ini.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-3">
-          <button
-            className="inline-flex items-center justify-center gap-2 rounded-[20px] border border-slate-200 bg-white/90 px-4 py-3 text-sm font-semibold text-[var(--app-text-color)] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+    <PageSection
+      eyebrow="HRD & Rekrutmen"
+      title="Pipeline pelamar berbasis status"
+      description="Lihat pergerakan pelamar dari screening sampai diterima atau ditolak, lalu kelola dokumen CV dan KTP langsung dari form ini."
+      action={
+        <div className="flex flex-wrap justify-end gap-3">
+          <AppButton
             disabled={isLoading}
             onClick={() => {
               void fetchApplicants({ force: true }).catch((fetchError) => {
                 console.error('Gagal memuat ulang pelamar:', fetchError)
               })
             }}
+            variant="secondary"
             type="button"
           >
             <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
-          </button>
+          </AppButton>
 
-          <button
-            className="inline-flex items-center justify-center gap-2 rounded-[20px] bg-gradient-to-r from-sky-600 via-cyan-500 to-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-500/20 transition active:scale-[0.99]"
+          <AppButton
             onClick={openCreateModal}
+            leadingIcon={<Plus className="h-4 w-4" />}
             type="button"
           >
-            <Plus className="h-4 w-4" />
             Tambah Pelamar
-          </button>
+          </AppButton>
         </div>
-      </div>
+      }
+    >
 
       {error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+        <AppCardDashed className="app-tone-danger text-sm leading-6 text-rose-700">
           {error}
-        </div>
+        </AppCardDashed>
       ) : null}
 
       {isLoading && applicants.length === 0 ? (
-        <div className="rounded-3xl border border-slate-200 bg-white/80 px-4 py-5 text-sm text-[var(--app-hint-color)]">
+        <AppCardDashed className="px-4 py-5 text-sm text-[var(--app-hint-color)]">
           Memuat data pelamar...
-        </div>
+        </AppCardDashed>
       ) : applicants.length > 0 ? (
         <div className="grid gap-4 xl:grid-cols-5">
           {groupedApplicants.map((group) => (
@@ -305,32 +286,25 @@ function HrdPipeline() {
                         </span>
                       </div>
 
-                      <label className="mt-3 block space-y-1.5">
-                        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                          Update Status
-                        </span>
-                        <select
-                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                          disabled={isSubmitting}
-                          value={applicant.status_aplikasi}
-                          onChange={(event) => {
-                            void updateApplicant(applicant.id, {
-                              status_aplikasi: event.target.value,
-                            }).catch((updateError) => {
-                              console.error(
-                                'Gagal memperbarui status pelamar:',
-                                updateError
-                              )
-                            })
-                          }}
-                        >
-                          {applicantStatusOptions.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      <AppWrapToggleGroup
+                        buttonSize="sm"
+                        className="mt-3"
+                        description="Status pelamar memakai opsi statis agar lebih cepat diubah."
+                        label="Update Status"
+                        disabled={isSubmitting}
+                        onChange={(nextValue) => {
+                          void updateApplicant(applicant.id, {
+                            status_aplikasi: nextValue,
+                          }).catch((updateError) => {
+                            console.error(
+                              'Gagal memperbarui status pelamar:',
+                              updateError
+                            )
+                          })
+                        }}
+                        options={applicantStatusOptions}
+                        value={applicant.status_aplikasi}
+                      />
 
                       {applicant.documents.length > 0 ? (
                         <div className="mt-3 space-y-2">
@@ -367,18 +341,18 @@ function HrdPipeline() {
                     </article>
                   ))
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
+                  <AppCardDashed className="px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
                     Belum ada pelamar pada status ini.
-                  </div>
+                  </AppCardDashed>
                 )}
               </div>
             </div>
           ))}
         </div>
       ) : (
-        <div className="rounded-3xl border border-dashed border-slate-200 bg-white/70 px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
+        <AppCardDashed className="px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
           Belum ada data pelamar. Tambahkan pelamar pertama untuk memulai pipeline.
-        </div>
+        </AppCardDashed>
       )}
 
       {isModalOpen ? (
@@ -418,23 +392,21 @@ function HrdPipeline() {
                 />
               </label>
 
-              <label className="block space-y-2">
-                <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                  Status
-                </span>
-                <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                  name="status_aplikasi"
-                  onChange={handleChange}
-                  value={formData.status_aplikasi}
-                >
-                  {applicantStatusOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <AppWrapToggleGroup
+                buttonSize="sm"
+                description="Status pelamar memakai opsi statis."
+                label="Status"
+                onChange={(nextValue) =>
+                  handleChange({
+                    target: {
+                      name: 'status_aplikasi',
+                      value: nextValue,
+                    },
+                  })
+                }
+                options={applicantStatusOptions}
+                value={formData.status_aplikasi}
+              />
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block space-y-2">
@@ -507,7 +479,7 @@ function HrdPipeline() {
           </form>
         </AppSheet>
       ) : null}
-    </section>
+    </PageSection>
   )
 }
 

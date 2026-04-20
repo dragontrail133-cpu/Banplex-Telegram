@@ -1,16 +1,21 @@
 import useAuthStore from '../store/useAuthStore'
 import { hasRequiredRole } from '../lib/rbac'
+import { canUseCapability } from '../lib/capabilities'
 
 function ProtectedRoute({
   allowedRoles = [],
+  requiredCapability = null,
   title = 'Akses Ditolak',
   description = 'Anda tidak memiliki akses ke halaman ini.',
   children,
 }) {
   const role = useAuthStore((state) => state.role)
   const isRegistered = useAuthStore((state) => state.isRegistered)
+  const hasAccess = requiredCapability
+    ? canUseCapability(role, requiredCapability)
+    : hasRequiredRole(role, allowedRoles)
 
-  if (!isRegistered || !hasRequiredRole(role, allowedRoles)) {
+  if (!isRegistered || !hasAccess) {
     return (
       <section className="rounded-[26px] border border-rose-200 bg-rose-50/85 px-5 py-5 text-rose-900">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-rose-700">

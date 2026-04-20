@@ -1,3 +1,75 @@
+create table if not exists public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  telegram_user_id text unique,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.projects (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.expense_categories (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.transactions (
+  id uuid primary key default gen_random_uuid(),
+  telegram_user_id text,
+  type text not null,
+  amount numeric not null default 0,
+  description text,
+  transaction_date date not null default current_date,
+  source_table text,
+  worker_name_snapshot text,
+  supplier_name_snapshot text,
+  project_name_snapshot text,
+  creditor_name_snapshot text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.suppliers (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.expenses (
+  id uuid primary key default gen_random_uuid(),
+  telegram_user_id text not null,
+  project_id uuid not null references public.projects(id),
+  supplier_name text not null,
+  expense_date date not null,
+  total_amount numeric not null default 0,
+  description text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.bills (
+  id uuid primary key default gen_random_uuid(),
+  expense_id uuid not null unique references public.expenses(id) on delete cascade,
+  telegram_user_id text,
+  team_id uuid,
+  project_id uuid references public.projects(id),
+  supplier_id uuid references public.suppliers(id),
+  bill_type text,
+  description text,
+  amount numeric not null default 0,
+  due_date date not null,
+  status text not null default 'unpaid',
+  paid_amount numeric not null default 0,
+  paid_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
 alter table public.bills
   add column if not exists paid_amount numeric not null default 0,
   add column if not exists paid_at timestamp with time zone;
@@ -5,10 +77,23 @@ alter table public.bills
 create table if not exists public.loans (
   id uuid primary key default gen_random_uuid(),
   team_id uuid,
+  telegram_user_id text,
   amount numeric not null default 0,
   description text,
   disbursed_date date not null default current_date,
-  created_at timestamp with time zone not null default now()
+  transaction_date date not null default current_date,
+  principal_amount numeric not null default 0,
+  repayment_amount numeric not null default 0,
+  interest_type text not null default 'no_interest',
+  status text not null default 'unpaid',
+  paid_amount numeric not null default 0,
+  interest_rate numeric(8,4),
+  tenor_months integer,
+  notes text,
+  created_by_user_id uuid references public.profiles(id) on delete set null,
+  creditor_name_snapshot text,
+  created_at timestamp with time zone not null default now(),
+  updated_at timestamp with time zone not null default now()
 );
 
 create table if not exists public.loan_payments (

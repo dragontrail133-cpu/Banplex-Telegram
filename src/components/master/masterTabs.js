@@ -37,6 +37,29 @@ function formatStaffPaymentType(value) {
   return normalizeText(value, 'Belum diatur')
 }
 
+function buildDeleteGuard(count, entityLabel) {
+  const normalizedCount = Math.max(0, Math.trunc(Number(count) || 0))
+
+  if (normalizedCount <= 0) {
+    return {
+      blocked: false,
+      label: 'Siap dihapus',
+      reason: null,
+    }
+  }
+
+  return {
+    blocked: true,
+    label: `Dipakai ${normalizedCount}x`,
+    reason: `${entityLabel} ini masih dipakai di ${normalizedCount} referensi aktif.`,
+  }
+}
+
+export const supplierTypeGroups = {
+  material: ['Material'],
+  operationalExpense: ['Operasional', 'Lainnya'],
+}
+
 export const masterTabs = [
   {
     key: 'projects',
@@ -68,6 +91,7 @@ export const masterTabs = [
         name: 'budget',
         label: 'Budget',
         type: 'number',
+        format: 'currency',
         inputMode: 'decimal',
         min: '0',
         step: '0.01',
@@ -102,6 +126,22 @@ export const masterTabs = [
       record.status || 'Status belum diisi',
       record.is_wage_assignable ? 'Upah aktif' : 'Tanpa upah',
     ],
+    getDetails: (record, context = {}) => [
+      `Budget ${formatCurrency(record.budget ?? 0)}`,
+      (context.projectWageRateUsageById?.[record.id] ?? 0) > 0
+        ? `Dipakai di ${context.projectWageRateUsageById[record.id]} tarif upah`
+        : 'Belum dipakai di tarif upah',
+      (context.projectWorkerUsageById?.[record.id] ?? 0) > 0
+        ? `Dipakai oleh ${context.projectWorkerUsageById[record.id]} pekerja`
+        : 'Belum dipakai sebagai default pekerja',
+      record.notes || 'Tanpa catatan',
+    ],
+    getDeleteGuard: (record, context = {}) =>
+      buildDeleteGuard(
+        (context.projectWageRateUsageById?.[record.id] ?? 0) +
+          (context.projectWorkerUsageById?.[record.id] ?? 0),
+        'Proyek'
+      ),
     getDescription: (record) =>
       record.notes || `Budget ${formatCurrency(record.budget ?? 0)}`,
   },
@@ -118,6 +158,22 @@ export const masterTabs = [
     createLabel: 'Tambah Pekerja',
     emptyTitle: 'Belum ada pekerja aktif.',
     customForm: 'worker',
+    getDetails: (record, context = {}) => {
+      const defaultProject =
+        context.projectsById?.[record.default_project_id]?.project_name ??
+        context.projectsById?.[record.default_project_id]?.name ??
+        'Belum diisi'
+
+      return [
+        `Project default: ${defaultProject}`,
+        (context.workerRateUsageById?.[record.id] ?? 0) > 0
+          ? `Dipakai di ${context.workerRateUsageById[record.id]} tarif upah`
+          : 'Belum dipakai di tarif upah',
+        record.notes || 'Tanpa catatan.',
+      ]
+    },
+    getDeleteGuard: (record, context = {}) =>
+      buildDeleteGuard(context.workerRateUsageById?.[record.id] ?? 0, 'Pekerja'),
   },
   {
     key: 'suppliers',
@@ -159,6 +215,10 @@ export const masterTabs = [
       },
     ],
     getBadges: (record) => [record.supplier_type || 'Tipe belum diisi'],
+    getDetails: (record) => [
+      `Tipe ${normalizeText(record.supplier_type, 'Belum diisi')}`,
+      record.notes || 'Siap dipakai pada expense dan bill.',
+    ],
     getDescription: (record) => record.notes || 'Siap dipakai pada expense dan bill.',
   },
   {
@@ -201,6 +261,15 @@ export const masterTabs = [
       },
     ],
     getBadges: (record) => [formatCategoryGroup(record.category_group)],
+    getDetails: (record, context = {}) => [
+      formatCategoryGroup(record.category_group),
+      (context.categoryUsageById?.[record.id] ?? 0) > 0
+        ? `Dipakai di ${context.categoryUsageById[record.id]} material`
+        : 'Belum dipakai di material',
+      record.notes || 'Dipakai untuk form transaksi pengeluaran.',
+    ],
+    getDeleteGuard: (record, context = {}) =>
+      buildDeleteGuard(context.categoryUsageById?.[record.id] ?? 0, 'Kategori biaya'),
     getDescription: (record) => record.notes || 'Dipakai untuk form transaksi pengeluaran.',
   },
   {
@@ -232,6 +301,10 @@ export const masterTabs = [
       },
     ],
     getBadges: () => ['Pendanaan'],
+    getDetails: (record) => [
+      'Dipakai untuk input pinjaman dan pembayaran loan.',
+      record.notes || 'Tanpa catatan.',
+    ],
     getDescription: (record) => record.notes || 'Dipakai untuk input pinjaman dan pembayaran loan.',
   },
   {
@@ -263,6 +336,14 @@ export const masterTabs = [
       },
     ],
     getBadges: () => ['Profesi'],
+    getDetails: (record, context = {}) => [
+      (context.professionUsageById?.[record.id] ?? 0) > 0
+        ? `Dipakai oleh ${context.professionUsageById[record.id]} pekerja`
+        : 'Belum dipakai di pekerja',
+      record.notes || 'Dipakai pada master pekerja.',
+    ],
+    getDeleteGuard: (record, context = {}) =>
+      buildDeleteGuard(context.professionUsageById?.[record.id] ?? 0, 'Profesi'),
     getDescription: (record) => record.notes || 'Dipakai pada master pekerja.',
   },
   {
@@ -300,6 +381,7 @@ export const masterTabs = [
         name: 'salary',
         label: 'Gaji Bulanan',
         type: 'number',
+        format: 'currency',
         inputMode: 'decimal',
         min: '0',
         step: '0.01',
@@ -316,6 +398,7 @@ export const masterTabs = [
         name: 'fee_amount',
         label: 'Fee Tetap',
         type: 'number',
+        format: 'currency',
         inputMode: 'decimal',
         min: '0',
         step: '0.01',
@@ -329,6 +412,12 @@ export const masterTabs = [
       },
     ],
     getBadges: (record) => [formatStaffPaymentType(record.payment_type)],
+    getDetails: (record) => [
+      `Gaji ${formatCurrency(record.salary ?? 0)}`,
+      `Fee ${Number(record.fee_percentage ?? 0)}%`,
+      `Tetap ${formatCurrency(record.fee_amount ?? 0)}`,
+      record.notes || 'Tanpa catatan.',
+    ],
     getDescription: (record) =>
       [
         `Gaji ${formatCurrency(record.salary ?? 0)}`,

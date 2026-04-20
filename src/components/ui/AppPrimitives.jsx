@@ -1,6 +1,11 @@
 import { createElement, isValidElement, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
+import { ArrowLeft } from 'lucide-react'
 import { AnimatePresence, motion as Motion } from 'framer-motion'
+import {
+  formatNominalInputValue,
+  normalizeNominalInputValue,
+} from '../../lib/nominal'
 
 function joinClasses(...values) {
   return values.flat().filter(Boolean).join(' ')
@@ -55,6 +60,55 @@ function AppCardDashed(props) {
   return <AppCard tone="dashed" {...props} />
 }
 
+function AppSafeZone({
+  as,
+  className = '',
+  children,
+  ...props
+}) {
+  const Component = as ?? 'div'
+
+  return (
+    <Component className={joinClasses('px-1 py-2', className)} {...props}>
+      {children}
+    </Component>
+  )
+}
+
+function AppViewportSafeArea({
+  as,
+  className = '',
+  children,
+  ...props
+}) {
+  const Component = as ?? 'div'
+
+  return (
+    <Component
+      className={joinClasses(
+        'pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] pt-[max(0.5rem,env(safe-area-inset-top))] pb-[max(0.5rem,env(safe-area-inset-bottom))]',
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </Component>
+  )
+}
+
+function PageShell({
+  as,
+  className = '',
+  children,
+  ...props
+}) {
+  return (
+    <AppSafeZone as={as ?? 'section'} className={joinClasses('space-y-4', className)} {...props}>
+      {children}
+    </AppSafeZone>
+  )
+}
+
 function AppButton({
   variant = 'primary',
   size = 'md',
@@ -102,6 +156,26 @@ function AppInput({ className = '', ...props }) {
   )
 }
 
+function AppNominalInput({
+  className = '',
+  onValueChange,
+  value = '',
+  ...props
+}) {
+  return (
+    <AppInput
+      className={className}
+      {...props}
+      inputMode="numeric"
+      onChange={(event) => {
+        onValueChange?.(normalizeNominalInputValue(event.target.value))
+      }}
+      type="text"
+      value={formatNominalInputValue(value)}
+    />
+  )
+}
+
 function AppTextarea({ className = '', ...props }) {
   return (
     <textarea
@@ -117,6 +191,108 @@ function AppSelect({ className = '', ...props }) {
       className={joinClasses('app-input w-full rounded-[20px] px-4 py-3 text-base', className)}
       {...props}
     />
+  )
+}
+
+function AppToggleGroup({
+  label = null,
+  description = null,
+  options = [],
+  value = null,
+  onChange,
+  disabled = false,
+  className = '',
+  buttonSize = 'md',
+}) {
+  return (
+    <div className={joinClasses('space-y-2', className)} role="group">
+      {label || description ? (
+        <div className="space-y-1">
+          {label ? <p className="text-sm font-semibold text-[var(--app-text-color)]">{label}</p> : null}
+          {description ? (
+            <p className="text-xs leading-5 text-[var(--app-hint-color)]">{description}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="overflow-x-auto pb-1">
+        <div
+          className="grid min-w-full gap-2 rounded-[24px] border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] p-1"
+          style={{
+            gridTemplateColumns: `repeat(${Math.max(options.length, 1)}, minmax(7.5rem, 1fr))`,
+          }}
+        >
+          {options.map((option) => {
+          const isActive = value === option.value
+
+          return (
+            <AppButton
+              key={option.value}
+              aria-pressed={isActive}
+              className="w-full rounded-[20px]"
+              disabled={disabled}
+              onClick={() => onChange?.(option.value)}
+              size={buttonSize}
+              type="button"
+              variant={isActive ? 'primary' : 'secondary'}
+            >
+              {option.label}
+            </AppButton>
+          )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AppWrapToggleGroup({
+  label = null,
+  description = null,
+  options = [],
+  value = null,
+  onChange,
+  disabled = false,
+  className = '',
+  buttonSize = 'md',
+}) {
+  return (
+    <div className={joinClasses('space-y-2', className)} role="group">
+      {label || description ? (
+        <div className="space-y-1">
+          {label ? <p className="text-sm font-semibold text-[var(--app-text-color)]">{label}</p> : null}
+          {description ? (
+            <p className="text-xs leading-5 text-[var(--app-hint-color)]">{description}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div
+        className="grid gap-2 rounded-[24px] border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] p-1"
+        style={{
+          gridTemplateColumns: 'repeat(auto-fit, minmax(8rem, 1fr))',
+        }}
+      >
+        {options.map((option) => {
+          const isActive = value === option.value
+
+          return (
+            <AppButton
+              key={option.value}
+              aria-pressed={isActive}
+              className="w-full rounded-[20px] whitespace-normal text-center leading-5"
+              disabled={disabled}
+              onClick={() => onChange?.(option.value)}
+              size={buttonSize}
+              type="button"
+              variant={isActive ? 'primary' : 'secondary'}
+            >
+              {option.label}
+            </AppButton>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -154,7 +330,39 @@ function AppBadge({
   )
 }
 
-function PageHeader({ eyebrow = null, title, description = null, action = null, chips = null, className = '' }) {
+function renderHeaderControl({ backAction, backLabel, action }) {
+  if (backAction) {
+    return (
+      <AppButton
+        className="shrink-0 rounded-full"
+        leadingIcon={<ArrowLeft className="h-4 w-4" />}
+        onClick={backAction}
+        size="sm"
+        type="button"
+        variant="secondary"
+      >
+        {backLabel ?? 'Kembali'}
+      </AppButton>
+    )
+  }
+
+  if (action) {
+    return <div className="shrink-0">{action}</div>
+  }
+
+  return <div className="h-11 w-11 shrink-0" aria-hidden="true" />
+}
+
+function PageHeader({
+  eyebrow = null,
+  title,
+  description = null,
+  action = null,
+  backAction = null,
+  backLabel = 'Kembali',
+  chips = null,
+  className = '',
+}) {
   return (
     <section className={joinClasses('space-y-3', className)}>
       <div className="flex items-start justify-between gap-3">
@@ -163,14 +371,22 @@ function PageHeader({ eyebrow = null, title, description = null, action = null, 
           <h1 className="app-page-title">{title}</h1>
           {description ? <p className="app-page-lead">{description}</p> : null}
         </div>
-        {action ? <div className="shrink-0">{action}</div> : null}
+        {renderHeaderControl({ backAction, backLabel, action })}
       </div>
       {chips ? <div className="flex flex-wrap gap-2">{chips}</div> : null}
     </section>
   )
 }
 
-function SectionHeader({ eyebrow = null, title, description = null, action = null, className = '' }) {
+function SectionHeader({
+  eyebrow = null,
+  title,
+  description = null,
+  action = null,
+  backAction = null,
+  backLabel = 'Kembali',
+  className = '',
+}) {
   return (
     <div className={joinClasses('flex items-start justify-between gap-3', className)}>
       <div className="min-w-0 space-y-1.5">
@@ -178,7 +394,76 @@ function SectionHeader({ eyebrow = null, title, description = null, action = nul
         <h2 className="app-section-title">{title}</h2>
         {description ? <p className="app-section-lead">{description}</p> : null}
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {renderHeaderControl({ backAction, backLabel, action })}
+    </div>
+  )
+}
+
+function PageSection({
+  eyebrow = null,
+  title,
+  description = null,
+  action = null,
+  className = '',
+  children,
+}) {
+  return (
+    <section className={joinClasses('space-y-4', className)}>
+      <SectionHeader
+        eyebrow={eyebrow}
+        title={title}
+        description={description}
+        action={action}
+      />
+      {children}
+    </section>
+  )
+}
+
+function FormSection({
+  eyebrow = null,
+  title,
+  description = null,
+  action = null,
+  className = '',
+  children,
+}) {
+  return (
+    <AppCardStrong className={joinClasses('space-y-4', className)}>
+      <SectionHeader
+        eyebrow={eyebrow}
+        title={title}
+        description={description}
+        action={action}
+      />
+      {children}
+    </AppCardStrong>
+  )
+}
+
+function FormActionBar({
+  formId,
+  actionLabel,
+  isSubmitting = false,
+  submitDisabled = false,
+  secondaryAction = null,
+  className = '',
+}) {
+  if (!formId || !actionLabel) {
+    return null
+  }
+
+  return (
+    <div className={joinClasses('flex flex-col-reverse gap-3 sm:flex-row sm:justify-end', className)}>
+      {secondaryAction}
+      <AppButton
+        className="w-full sm:w-auto"
+        disabled={Boolean(isSubmitting || submitDisabled)}
+        form={formId}
+        type="submit"
+      >
+        {isSubmitting ? 'Menyimpan...' : actionLabel}
+      </AppButton>
     </div>
   )
 }
@@ -315,7 +600,7 @@ function OverlayPanel({
       {open ? (
         <div
           className={joinClasses(
-            'fixed inset-0 z-[80] flex justify-center px-2 py-2',
+            'fixed inset-0 z-[140] flex justify-center px-2 py-2',
             isBottomPlacement ? 'items-end sm:items-center' : 'items-center'
           )}
         >
@@ -407,11 +692,20 @@ export {
   AppEmptyState,
   AppErrorState,
   AppInput,
+  AppNominalInput,
   AppListCard,
   AppListRow,
+  FormActionBar,
+  FormSection,
+  AppSafeZone,
   AppSelect,
+  AppToggleGroup,
+  AppWrapToggleGroup,
   AppSheet,
   AppTextarea,
+  AppViewportSafeArea,
+  PageShell,
   PageHeader,
+  PageSection,
   SectionHeader,
 }

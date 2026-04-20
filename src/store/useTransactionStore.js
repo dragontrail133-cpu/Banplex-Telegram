@@ -1,12 +1,23 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
+import { resolveProfileId, resolveTeamId, resolveTelegramUserId } from '../lib/auth-context'
 import {
-  resolveProfileId,
-  resolveTeamId,
-  resolveTelegramUserId,
-} from '../lib/auth-context'
-
-const validTransactionTypes = new Set(['income', 'expense'])
+  createExpenseFromApi,
+  attachExpenseAttachmentFromApi,
+  createMaterialInvoiceFromApi,
+  fetchExpenseByIdFromApi,
+  fetchExpenseAttachmentsFromApi,
+  fetchMaterialInvoiceByIdFromApi,
+  permanentDeleteExpenseAttachmentFromApi,
+  restoreExpenseFromApi,
+  restoreExpenseAttachmentFromApi,
+  restoreMaterialInvoiceFromApi,
+  softDeleteExpenseFromApi,
+  softDeleteExpenseAttachmentFromApi,
+  softDeleteMaterialInvoiceFromApi,
+  updateExpenseFromApi,
+  updateMaterialInvoiceFromApi,
+} from '../lib/records-api'
 
 function notifyTelegram(payload) {
   console.log('Insert sukses, memicu notifikasi ke /api/notify...')
@@ -66,62 +77,6 @@ function toNumber(value) {
   return Number.isFinite(parsedValue) ? parsedValue : NaN
 }
 
-function buildTransactionPayload(data = {}) {
-  const telegramUserId = resolveTelegramUserId(data.telegram_user_id)
-  const type = normalizeText(data.type)
-  const teamId = resolveTeamId(data.team_id)
-  const projectId = normalizeText(data.project_id)
-  const expenseCategoryId = normalizeText(data.expense_category_id)
-  const categoryName = normalizeText(data.category_name)
-  const transactionDate = normalizeText(data.transaction_date)
-  const description = normalizeText(data.description)
-  const notes = normalizeText(data.notes)
-  const amount = Number(data.amount)
-  const projectNameSnapshot = normalizeText(data.project_name)
-
-  if (!telegramUserId) {
-    throw new Error('ID pengguna Telegram tidak ditemukan.')
-  }
-
-  if (!teamId) {
-    throw new Error('Akses workspace tidak ditemukan.')
-  }
-
-  if (!type || !validTransactionTypes.has(type)) {
-    throw new Error('Tipe transaksi tidak valid.')
-  }
-
-  if (!projectId) {
-    throw new Error('Proyek wajib dipilih.')
-  }
-
-  if (!expenseCategoryId || !categoryName) {
-    throw new Error('Kategori transaksi wajib dipilih.')
-  }
-
-  if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error('Nominal transaksi harus lebih dari 0.')
-  }
-
-  if (!transactionDate) {
-    throw new Error('Tanggal transaksi wajib diisi.')
-  }
-
-  return {
-    telegram_user_id: telegramUserId,
-    team_id: teamId,
-    type,
-    project_id: projectId,
-    expense_category_id: expenseCategoryId,
-    category: categoryName,
-    amount,
-    transaction_date: transactionDate,
-    description,
-    notes,
-    project_name_snapshot: projectNameSnapshot,
-  }
-}
-
 function buildNotificationPayload(data = {}, transactionId, amount) {
   return {
     transactionId,
@@ -148,7 +103,11 @@ function buildExpensePayload(data = {}) {
   const notes = normalizeText(data.notes)
   const amount = Number(data.amount)
   const projectNameSnapshot = normalizeText(data.project_name)
-  const supplierNameSnapshot = normalizeText(data.supplier_name)
+  const supplierName =
+    normalizeText(data.supplier_name, null) ??
+    normalizeText(data.supplierName, null) ??
+    normalizeText(data.supplier_name_snapshot, null)
+  const supplierNameSnapshot = supplierName
 
   if (!telegramUserId) {
     throw new Error('ID pengguna Telegram tidak ditemukan.')
@@ -186,6 +145,10 @@ function buildExpensePayload(data = {}) {
     throw new Error('Deskripsi pengeluaran wajib diisi.')
   }
 
+  if (!supplierName) {
+    throw new Error('Supplier wajib dipilih.')
+  }
+
   return {
     telegram_user_id: telegramUserId,
     created_by_user_id: createdByUserId,
@@ -202,6 +165,7 @@ function buildExpensePayload(data = {}) {
     description,
     notes,
     project_name_snapshot: projectNameSnapshot,
+    supplier_name: supplierName,
     supplier_name_snapshot: supplierNameSnapshot,
   }
 }
@@ -211,6 +175,7 @@ function buildMaterialInvoicePayload(headerData = {}, itemsData = []) {
   const createdByUserId = resolveProfileId(headerData.created_by_user_id)
   const teamId = resolveTeamId(headerData.team_id)
   const projectId = normalizeText(headerData.project_id)
+  const supplierId = normalizeText(headerData.supplier_id ?? headerData.supplierId)
   const supplierName = normalizeText(headerData.supplier_name)
   const expenseDate = normalizeText(headerData.expense_date)
   const documentType = normalizeText(headerData.document_type, 'faktur')
@@ -218,7 +183,8 @@ function buildMaterialInvoicePayload(headerData = {}, itemsData = []) {
     documentType === 'surat_jalan'
       ? 'delivery_order'
       : normalizeText(headerData.status, 'paid')
-  const expenseType = normalizeText(headerData.expense_type, 'material')
+  const expenseType =
+    documentType === 'surat_jalan' ? 'material' : 'material_invoice'
   const description = normalizeText(headerData.description)
   const notes = normalizeText(headerData.notes)
   const projectNameSnapshot = normalizeText(headerData.project_name)
@@ -313,6 +279,7 @@ function buildMaterialInvoicePayload(headerData = {}, itemsData = []) {
       created_by_user_id: createdByUserId,
       team_id: teamId,
       project_id: projectId,
+      supplier_id: supplierId,
       supplier_name: supplierName,
       supplier_name_snapshot: supplierNameSnapshot,
       project_name_snapshot: projectNameSnapshot,
@@ -336,6 +303,9 @@ function buildMaterialInvoiceNotificationPayload(
   totalAmount,
   lineItemsPayload = []
 ) {
+  const isDeliveryOrder =
+    normalizeText(headerData.document_type ?? headerData.documentType, '') === 'surat_jalan'
+
   return {
     notificationType: 'material_invoice',
     expenseId,
@@ -344,7 +314,12 @@ function buildMaterialInvoiceNotificationPayload(
     supplierName: normalizeText(headerData.supplier_name, '-'),
     projectName: normalizeText(headerData.project_name, '-'),
     totalAmount,
-    description: normalizeText(headerData.description, 'Faktur material baru dicatat.'),
+    description: normalizeText(
+      headerData.description,
+      isDeliveryOrder
+        ? 'Surat Jalan Barang baru dicatat.'
+        : 'Faktur Barang baru dicatat.'
+    ),
     items: lineItemsPayload.map((item) => ({
       itemName: item.item_name,
       qty: item.qty,
@@ -352,78 +327,6 @@ function buildMaterialInvoiceNotificationPayload(
       lineTotal: item.line_total,
     })),
   }
-}
-
-async function rollbackExpense(expenseId) {
-  if (!supabase || !expenseId) {
-    return null
-  }
-
-  const { error } = await supabase
-    .from('expenses')
-    .update({
-      deleted_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', expenseId)
-    .is('deleted_at', null)
-
-  return error ?? null
-}
-
-async function upsertSupplier(supplierName, explicitTeamId = null) {
-  if (!supabase) {
-    throw new Error('Client Supabase belum dikonfigurasi.')
-  }
-
-  const normalizedSupplierName = normalizeText(supplierName)
-  const teamId = resolveTeamId(explicitTeamId)
-
-  if (!normalizedSupplierName) {
-    throw new Error('Nama supplier wajib diisi.')
-  }
-
-  if (!teamId) {
-    throw new Error('Akses workspace tidak ditemukan.')
-  }
-
-  const { data: existingSupplier, error: existingSupplierError } = await supabase
-    .from('suppliers')
-    .select('id, name, supplier_name, supplier_type, team_id')
-    .eq('team_id', teamId)
-    .is('deleted_at', null)
-    .eq('supplier_type', 'Material')
-    .ilike('name', normalizedSupplierName)
-    .maybeSingle()
-
-  if (existingSupplierError) {
-    throw existingSupplierError
-  }
-
-  if (existingSupplier?.id) {
-    return existingSupplier
-  }
-
-  const { data, error } = await supabase
-    .from('suppliers')
-    .insert({
-      name: normalizedSupplierName,
-      supplier_type: 'Material',
-      team_id: teamId,
-      is_active: true,
-    })
-    .select('id, name, supplier_name, supplier_type, team_id')
-    .single()
-
-  if (error) {
-    throw error
-  }
-
-  if (!data?.id) {
-    throw new Error('Supplier gagal dipersiapkan.')
-  }
-
-  return data
 }
 
 const useTransactionStore = create((set) => ({
@@ -439,14 +342,10 @@ const useTransactionStore = create((set) => ({
       }
 
       const payload = buildExpensePayload(data)
-      const { data: insertedExpense, error } = await supabase
-        .from('expenses')
-        .insert(payload)
-        .select('id')
-        .single()
+      const apiExpense = await createExpenseFromApi(payload)
 
-      if (error) {
-        throw error
+      if (!apiExpense) {
+        throw new Error('Server tidak mengembalikan data expense.')
       }
 
       notifyTelegram(
@@ -456,17 +355,14 @@ const useTransactionStore = create((set) => ({
             type: 'expense',
             transaction_date: payload.expense_date,
           },
-          insertedExpense?.id ?? null,
+          apiExpense.id ?? null,
           payload.amount
         )
       )
 
       set({ error: null })
 
-      return {
-        ...payload,
-        id: insertedExpense?.id ?? null,
-      }
+      return apiExpense
     } catch (error) {
       const normalizedError = toError(error)
 
@@ -477,7 +373,84 @@ const useTransactionStore = create((set) => ({
       set({ isSubmitting: false })
     }
   },
-  submitTransaction: async (data) => {
+  fetchExpenseById: async (expenseId, options = {}) => {
+    try {
+      return await fetchExpenseByIdFromApi(expenseId, options)
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    }
+  },
+  fetchMaterialInvoiceById: async (expenseId, options = {}) => {
+    try {
+      return await fetchMaterialInvoiceByIdFromApi(expenseId, options)
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    }
+  },
+  fetchExpenseAttachments: async (expenseId, options = {}) => {
+    try {
+      return await fetchExpenseAttachmentsFromApi(expenseId, options)
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    }
+  },
+  attachExpenseAttachment: async (expenseId, fileAssetId, payload = {}) => {
+    try {
+      return await attachExpenseAttachmentFromApi(expenseId, fileAssetId, payload)
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    }
+  },
+  softDeleteExpenseAttachment: async (attachmentId, teamId) => {
+    try {
+      return await softDeleteExpenseAttachmentFromApi(attachmentId, teamId)
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    }
+  },
+  restoreExpenseAttachment: async (attachmentId, teamId) => {
+    try {
+      return await restoreExpenseAttachmentFromApi(attachmentId, teamId)
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    }
+  },
+  permanentDeleteExpenseAttachment: async (attachmentId, teamId) => {
+    try {
+      return await permanentDeleteExpenseAttachmentFromApi(attachmentId, teamId)
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    }
+  },
+  updateExpense: async (expenseId, data = {}) => {
     set({ isSubmitting: true, error: null })
 
     try {
@@ -485,27 +458,75 @@ const useTransactionStore = create((set) => ({
         throw new Error('Client Supabase belum dikonfigurasi.')
       }
 
-      const payload = buildTransactionPayload(data)
-      console.log('Memulai pengiriman data ke Supabase...')
-      const { data: insertedTransaction, error } = await supabase
-        .from('transactions')
-        .insert(payload)
-        .select('id')
-        .single()
+      const payload = buildExpensePayload(data)
+      const apiExpense = await updateExpenseFromApi(expenseId, {
+        ...payload,
+        teamId: payload.team_id,
+        expectedUpdatedAt: normalizeText(
+          data.expectedUpdatedAt ?? data.expected_updated_at ?? data.updated_at ?? data.updatedAt,
+          null
+        ),
+      })
 
-      if (error) {
-        throw error
+      if (!apiExpense) {
+        throw new Error('Server tidak mengembalikan data expense.')
       }
 
-      notifyTelegram(
-        buildNotificationPayload(data, insertedTransaction?.id ?? null, payload.amount)
+      set({ error: null })
+
+      return apiExpense
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    } finally {
+      set({ isSubmitting: false })
+    }
+  },
+  updateMaterialInvoice: async (expenseId, data = {}) => {
+    set({ isSubmitting: true, error: null })
+
+    try {
+      if (!supabase) {
+        throw new Error('Client Supabase belum dikonfigurasi.')
+      }
+
+      const { headerPayload, lineItemsPayload } = buildMaterialInvoicePayload(
+        data.headerData ?? data,
+        data.itemsData ?? data.items ?? []
       )
+      const editableItems = lineItemsPayload.map((item, index) => ({
+        ...item,
+        id: normalizeText(data.itemsData?.[index]?.id, null),
+      }))
+      const result = await updateMaterialInvoiceFromApi(
+        expenseId,
+        {
+          ...headerPayload,
+          expectedUpdatedAt: normalizeText(
+            data.expectedUpdatedAt ??
+              data.expected_updated_at ??
+              data.headerData?.updated_at ??
+              data.headerData?.updatedAt ??
+              data.updated_at ??
+              data.updatedAt,
+            null
+          ),
+        },
+        editableItems
+      )
+
+      if (!result?.expense?.id) {
+        throw new Error('Server tidak mengembalikan data faktur material.')
+      }
 
       set({ error: null })
 
       return {
-        ...payload,
-        id: insertedTransaction?.id ?? null,
+        ...result.expense,
+        items: result.items,
       }
     } catch (error) {
       const normalizedError = toError(error)
@@ -517,10 +538,56 @@ const useTransactionStore = create((set) => ({
       set({ isSubmitting: false })
     }
   },
+  softDeleteExpense: async (expenseId, expectedUpdatedAt = null) => {
+    try {
+      await softDeleteExpenseFromApi(expenseId, resolveTeamId(), expectedUpdatedAt)
+      return true
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    }
+  },
+  softDeleteMaterialInvoice: async (expenseId, expectedUpdatedAt = null) => {
+    try {
+      await softDeleteMaterialInvoiceFromApi(expenseId, resolveTeamId(), expectedUpdatedAt)
+      return true
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    }
+  },
+  restoreExpense: async (expenseId, expectedUpdatedAt = null) => {
+    try {
+      await restoreExpenseFromApi(expenseId, resolveTeamId(), expectedUpdatedAt)
+      return true
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    }
+  },
+  restoreMaterialInvoice: async (expenseId, expectedUpdatedAt = null) => {
+    try {
+      await restoreMaterialInvoiceFromApi(expenseId, resolveTeamId(), expectedUpdatedAt)
+      return true
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    }
+  },
   submitMaterialInvoice: async (headerData, itemsData) => {
     set({ isSubmitting: true, error: null })
-
-    let insertedExpenseId = null
 
     try {
       if (!supabase) {
@@ -529,71 +596,32 @@ const useTransactionStore = create((set) => ({
 
       const { headerPayload, lineItemsPayload, totalAmount } =
         buildMaterialInvoicePayload(headerData, itemsData)
-      const supplier = await upsertSupplier(
-        headerPayload.supplier_name,
-        headerPayload.team_id
+      const result = await createMaterialInvoiceFromApi(
+        headerPayload,
+        lineItemsPayload
       )
 
-      const expenseInsertPayload = {
-        ...headerPayload,
-        supplier_id: supplier.id,
-      }
-
-      const { data: insertedExpense, error: expenseError } = await supabase
-        .from('expenses')
-        .insert(expenseInsertPayload)
-        .select('id')
-        .single()
-
-      if (expenseError) {
-        throw expenseError
-      }
-
-      insertedExpenseId = insertedExpense?.id ?? null
-
-      if (!insertedExpenseId) {
-        throw new Error('ID faktur material gagal dibuat.')
-      }
-
-      const relationalLineItems = lineItemsPayload.map((item) => ({
-        ...item,
-        expense_id: insertedExpenseId,
-      }))
-
-      const { error: lineItemsError } = await supabase
-        .from('expense_line_items')
-        .insert(relationalLineItems)
-
-      if (lineItemsError) {
-        const rollbackError = await rollbackExpense(insertedExpenseId)
-
-        if (rollbackError) {
-          throw new Error(
-            `Gagal menyimpan item faktur. Rollback header juga gagal: ${rollbackError.message}`
-          )
-        }
-
-        throw lineItemsError
+      if (!result?.expense?.id) {
+        throw new Error('Server tidak mengembalikan data faktur material.')
       }
 
       notifyTelegram(
         buildMaterialInvoiceNotificationPayload(
           {
             ...headerData,
-            supplier_name: supplier.name,
+            supplier_name: headerPayload.supplier_name,
           },
-          insertedExpenseId,
+          result.expense.id,
           totalAmount,
-          relationalLineItems
+          result.items
         )
       )
 
       set({ error: null })
 
       return {
-        ...expenseInsertPayload,
-        id: insertedExpenseId,
-        items: relationalLineItems,
+        ...result.expense,
+        items: result.items,
       }
     } catch (error) {
       const normalizedError = toError(error)

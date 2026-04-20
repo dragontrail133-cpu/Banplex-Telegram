@@ -1,0 +1,8 @@
+- generic [ref=e1]:
+  - heading "MCP Smoke" [level=1] [ref=e2]
+  - text: Name
+  - textbox "Name" [ref=e3]: Banplex
+  - button "Say hello" [active] [ref=e4]
+  - button "Toggle" [ref=e5]
+  - text: "OFF"
+  - status [ref=e6]: Hello, Banplex!

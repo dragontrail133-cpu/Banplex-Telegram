@@ -1,8 +1,8 @@
 import { useNavigate } from 'react-router-dom'
-import { CalendarCheck2, Users } from 'lucide-react'
 import ProtectedRoute from '../components/ProtectedRoute'
 import FormLayout from '../components/layouts/FormLayout'
 import AttendanceForm from '../components/AttendanceForm'
+import { AppButton } from '../components/ui/AppPrimitives'
 import useAttendanceStore from '../store/useAttendanceStore'
 
 function AttendancePage() {
@@ -22,10 +22,17 @@ function AttendancePage() {
         onBack={() => navigate(-1)}
         title="Absensi Harian"
       >
-        <div className=" ">
-          <section className=" ">
-          </section>
-
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <AppButton
+              onClick={() => navigate('/payroll')}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Catatan Absensi
+            </AppButton>
+          </div>
           <AttendanceForm formId={formId} hideActions />
         </div>
       </FormLayout>

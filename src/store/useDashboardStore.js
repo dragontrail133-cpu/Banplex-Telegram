@@ -1,6 +1,10 @@
 import { create } from 'zustand'
-import { supabase } from '../lib/supabase'
 import { resolveTeamId } from '../lib/auth-context'
+import {
+  fetchCashMutationsFromApi,
+  fetchTransactionSummaryFromApi,
+  fetchWorkspaceTransactionsFromApi,
+} from '../lib/transactions-api'
 
 function createEmptySummary() {
   return {
@@ -31,13 +35,6 @@ function toError(error, fallbackMessage) {
   return error instanceof Error ? error : new Error(message)
 }
 
-function mapCashMutationRow(mutation) {
-  return {
-    ...mutation,
-    amount: toNumber(mutation?.amount),
-  }
-}
-
 function summarizeCashMutations(cashMutations = []) {
   return cashMutations.reduce(
     (summary, mutation) => {
@@ -61,164 +58,41 @@ function summarizeCashMutations(cashMutations = []) {
   )
 }
 
-function sortCashMutations(rows = []) {
-  return [...rows].sort((left, right) => {
-    const rightTimestamp = new Date(
-      String(right.transaction_date ?? right.created_at ?? '')
-    ).getTime()
-    const leftTimestamp = new Date(
-      String(left.transaction_date ?? left.created_at ?? '')
-    ).getTime()
-
-    return rightTimestamp - leftTimestamp
-  })
+async function loadCashMutations(teamId) {
+  return fetchCashMutationsFromApi(teamId)
 }
 
-async function loadCashMutations(teamId) {
-  if (!supabase) {
-    throw new Error('Client Supabase belum dikonfigurasi.')
-  }
+async function loadWorkspaceTransactions(teamId) {
+  return fetchWorkspaceTransactionsFromApi(teamId)
+}
 
-  const normalizedTeamId = resolveTeamId(teamId)
-
-  if (!normalizedTeamId) {
-    return []
-  }
-
-  const [
-    projectIncomesResult,
-    loansResult,
-    billPaymentsResult,
-    loanPaymentsResult,
-  ] = await Promise.all([
-    supabase
-      .from('project_incomes')
-      .select(
-        'id, team_id, project_id, transaction_date, income_date, amount, description, created_at, updated_at, project_name_snapshot, deleted_at'
-      )
-      .eq('team_id', normalizedTeamId)
-      .is('deleted_at', null),
-    supabase
-      .from('loans')
-      .select(
-        'id, team_id, transaction_date, disbursed_date, amount, principal_amount, description, created_at, updated_at, creditor_name_snapshot, deleted_at'
-      )
-      .eq('team_id', normalizedTeamId)
-      .is('deleted_at', null),
-    supabase
-      .from('bill_payments')
-      .select(
-        'id, bill_id, team_id, amount, payment_date, notes, created_at, updated_at, worker_name_snapshot, supplier_name_snapshot, project_name_snapshot, deleted_at'
-      )
-      .eq('team_id', normalizedTeamId)
-      .is('deleted_at', null),
-    supabase
-      .from('loan_payments')
-      .select(
-        'id, loan_id, team_id, amount, payment_date, notes, created_at, updated_at, creditor_name_snapshot, deleted_at'
-      )
-      .eq('team_id', normalizedTeamId)
-      .is('deleted_at', null),
-  ])
-
-  const results = [
-    projectIncomesResult,
-    loansResult,
-    billPaymentsResult,
-    loanPaymentsResult,
-  ]
-
-  for (const result of results) {
-    if (result.error) {
-      throw result.error
-    }
-  }
-
-  const projectIncomeRows = (projectIncomesResult.data ?? []).map((row) =>
-    mapCashMutationRow({
-      id: row.id,
-      sourceType: 'project-income',
-      type: 'income',
-      amount: row.amount,
-      transaction_date: row.transaction_date ?? row.income_date,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      description: row.description,
-      project_name: row.project_name_snapshot,
-      party_label: null,
-      related_id: row.project_id ?? null,
-    })
-  )
-
-  const loanRows = (loansResult.data ?? []).map((row) =>
-    mapCashMutationRow({
-      id: row.id,
-      sourceType: 'loan-disbursement',
-      type: 'income',
-      amount: row.principal_amount ?? row.amount,
-      transaction_date: row.transaction_date ?? row.disbursed_date,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      description: row.description,
-      project_name: null,
-      party_label: row.creditor_name_snapshot,
-      related_id: null,
-    })
-  )
-
-  const billPaymentRows = (billPaymentsResult.data ?? []).map((row) =>
-    mapCashMutationRow({
-      id: row.id,
-      sourceType: 'bill-payment',
-      type: 'expense',
-      amount: row.amount,
-      transaction_date: row.payment_date,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      description: row.notes,
-      project_name: row.project_name_snapshot,
-      party_label:
-        row.supplier_name_snapshot ?? row.worker_name_snapshot ?? null,
-      related_id: row.bill_id ?? null,
-    })
-  )
-
-  const loanPaymentRows = (loanPaymentsResult.data ?? []).map((row) =>
-    mapCashMutationRow({
-      id: row.id,
-      sourceType: 'loan-payment',
-      type: 'expense',
-      amount: row.amount,
-      transaction_date: row.payment_date,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      description: row.notes,
-      project_name: null,
-      party_label: row.creditor_name_snapshot,
-      related_id: row.loan_id ?? null,
-    })
-  )
-
-  return sortCashMutations([
-    ...projectIncomeRows,
-    ...loanRows,
-    ...billPaymentRows,
-    ...loanPaymentRows,
-  ])
+async function loadTransactionSummary(teamId) {
+  return fetchTransactionSummaryFromApi(teamId)
 }
 
 const useDashboardStore = create((set) => ({
   summary: createEmptySummary(),
   cashMutations: [],
+  workspaceTransactions: [],
   isLoading: false,
   isRefreshing: false,
+  isWorkspaceLoading: false,
   error: null,
+  workspaceError: null,
   lastUpdatedAt: null,
+  workspaceLastUpdatedAt: null,
   clearError: () => set({ error: null }),
+  clearWorkspaceError: () => set({ workspaceError: null }),
   fetchSummary: async (teamId) => {
     const normalizedTeamId = normalizeTeamId(resolveTeamId(teamId))
-    const cashMutations = await loadCashMutations(normalizedTeamId)
-    const summary = summarizeCashMutations(cashMutations)
+    const summaryRow = await loadTransactionSummary(normalizedTeamId)
+    const summary = summaryRow
+      ? {
+          totalIncome: Number(summaryRow.total_income) || 0,
+          totalExpense: Number(summaryRow.total_expense) || 0,
+          endingBalance: Number(summaryRow.ending_balance) || 0,
+        }
+      : summarizeCashMutations(await loadCashMutations(normalizedTeamId))
 
     set({
       summary,
@@ -238,6 +112,48 @@ const useDashboardStore = create((set) => ({
 
     return cashMutations
   },
+  fetchWorkspaceTransactions: async (teamId, { silent = false } = {}) => {
+    const normalizedTeamId = normalizeTeamId(resolveTeamId(teamId))
+
+    if (!normalizedTeamId) {
+      set({
+        workspaceTransactions: [],
+        isWorkspaceLoading: false,
+        workspaceError: null,
+        workspaceLastUpdatedAt: null,
+      })
+
+      return []
+    }
+
+    set({
+      isWorkspaceLoading: !silent,
+      workspaceError: null,
+    })
+
+    try {
+      const workspaceTransactions = await loadWorkspaceTransactions(normalizedTeamId)
+
+      set({
+        workspaceTransactions,
+        isWorkspaceLoading: false,
+        workspaceError: null,
+        workspaceLastUpdatedAt: new Date().toISOString(),
+      })
+
+      return workspaceTransactions
+    } catch (error) {
+      const normalizedError = toError(error, 'Gagal memuat workspace transaksi.')
+
+      set({
+        workspaceTransactions: [],
+        isWorkspaceLoading: false,
+        workspaceError: normalizedError.message,
+      })
+
+      throw normalizedError
+    }
+  },
   refreshDashboard: async (teamId, { silent = false } = {}) => {
     const normalizedTeamId = normalizeTeamId(resolveTeamId(teamId))
 
@@ -247,10 +163,14 @@ const useDashboardStore = create((set) => ({
       set({
         summary: emptySummary,
         cashMutations: [],
+        workspaceTransactions: [],
         isLoading: false,
         isRefreshing: false,
+        isWorkspaceLoading: false,
         error: null,
+        workspaceError: null,
         lastUpdatedAt: null,
+        workspaceLastUpdatedAt: null,
       })
 
       return {
@@ -266,8 +186,17 @@ const useDashboardStore = create((set) => ({
     })
 
     try {
-      const cashMutations = await loadCashMutations(normalizedTeamId)
-      const summary = summarizeCashMutations(cashMutations)
+      const [cashMutations, summaryRow] = await Promise.all([
+        loadCashMutations(normalizedTeamId),
+        loadTransactionSummary(normalizedTeamId),
+      ])
+      const summary = summaryRow
+        ? {
+            totalIncome: Number(summaryRow.total_income) || 0,
+            totalExpense: Number(summaryRow.total_expense) || 0,
+            endingBalance: Number(summaryRow.ending_balance) || 0,
+          }
+        : summarizeCashMutations(cashMutations)
 
       set({
         summary,

@@ -5,6 +5,9 @@ import useTelegram from '../hooks/useTelegram'
 import useAttendanceStore from '../store/useAttendanceStore'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
+import { getAppTodayKey } from '../lib/date-time'
+import MasterPickerField from './ui/MasterPickerField'
+import { AppBadge, AppToggleGroup } from './ui/AppPrimitives'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -17,9 +20,7 @@ function formatCurrency(value) {
 }
 
 function getTodayDateString() {
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'Asia/Jakarta',
-  }).format(new Date())
+  return getAppTodayKey()
 }
 
 function getPreviousDateString(value) {
@@ -102,8 +103,10 @@ function AttendanceSummaryChip({ label, value, toneClassName = '' }) {
 }
 
 function AttendanceRowCard({ row, statusOptions, onStatusChange, onNotesChange }) {
+  const isLocked = Boolean(row.readOnly)
+
   return (
-    <article className="app-section-surface p-3">
+    <article className={`app-section-surface p-3 ${isLocked ? 'opacity-95' : ''}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
@@ -121,6 +124,11 @@ function AttendanceRowCard({ row, statusOptions, onStatusChange, onNotesChange }
               Rate upah belum diatur untuk worker ini.
             </p>
           )}
+          {isLocked ? (
+            <div className="mt-2">
+              <AppBadge tone="warning">Terkunci</AppBadge>
+            </div>
+          ) : null}
         </div>
 
         <div className="shrink-0 text-right">
@@ -133,22 +141,23 @@ function AttendanceRowCard({ row, statusOptions, onStatusChange, onNotesChange }
         </div>
       </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-[160px_minmax(0,1fr)]">
-        <select
-          className="w-full rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-3 py-3 text-sm text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-          onChange={(event) => onStatusChange(row.workerId, event.target.value)}
+      <div className="mt-3 grid gap-2">
+        <AppToggleGroup
+          buttonSize="sm"
+          description="Status absensi memakai pilihan statis agar lebih cepat diisi."
+          label="Status Kehadiran"
+          disabled={isLocked}
+          onChange={(nextValue) => onStatusChange(row.workerId, nextValue)}
+          options={[
+            { value: '', label: 'Belum diisi' },
+            ...statusOptions,
+          ]}
           value={row.attendanceStatus}
-        >
-          <option value="">Belum diisi</option>
-          {statusOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        />
 
         <input
-          className="w-full rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-3 py-3 text-sm text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+          className="w-full rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-3 py-3 text-sm text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200 disabled:cursor-not-allowed disabled:bg-[var(--app-surface-low-color)] disabled:text-[var(--app-hint-color)]"
+          disabled={isLocked}
           onChange={(event) => onNotesChange(row.workerId, event.target.value)}
           placeholder="Catatan singkat, opsional"
           value={row.notes}
@@ -200,6 +209,18 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
 
       return wageProjects.length > 0 ? wageProjects : allProjects
   }, [projects])
+  const projectPickerOptions = useMemo(
+    () =>
+      activeProjects.map((project) => ({
+        value: project.id,
+        label: project.name,
+        description: project.project_type
+          ? `Tipe: ${project.project_type}`
+          : 'Master proyek aktif',
+        searchText: [project.name, project.project_type, project.status].join(' '),
+      })),
+    [activeProjects]
+  )
 
   const effectiveSelectedProjectId = selectedProjectId || activeProjects[0]?.id || ''
   const currentSheetKey = `${selectedDate}:${effectiveSelectedProjectId}`
@@ -309,6 +330,11 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
               ? Number(existingRecord.total_pay ?? 0)
               : Math.round(baseWage * multiplier),
         hasRate: baseWage > 0,
+        billingStatus: normalizeText(existingRecord?.billing_status, 'unbilled'),
+        salaryBillId: existingRecord?.salary_bill_id ?? null,
+        readOnly:
+          normalizeText(existingRecord?.billing_status, 'unbilled') === 'billed' ||
+          Boolean(existingRecord?.salary_bill_id),
       }
     })
   }, [
@@ -339,6 +365,12 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
   const summary = useMemo(() => buildRowSummary(rows), [rows])
 
   const handleRowStatusChange = (workerId, nextStatus) => {
+    const targetRow = rows.find((row) => row.workerId === workerId)
+
+    if (targetRow?.readOnly) {
+      return
+    }
+
     setRowDraftState((currentState) => ({
       key: currentSheetKey,
       values: {
@@ -361,6 +393,12 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
   }
 
   const handleRowNotesChange = (workerId, nextNotes) => {
+    const targetRow = rows.find((row) => row.workerId === workerId)
+
+    if (targetRow?.readOnly) {
+      return
+    }
+
     setRowDraftState((currentState) => ({
       key: currentSheetKey,
       values: {
@@ -380,6 +418,11 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
 
   const applyStatusToAll = (nextStatus) => {
     const nextValues = rows.reduce((accumulator, row) => {
+      if (row.readOnly) {
+        accumulator[row.workerId] = rowDrafts[row.workerId] ?? {}
+        return accumulator
+      }
+
       accumulator[row.workerId] = {
         ...(rowDrafts[row.workerId] ?? {}),
         attendanceStatus: nextStatus,
@@ -424,6 +467,11 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
       )
 
       const nextValues = rows.reduce((accumulator, row) => {
+        if (row.readOnly) {
+          accumulator[row.workerId] = rowDrafts[row.workerId] ?? {}
+          return accumulator
+        }
+
         const previousRow = previousByWorkerId.get(row.workerId)
 
         if (!previousRow) {
@@ -468,7 +516,9 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
         telegramUserId,
         attendanceDate: selectedDate,
         projectId: effectiveSelectedProjectId,
-        rows: rows.map((row) => ({
+        rows: rows
+          .filter((row) => !row.readOnly)
+          .map((row) => ({
           sourceId: row.sourceId,
           worker_id: row.workerId,
           worker_name: row.workerName,
@@ -476,7 +526,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
           attendance_status: row.attendanceStatus,
           total_pay: row.totalPay,
           notes: row.notes,
-        })),
+          })),
       })
 
       const nextSavedByWorkerId = new Map(
@@ -560,22 +610,18 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
               />
             </label>
 
-            <label className="block space-y-2">
-              <span>Proyek</span>
-              <select
-                className="w-full rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-4 py-3 text-sm text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                name="projectId"
-                onChange={(event) => setSelectedProjectId(event.target.value)}
-                value={effectiveSelectedProjectId}
-              >
-                <option value="">Pilih proyek</option>
-                {activeProjects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <MasterPickerField
+              disabled={isMasterLoading || activeProjects.length === 0}
+              emptyMessage="Data proyek belum tersedia."
+              label="Proyek"
+              name="projectId"
+              onChange={(nextValue) => setSelectedProjectId(nextValue)}
+              placeholder="Pilih proyek"
+              searchPlaceholder="Cari proyek..."
+              title="Pilih Proyek"
+              value={effectiveSelectedProjectId}
+              options={projectPickerOptions}
+            />
           </div>
 
           <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
@@ -728,7 +774,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
             disabled={isSheetSaving || !effectiveSelectedProjectId}
             type="submit"
           >
-            {isSheetSaving ? 'Menyimpan Sheet...' : 'Simpan Sheet Absensi'}
+            {isSheetSaving ? 'Menyimpan Catatan...' : 'Simpan Catatan Absensi'}
           </button>
         )}
       </fieldset>

@@ -3,6 +3,12 @@ import useTelegram from '../hooks/useTelegram'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
 import useTransactionStore from '../store/useTransactionStore'
+import { getAppTodayKey } from '../lib/date-time'
+import ExpenseAttachmentSection from './ExpenseAttachmentSection'
+import FormLayout from './layouts/FormLayout'
+import { supplierTypeGroups } from './master/masterTabs'
+import MasterPickerField from './ui/MasterPickerField'
+import { AppNominalInput, AppToggleGroup } from './ui/AppPrimitives'
 
 function normalizeText(value, fallback = null) {
   const normalizedValue = String(value ?? '').trim()
@@ -39,16 +45,19 @@ function getTelegramUserId(user, authUser) {
   return normalizedValue.length > 0 ? normalizedValue : null
 }
 
-function createInitialFormData() {
+function createInitialFormData(initialData = null) {
   return {
-    projectId: '',
-    categoryId: '',
-    supplierId: '',
-    paymentStatus: 'unpaid',
-    amount: '',
-    date: new Date().toISOString().slice(0, 10),
-    description: '',
-    notes: '',
+    projectId: normalizeText(initialData?.project_id, ''),
+    categoryId: normalizeText(initialData?.category_id, ''),
+    supplierId: normalizeText(initialData?.supplier_id, ''),
+    paymentStatus: normalizeText(initialData?.status, 'unpaid'),
+    amount: normalizeText(
+      initialData?.amount ?? initialData?.total_amount,
+      ''
+    ),
+    date: normalizeText(initialData?.expense_date, getAppTodayKey()),
+    description: normalizeText(initialData?.description, ''),
+    notes: normalizeText(initialData?.notes, ''),
   }
 }
 
@@ -62,18 +71,21 @@ function resolveExpenseType(category) {
   return 'lainnya'
 }
 
-function ExpenseForm({ onSuccess }) {
-  const [formData, setFormData] = useState(createInitialFormData)
+function ExpenseForm({ initialData = null, onSuccess }) {
+  const [formData, setFormData] = useState(() => createInitialFormData(initialData))
   const [successMessage, setSuccessMessage] = useState(null)
+  const [savedExpenseId, setSavedExpenseId] = useState(initialData?.id ?? null)
   const { user } = useTelegram()
   const authUser = useAuthStore((state) => state.user)
   const projects = useMasterStore((state) => state.projects)
   const categories = useMasterStore((state) => state.categories)
   const suppliers = useMasterStore((state) => state.suppliers)
+  const getSuppliersByTypes = useMasterStore((state) => state.getSuppliersByTypes)
   const isMasterLoading = useMasterStore((state) => state.isLoading)
   const masterError = useMasterStore((state) => state.error)
   const fetchMasters = useMasterStore((state) => state.fetchMasters)
   const submitExpense = useTransactionStore((state) => state.submitExpense)
+  const updateExpense = useTransactionStore((state) => state.updateExpense)
   const isSubmitting = useTransactionStore((state) => state.isSubmitting)
   const error = useTransactionStore((state) => state.error)
   const clearError = useTransactionStore((state) => state.clearError)
@@ -104,9 +116,67 @@ function ExpenseForm({ onSuccess }) {
   const selectedCategory = selectableCategories.find(
     (category) => category.id === formData.categoryId
   )
-  const selectedSupplier = suppliers.find((supplier) => supplier.id === formData.supplierId)
+  const contextualSuppliers = getSuppliersByTypes(supplierTypeGroups.operationalExpense)
+  const selectedSupplier = suppliers.find(
+    (supplier) => supplier.id === formData.supplierId
+  )
+  const resolvedSupplierName = normalizeText(
+    selectedSupplier?.name,
+    normalizeText(initialData?.supplier_name, normalizeText(initialData?.supplier_name_snapshot, null))
+  )
+  const availableSuppliers = useMemo(
+    () =>
+      selectedSupplier
+        ? [
+            selectedSupplier,
+            ...contextualSuppliers.filter(
+              (supplier) => supplier.id !== selectedSupplier.id
+            ),
+          ]
+        : contextualSuppliers,
+    [contextualSuppliers, selectedSupplier]
+  )
   const isMasterDataReady =
     !isMasterLoading && projects.length > 0 && selectableCategories.length > 0
+  const isLocked = Boolean(initialData?.deleted_at)
+  const activeExpenseId = savedExpenseId ?? initialData?.id ?? null
+  const projectPickerOptions = useMemo(
+    () =>
+      projects.map((project) => ({
+        value: project.id,
+        label: project.name,
+        description:
+          project.project_type || project.status
+            ? [project.project_type, project.status].filter(Boolean).join(' • ')
+            : 'Master proyek aktif',
+        searchText: [project.name, project.project_type, project.status].join(' '),
+      })),
+    [projects]
+  )
+  const categoryPickerOptions = useMemo(
+    () =>
+      selectableCategories.map((category) => ({
+        value: category.id,
+        label: category.name,
+        description: category.category_group
+          ? `Kelompok: ${category.category_group}`
+          : 'Master kategori biaya',
+        searchText: [category.name, category.category_group].join(' '),
+      })),
+    [selectableCategories]
+  )
+  const supplierPickerOptions = useMemo(
+    () =>
+      availableSuppliers.map((supplier) => ({
+        value: supplier.id,
+        label: supplier.name,
+        description: supplier.supplier_type
+          ? `Tipe: ${supplier.supplier_type}`
+          : 'Master supplier kontekstual',
+        searchText: [supplier.name, supplier.supplier_type].join(' '),
+      })),
+    [availableSuppliers]
+  )
 
   const handleChange = (event) => {
     const { name, value } = event.target
@@ -133,22 +203,41 @@ function ExpenseForm({ onSuccess }) {
     }
 
     try {
-      await submitExpense({
+      if (!selectedProject) {
+        throw new Error('Proyek wajib dipilih.')
+      }
+
+      if (!selectedCategory) {
+        throw new Error('Kategori wajib dipilih.')
+      }
+
+      const payload = {
         telegram_user_id: telegramUserId,
         userName,
+        expectedUpdatedAt: initialData?.updated_at ?? initialData?.updatedAt ?? null,
         project_id: formData.projectId,
         project_name: selectedProject?.name ?? null,
         category_id: formData.categoryId,
         category_name: selectedCategory?.name ?? null,
         expense_type: resolveExpenseType(selectedCategory),
         supplier_id: normalizeText(formData.supplierId, null),
-        supplier_name: selectedSupplier?.name ?? null,
+        supplier_name: resolvedSupplierName,
         expense_date: formData.date,
         amount: formData.amount,
         status: formData.paymentStatus,
         description: formData.description,
         notes: normalizeText(formData.notes, null),
-      })
+      }
+
+      const nextExpense = initialData?.id
+        ? await updateExpense(initialData.id, payload)
+        : await submitExpense(payload)
+
+      if (nextExpense?.id) {
+        setSavedExpenseId(nextExpense.id)
+      } else {
+        setSavedExpenseId(initialData?.id ?? null)
+      }
 
       try {
         await onSuccess?.()
@@ -156,8 +245,12 @@ function ExpenseForm({ onSuccess }) {
         console.error('Gagal memperbarui ringkasan setelah pengeluaran:', refreshError)
       }
 
-      setFormData(createInitialFormData())
-      setSuccessMessage('Pengeluaran berhasil disimpan ke jalur relasional final.')
+      setFormData(createInitialFormData(initialData))
+      setSuccessMessage(
+        initialData?.id
+          ? 'Pengeluaran berhasil diperbarui ke jalur relasional final.'
+          : 'Pengeluaran berhasil disimpan ke jalur relasional final.'
+      )
     } catch (submitError) {
       const message =
         submitError instanceof Error
@@ -170,7 +263,27 @@ function ExpenseForm({ onSuccess }) {
 
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
-      <fieldset className="space-y-6" disabled={isSubmitting}>
+      <fieldset className="space-y-6" disabled={isSubmitting || isLocked}>
+        <FormLayout
+          embedded
+          sections={[
+            {
+              id: 'expense-identity',
+              title: 'Relasi Transaksi',
+              description: 'Pilih master relasional yang mengikat transaksi ini.',
+            },
+            {
+              id: 'expense-details',
+              title: 'Nilai dan Status',
+              description: 'Isi nominal, status pembayaran, dan deskripsi transaksi.',
+            },
+            {
+              id: 'expense-notes',
+              title: 'Catatan dan Aksi',
+              description: 'Tambahkan catatan tambahan dan simpan perubahan.',
+            },
+          ]}
+        >
         <section className="space-y-4 rounded-[26px] border border-slate-200 bg-white/75 p-4 sm:p-5">
           <div className="space-y-1">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
@@ -178,87 +291,72 @@ function ExpenseForm({ onSuccess }) {
             </p>
           </div>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-[var(--app-text-color)]">
-              Proyek
-            </span>
-            <select
-              className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              disabled={isSubmitting || isMasterLoading || projects.length === 0}
-              name="projectId"
-              onChange={handleChange}
-              required
-              value={formData.projectId}
-            >
-              {isMasterLoading ? (
-                <option value="">Memuat proyek...</option>
-              ) : projects.length > 0 ? (
-                <>
-                  <option value="">Pilih proyek</option>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </>
-              ) : (
-                <option value="">Data proyek belum tersedia</option>
-              )}
-            </select>
-          </label>
+          <MasterPickerField
+            disabled={isSubmitting || isMasterLoading || projects.length === 0}
+            emptyMessage="Data proyek belum tersedia."
+            label="Proyek"
+            name="projectId"
+            onChange={(nextValue) =>
+              handleChange({
+                target: {
+                  name: 'projectId',
+                  value: nextValue,
+                },
+              })
+            }
+            placeholder="Pilih proyek"
+            required
+            searchPlaceholder="Cari proyek..."
+            title="Pilih Proyek"
+            value={formData.projectId}
+            options={projectPickerOptions}
+          />
 
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-[var(--app-text-color)]">
-              Kategori
-            </span>
-            <select
-              className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              disabled={
-                isSubmitting ||
-                isMasterLoading ||
-                selectableCategories.length === 0
-              }
-              name="categoryId"
-              onChange={handleChange}
-              required
-              value={formData.categoryId}
-            >
-              {isMasterLoading ? (
-                <option value="">Memuat kategori...</option>
-              ) : selectableCategories.length > 0 ? (
-                <>
-                  <option value="">Pilih kategori</option>
-                  {selectableCategories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </>
-              ) : (
-                <option value="">Data kategori belum tersedia</option>
-              )}
-            </select>
-          </label>
+          <MasterPickerField
+            disabled={
+              isSubmitting ||
+              isMasterLoading ||
+              selectableCategories.length === 0
+            }
+            emptyMessage="Data kategori belum tersedia."
+            label="Kategori"
+            name="categoryId"
+            onChange={(nextValue) =>
+              handleChange({
+                target: {
+                  name: 'categoryId',
+                  value: nextValue,
+                },
+              })
+            }
+            placeholder="Pilih kategori"
+            required
+            searchPlaceholder="Cari kategori..."
+            title="Pilih Kategori"
+            value={formData.categoryId}
+            options={categoryPickerOptions}
+          />
 
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-[var(--app-text-color)]">
-              Supplier
-            </span>
-            <select
-              className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              disabled={isSubmitting || isMasterLoading}
-              name="supplierId"
-              onChange={handleChange}
-              value={formData.supplierId}
-            >
-              <option value="">Tanpa supplier spesifik</option>
-              {suppliers.map((supplier) => (
-                <option key={supplier.id} value={supplier.id}>
-                  {supplier.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <MasterPickerField
+            disabled={isSubmitting || isMasterLoading || availableSuppliers.length === 0}
+            emptyMessage="Data supplier belum tersedia."
+            label="Supplier"
+            required={!initialData?.id || !resolvedSupplierName}
+            name="supplierId"
+            onChange={(nextValue) =>
+              handleChange({
+                target: {
+                  name: 'supplierId',
+                  value: nextValue,
+                },
+              })
+            }
+            placeholder="Pilih supplier"
+            searchPlaceholder="Cari supplier..."
+            title="Pilih Supplier"
+            value={formData.supplierId}
+            options={supplierPickerOptions}
+          />
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block space-y-2">
@@ -279,36 +377,42 @@ function ExpenseForm({ onSuccess }) {
               <span className="text-sm font-semibold text-[var(--app-text-color)]">
                 Nominal
               </span>
-              <input
+              <AppNominalInput
                 className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                inputMode="decimal"
-                min="0.01"
                 name="amount"
-                onChange={handleChange}
+                onValueChange={(nextValue) =>
+                  handleChange({
+                    target: {
+                      name: 'amount',
+                      value: nextValue,
+                    },
+                  })
+                }
                 placeholder="Rp 0"
                 required
-                step="0.01"
-                type="number"
                 value={formData.amount}
               />
             </label>
           </div>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-[var(--app-text-color)]">
-              Status Pembayaran
-            </span>
-            <select
-              className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              name="paymentStatus"
-              onChange={handleChange}
-              required
-              value={formData.paymentStatus}
-            >
-              <option value="unpaid">Belum dibayar</option>
-              <option value="paid">Sudah dibayar</option>
-            </select>
-          </label>
+          <AppToggleGroup
+            buttonSize="sm"
+            description="Status pembayaran hanya punya dua opsi dan tidak mengambil master data."
+            label="Status Pembayaran"
+            onChange={(nextValue) =>
+              handleChange({
+                target: {
+                  name: 'paymentStatus',
+                  value: nextValue,
+                },
+              })
+            }
+            options={[
+              { value: 'unpaid', label: 'Belum dibayar' },
+              { value: 'paid', label: 'Sudah dibayar' },
+            ]}
+            value={formData.paymentStatus}
+          />
 
           <label className="block space-y-2">
             <span className="text-sm font-semibold text-[var(--app-text-color)]">
@@ -336,33 +440,44 @@ function ExpenseForm({ onSuccess }) {
               value={formData.notes}
             />
           </label>
+          
+          <ExpenseAttachmentSection
+            deferUploadUntilParentSaved
+            expenseId={activeExpenseId}
+            title="Lampiran Bukti"
+          />
+
+          {error ? (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+              {error}
+            </div>
+          ) : null}
+
+          {masterError ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+              {masterError}
+            </div>
+          ) : null}
+
+          {successMessage ? (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-700">
+              {successMessage}
+            </div>
+          ) : null}
+
+          <button
+            className="flex w-full items-center justify-center rounded-[22px] bg-slate-950 px-5 py-4 text-base font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isSubmitting || !isMasterDataReady}
+            type="submit"
+          >
+            {isSubmitting
+              ? 'Menyimpan...'
+              : initialData?.id
+                ? 'Perbarui Pengeluaran'
+                : 'Simpan Pengeluaran'}
+          </button>
         </section>
-
-        {error ? (
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
-            {error}
-          </div>
-        ) : null}
-
-        {masterError ? (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-            {masterError}
-          </div>
-        ) : null}
-
-        {successMessage ? (
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-700">
-            {successMessage}
-          </div>
-        ) : null}
-
-        <button
-          className="flex w-full items-center justify-center rounded-[22px] bg-slate-950 px-5 py-4 text-base font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={isSubmitting || !isMasterDataReady}
-          type="submit"
-        >
-          {isSubmitting ? 'Menyimpan...' : 'Simpan Pengeluaran'}
-        </button>
+      </FormLayout>
       </fieldset>
     </form>
   )

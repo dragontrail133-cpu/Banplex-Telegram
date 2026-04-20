@@ -6,6 +6,7 @@ import {
   AppCard,
   AppErrorState,
   AppInput,
+  AppNominalInput,
   AppSelect,
   AppTextarea,
 } from '../ui/AppPrimitives'
@@ -257,16 +258,25 @@ function GenericMasterForm({
                     ) : null}
                   </div>
                 </div>
-                <AppInput
-                  inputMode={field.inputMode}
-                  min={field.min}
-                  name={field.name}
-                  onChange={(event) => handleChange(field.name, event.target.value)}
-                  placeholder={field.placeholder}
-                  step={field.step}
-                  type={field.type === 'number' ? 'number' : 'text'}
-                  value={formState[field.name] ?? ''}
-                />
+                {field.type === 'number' && field.format === 'currency' ? (
+                  <AppNominalInput
+                    name={field.name}
+                    onValueChange={(nextValue) => handleChange(field.name, nextValue)}
+                    placeholder={field.placeholder}
+                    value={formState[field.name] ?? ''}
+                  />
+                ) : (
+                  <AppInput
+                    inputMode={field.inputMode}
+                    min={field.min}
+                    name={field.name}
+                    onChange={(event) => handleChange(field.name, event.target.value)}
+                    placeholder={field.placeholder}
+                    step={field.step}
+                    type={field.type === 'number' ? 'number' : 'text'}
+                    value={formState[field.name] ?? ''}
+                  />
+                )}
               </AppCard>
             )
           })}

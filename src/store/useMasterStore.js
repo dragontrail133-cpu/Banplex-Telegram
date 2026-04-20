@@ -93,6 +93,24 @@ function normalizeSupplierRow(supplier) {
   }
 }
 
+function normalizeSupplierType(value) {
+  return normalizeText(value, '').toLowerCase()
+}
+
+function filterSuppliersByTypes(suppliers = [], allowedTypes = []) {
+  const normalizedAllowedTypes = new Set(
+    allowedTypes.map((type) => normalizeSupplierType(type)).filter(Boolean)
+  )
+
+  if (normalizedAllowedTypes.size === 0) {
+    return [...suppliers]
+  }
+
+  return suppliers.filter((supplier) =>
+    normalizedAllowedTypes.has(normalizeSupplierType(supplier?.supplier_type))
+  )
+}
+
 function normalizeProfessionRow(profession) {
   const professionName = normalizeText(profession?.profession_name, '')
 
@@ -238,6 +256,24 @@ async function selectUndeletedRows(tableName, columns, orderColumn) {
   return data ?? []
 }
 
+async function selectDeletedRows(tableName, columns, orderColumn = 'deleted_at') {
+  if (!supabase) {
+    throw new Error('Client Supabase belum dikonfigurasi.')
+  }
+
+  const { data, error } = await supabase
+    .from(tableName)
+    .select(columns)
+    .not('deleted_at', 'is', null)
+    .order(orderColumn, { ascending: false })
+
+  if (error) {
+    throw error
+  }
+
+  return data ?? []
+}
+
 async function loadProjects() {
   return (await selectUndeletedRows('projects', projectSelectColumns, 'project_name')).map(
     normalizeProjectRow
@@ -322,6 +358,87 @@ async function loadMaterials() {
   return (data ?? []).map(normalizeMaterialRow)
 }
 
+async function loadDeletedProjects() {
+  return (await selectDeletedRows('projects', projectSelectColumns, 'deleted_at')).map(
+    normalizeProjectRow
+  )
+}
+
+async function loadDeletedCategories() {
+  return (
+    await selectDeletedRows('expense_categories', categorySelectColumns, 'deleted_at')
+  ).map(normalizeCategoryRow)
+}
+
+async function loadDeletedSuppliers() {
+  return (await selectDeletedRows('suppliers', supplierSelectColumns, 'deleted_at')).map(
+    normalizeSupplierRow
+  )
+}
+
+async function loadDeletedFundingCreditors() {
+  return (
+    await selectDeletedRows('funding_creditors', fundingCreditorSelectColumns, 'deleted_at')
+  ).map(normalizeFundingCreditorRow)
+}
+
+async function loadDeletedProfessions() {
+  return (await selectDeletedRows('professions', professionSelectColumns, 'deleted_at')).map(
+    normalizeProfessionRow
+  )
+}
+
+async function loadDeletedStaffMembers() {
+  return (await selectDeletedRows('staff', staffSelectColumns, 'deleted_at')).map(
+    normalizeStaffRow
+  )
+}
+
+async function loadDeletedWorkers() {
+  return (await selectDeletedRows('workers', workerSelectColumns, 'deleted_at')).map(
+    normalizeWorkerRow
+  )
+}
+
+async function loadDeletedMaterials() {
+  return (await selectDeletedRows('materials', materialSelectColumns, 'deleted_at')).map(
+    normalizeMaterialRow
+  )
+}
+
+async function loadDeletedMasterRecords() {
+  const [
+    projects,
+    categories,
+    suppliers,
+    fundingCreditors,
+    professions,
+    staffMembers,
+    workers,
+    materials,
+  ] = await Promise.all([
+    loadDeletedProjects(),
+    loadDeletedCategories(),
+    loadDeletedSuppliers(),
+    loadDeletedFundingCreditors(),
+    loadDeletedProfessions(),
+    loadDeletedStaffMembers(),
+    loadDeletedWorkers(),
+    loadDeletedMaterials(),
+  ])
+
+  return {
+    projects,
+    categories,
+    suppliers,
+    fundingCreditors,
+    professions,
+    staffMembers,
+    workers,
+    materials,
+  }
+}
+
 function setLoading(set) {
   set({ isLoading: true, error: null })
 }
@@ -358,6 +475,21 @@ async function updateRow(tableName, recordId, payload, columns) {
     .update(payload)
     .eq('id', recordId)
     .is('deleted_at', null)
+    .select(columns)
+    .single()
+
+  if (error) {
+    throw error
+  }
+
+  return data
+}
+
+async function restoreRow(tableName, recordId, payload, columns) {
+  const { data, error } = await supabase
+    .from(tableName)
+    .update(payload)
+    .eq('id', recordId)
     .select(columns)
     .single()
 
@@ -470,6 +602,7 @@ const useMasterStore = create((set, get) => ({
   fundingCreditors: [],
   workers: [],
   workerWageRates: [],
+  deletedMasters: null,
   hasFetched: false,
   isLoading: false,
   error: null,
@@ -603,6 +736,10 @@ const useMasterStore = create((set, get) => ({
       return setFailure(set, error, 'Gagal memuat supplier.', { suppliers: [] })
     }
   },
+  getSuppliersByTypes: (allowedTypes = []) => filterSuppliersByTypes(get().suppliers, allowedTypes),
+  getMaterialSuppliers: () => filterSuppliersByTypes(get().suppliers, ['Material']),
+  getOperationalSuppliers: () =>
+    filterSuppliersByTypes(get().suppliers, ['Operasional', 'Lainnya']),
   fetchProfessions: async ({ force = false } = {}) => {
     const { professions, isLoading } = get()
 
@@ -710,6 +847,148 @@ const useMasterStore = create((set, get) => ({
       return setFailure(set, error, 'Gagal memuat data upah pekerja.', {
         workerWageRates: [],
       })
+    }
+  },
+  fetchDeletedMasters: async () => {
+    set({
+      deletedMasters: null,
+      isLoading: true,
+      error: null,
+    })
+
+    try {
+      const deletedMasters = await loadDeletedMasterRecords()
+
+      set({
+        deletedMasters,
+        isLoading: false,
+        error: null,
+      })
+
+      return deletedMasters
+    } catch (error) {
+      return setFailure(set, error, 'Gagal memuat recycle bin master.', {
+        deletedMasters: null,
+        isLoading: false,
+      })
+    }
+  },
+  restoreMasterRecord: async (entityType, recordId) => {
+    set({ isLoading: true, error: null })
+
+    try {
+      const normalizedEntityType = normalizeText(entityType, '').toLowerCase()
+      const normalizedRecordId = normalizeText(recordId, null)
+
+      if (!normalizedEntityType) {
+        throw new Error('Tipe master record wajib diisi.')
+      }
+
+      if (!normalizedRecordId) {
+        throw new Error('ID master record wajib diisi.')
+      }
+
+      if (normalizedEntityType === 'project') {
+        await restoreRow(
+          'projects',
+          normalizedRecordId,
+          {
+            deleted_at: null,
+            is_active: true,
+          },
+          projectSelectColumns
+        )
+      } else if (normalizedEntityType === 'category') {
+        await restoreRow(
+          'expense_categories',
+          normalizedRecordId,
+          {
+            deleted_at: null,
+            is_active: true,
+          },
+          categorySelectColumns
+        )
+      } else if (normalizedEntityType === 'supplier') {
+        await restoreRow(
+          'suppliers',
+          normalizedRecordId,
+          {
+            deleted_at: null,
+            is_active: true,
+          },
+          supplierSelectColumns
+        )
+      } else if (normalizedEntityType === 'creditor') {
+        await restoreRow(
+          'funding_creditors',
+          normalizedRecordId,
+          {
+            deleted_at: null,
+            is_active: true,
+          },
+          fundingCreditorSelectColumns
+        )
+      } else if (normalizedEntityType === 'profession') {
+        await restoreRow(
+          'professions',
+          normalizedRecordId,
+          {
+            deleted_at: null,
+          },
+          professionSelectColumns
+        )
+      } else if (normalizedEntityType === 'staff') {
+        await restoreRow(
+          'staff',
+          normalizedRecordId,
+          {
+            deleted_at: null,
+          },
+          staffSelectColumns
+        )
+      } else if (normalizedEntityType === 'material') {
+        await restoreRow(
+          'materials',
+          normalizedRecordId,
+          {
+            deleted_at: null,
+            is_active: true,
+          },
+          materialSelectColumns
+        )
+      } else if (normalizedEntityType === 'worker') {
+        await restoreRow(
+          'workers',
+          normalizedRecordId,
+          {
+            deleted_at: null,
+            is_active: true,
+            status: 'active',
+          },
+          workerSelectColumns
+        )
+
+        const { error: wageRateError } = await supabase
+          .from('worker_wage_rates')
+          .update({
+            deleted_at: null,
+          })
+          .eq('worker_id', normalizedRecordId)
+
+        if (wageRateError) {
+          throw wageRateError
+        }
+      } else {
+        throw new Error('Tipe master record tidak dikenali.')
+      }
+
+      await get().fetchMasters({ force: true })
+
+      set({ isLoading: false, error: null })
+
+      return true
+    } catch (error) {
+      return setFailure(set, error, 'Gagal memulihkan master data.')
     }
   },
   addProject: async (projectData = {}) => {

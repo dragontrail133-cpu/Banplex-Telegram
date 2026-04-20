@@ -39,6 +39,7 @@ alter table public.transactions
 do $$
 declare
   v_default_team_id uuid;
+  v_profile_role_expr text;
 begin
   insert into public.teams (name, slug, is_active)
   values ('Default Workspace', 'default-workspace', true)
@@ -117,21 +118,41 @@ begin
   where public.loans.id = public.loan_payments.loan_id
     and public.loan_payments.team_id is null;
 
-  insert into public.team_members (team_id, telegram_user_id, role, is_default)
-  select
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'profiles'
+      and column_name = 'role'
+  ) then
+    v_profile_role_expr := $sql$
+      case
+        when p.role in ('Owner', 'Admin', 'Logistik', 'Payroll', 'Administrasi', 'Viewer')
+          then p.role
+        else 'Viewer'
+      end
+    $sql$;
+  else
+    v_profile_role_expr := '''Viewer''';
+  end if;
+
+  execute format(
+    $sql$
+      insert into public.team_members (team_id, telegram_user_id, role, is_default)
+      select
+        %L::uuid,
+        p.telegram_user_id,
+        %s,
+        true
+      from public.profiles p
+      where p.telegram_user_id is not null
+      on conflict (team_id, telegram_user_id) do update
+        set role = excluded.role,
+            is_default = excluded.is_default
+    $sql$,
     v_default_team_id,
-    p.telegram_user_id,
-    case
-      when p.role in ('Owner', 'Admin', 'Logistik', 'Payroll', 'Administrasi', 'Viewer')
-        then p.role
-      else 'Viewer'
-    end,
-    true
-  from public.profiles p
-  where p.telegram_user_id is not null
-  on conflict (team_id, telegram_user_id) do update
-    set role = excluded.role,
-        is_default = excluded.is_default;
+    v_profile_role_expr
+  );
 end $$;
 
 create schema if not exists app_private;

@@ -915,34 +915,52 @@ before update on public.file_assets
 for each row
 execute function app_private.set_updated_at();
 
-drop policy if exists "hrd_documents_select" on storage.objects;
-create policy "hrd_documents_select"
-on storage.objects
-for select
-to authenticated, anon
-using (bucket_id = 'hrd_documents');
+do $$
+begin
+  if to_regclass('storage.objects') is null then
+    return;
+  end if;
 
-drop policy if exists "hrd_documents_insert" on storage.objects;
-create policy "hrd_documents_insert"
-on storage.objects
-for insert
-to authenticated
-with check (bucket_id = 'hrd_documents');
-
-drop policy if exists "hrd_documents_update" on storage.objects;
-create policy "hrd_documents_update"
-on storage.objects
-for update
-to authenticated
-using (bucket_id = 'hrd_documents')
-with check (bucket_id = 'hrd_documents');
-
-drop policy if exists "hrd_documents_delete" on storage.objects;
-create policy "hrd_documents_delete"
-on storage.objects
-for delete
-to authenticated
-using (bucket_id = 'hrd_documents');
+  begin
+    execute 'drop policy if exists "hrd_documents_select" on storage.objects';
+    execute $policy$
+      create policy "hrd_documents_select"
+      on storage.objects
+      for select
+      to authenticated, anon
+      using (bucket_id = 'hrd_documents')
+    $policy$;
+    execute 'drop policy if exists "hrd_documents_insert" on storage.objects';
+    execute $policy$
+      create policy "hrd_documents_insert"
+      on storage.objects
+      for insert
+      to authenticated
+      with check (bucket_id = 'hrd_documents')
+    $policy$;
+    execute 'drop policy if exists "hrd_documents_update" on storage.objects';
+    execute $policy$
+      create policy "hrd_documents_update"
+      on storage.objects
+      for update
+      to authenticated
+      using (bucket_id = 'hrd_documents')
+      with check (bucket_id = 'hrd_documents')
+    $policy$;
+    execute 'drop policy if exists "hrd_documents_delete" on storage.objects';
+    execute $policy$
+      create policy "hrd_documents_delete"
+      on storage.objects
+      for delete
+      to authenticated
+      using (bucket_id = 'hrd_documents')
+    $policy$;
+  exception
+    when insufficient_privilege then
+      raise notice 'Skipping storage.objects policy refresh in 20260411235900 due to ownership mismatch.';
+  end;
+end
+$$;
 
 grant select, insert, update on public.pdf_settings to authenticated;
 grant select, insert, update on public.beneficiaries to authenticated;

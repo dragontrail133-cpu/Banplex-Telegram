@@ -59,6 +59,26 @@ Implikasi wajib untuk agent:
 
 ---
 
+## Dokumen Kerja Wajib untuk Stream Multi-Brief
+Jika user membuka stream kerja yang berlanjut lintas banyak brief, wajib ada:
+
+1. **Dokumen planning + micro-task** yang menjadi source of truth backlog.
+2. **Dokumen progress log** yang mencatat hasil audit tiap task.
+
+Untuk stream CRUD workspace yang sedang aktif, dokumen wajibnya adalah:
+
+- `docs/unified-crud-workspace-plan-2026-04-18.md`
+- `docs/progress/unified-crud-workspace-progress-log.md`
+
+Aturan wajib:
+
+1. Sebelum melanjutkan brief lanjutan pada stream yang sama, audit dulu dokumen planning aktif.
+2. Jika brief baru belum tercakup, tambahkan sebagai micro-task baru.
+3. Jika brief baru berbenturan dengan task yang sudah ada, revisi task yang terdampak sebelum planning/implementasi lanjut.
+4. Jangan lanjut implementasi task berikutnya jika progress log dan status audit task sebelumnya belum diperbarui.
+
+---
+
 ## Standar Eksekusi Default
 Urutan wajib:
 1. **Baca dulu**: file yang relevan, cari pola existing, identifikasi risiko.
@@ -66,6 +86,11 @@ Urutan wajib:
 3. **Edit minimal**: perubahan sekecil mungkin untuk mencapai tujuan.
 4. **Preserve style**: ikuti pola, naming, dan struktur existing repo.
 5. Hindari rename/pemindahan file kecuali diminta eksplisit.
+
+Tambahan wajib untuk stream multi-brief:
+6. Setelah satu task selesai, lakukan audit hasil task terhadap definition of done dan validasi minimum.
+7. Jangan lanjut ke task berikutnya sampai task aktif berstatus `validated`, `deferred`, atau `blocked` dengan alasan tertulis.
+8. Setelah audit, update progress log stream yang relevan sebelum menutup task.
 
 ---
 
@@ -79,6 +104,7 @@ Validasi harus proporsional terhadap scope:
 Catatan:
 - Jangan menginstal package atau mengubah lockfile untuk sekadar validasi kecuali diminta.
 - Jika validasi tidak bisa dijalankan, tulis alasannya di laporan akhir.
+- Untuk stream multi-brief, validasi task juga harus mencakup audit status task di dokumen planning/progress, bukan hanya hasil command.
 
 ---
 
@@ -136,6 +162,7 @@ Gunakan template ini saat memberi instruksi:
 - Styling mengikuti design tokens yang ditentukan.
 - Validasi relevan sudah dijalankan atau diberi alasan.
 - Laporan akhir lengkap (ringkasan, file, alasan, risiko, validasi).
+- Jika task bagian dari stream multi-brief: dokumen planning sudah diaudit, status task sudah diperbarui, dan progress log sudah di-update.
 
 ---
 

@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react'
 import useAuthStore from '../store/useAuthStore'
 import usePaymentStore from '../store/usePaymentStore'
-import { AppButton, AppCardStrong, AppDialog, AppInput, AppTextarea } from './ui/AppPrimitives'
+import { getAppTodayKey } from '../lib/date-time'
+import {
+  AppButton,
+  AppCardStrong,
+  AppDialog,
+  AppNominalInput,
+  AppInput,
+  AppTextarea,
+} from './ui/AppPrimitives'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -18,7 +26,7 @@ function formatCurrency(value) {
 function createInitialForm(bill) {
   return {
     amount: bill?.remainingAmount ? String(bill.remainingAmount) : '',
-    paymentDate: new Date().toISOString().slice(0, 10),
+    paymentDate: getAppTodayKey(),
     notes: '',
   }
 }
@@ -122,16 +130,19 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
             <span className="text-sm font-semibold text-[var(--app-text-color)]">
               Nominal Pembayaran
             </span>
-            <AppInput
-              inputMode="decimal"
+            <AppNominalInput
               max={bill.remainingAmount}
-              min="0.01"
               name="amount"
-              onChange={handleChange}
+              onValueChange={(nextValue) =>
+                handleChange({
+                  target: {
+                    name: 'amount',
+                    value: nextValue,
+                  },
+                })
+              }
               placeholder="Rp 0"
               required
-              step="0.01"
-              type="number"
               value={formData.amount}
             />
           </label>

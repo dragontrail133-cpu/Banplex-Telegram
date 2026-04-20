@@ -20,6 +20,7 @@ function formatDate(value) {
     return new Intl.DateTimeFormat('id-ID', {
       dateStyle: 'medium',
       timeStyle: 'short',
+      timeZone: 'Asia/Jakarta',
     }).format(new Date())
   }
 
@@ -29,6 +30,7 @@ function formatDate(value) {
     return new Intl.DateTimeFormat('id-ID', {
       dateStyle: 'medium',
       timeStyle: 'short',
+      timeZone: 'Asia/Jakarta',
     }).format(parsedDate)
   }
 
@@ -39,6 +41,7 @@ function formatDate(value) {
       day: 'numeric',
       month: 'long',
       year: 'numeric',
+      timeZone: 'Asia/Jakarta',
     }).format(parsedDateOnly)
   }
 

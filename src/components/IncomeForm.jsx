@@ -3,6 +3,16 @@ import useTelegram from '../hooks/useTelegram'
 import useAuthStore from '../store/useAuthStore'
 import useIncomeStore from '../store/useIncomeStore'
 import useMasterStore from '../store/useMasterStore'
+import { getAppTodayKey } from '../lib/date-time'
+import FormLayout from './layouts/FormLayout'
+import MasterPickerField from './ui/MasterPickerField'
+import {
+  AppButton,
+  AppCard,
+  AppErrorState,
+  AppNominalInput,
+  FormSection,
+} from './ui/AppPrimitives'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -46,7 +56,7 @@ function createInitialFormData(initialData = null) {
       initialData?.transaction_date ??
       initialData?.transactionDate ??
       initialData?.date ??
-      new Date().toISOString().slice(0, 10),
+      getAppTodayKey(),
     amount:
       initialData?.amount === 0 || initialData?.amount
         ? String(initialData.amount)
@@ -123,6 +133,14 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
   const telegramUserId = getTelegramUserId(user, authUser)
   const userName = getUserDisplayName(user, authUser)
   const selectedProject = projects.find((project) => project.id === formData.projectId)
+  const projectPickerOptions = projects.map((project) => ({
+    value: project.id,
+    label: project.name,
+    description: project.project_type
+      ? `Tipe: ${project.project_type}`
+      : 'Master proyek aktif',
+    searchText: [project.name, project.project_type, project.status].join(' '),
+  }))
   const terminAmount = Number(formData.amount) || 0
   const staffFeePreview = buildStaffFeePreview(staffMembers, terminAmount)
   const estimatedStaffFeeTotal = staffFeePreview.reduce(
@@ -168,6 +186,7 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
       const payload = {
         telegram_user_id: telegramUserId,
         userName,
+        expectedUpdatedAt: initialData?.updated_at ?? initialData?.updatedAt ?? null,
         project_id: formData.projectId,
         project_name: selectedProject?.name ?? null,
         transaction_date: formData.date,
@@ -209,174 +228,236 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
       <fieldset className="space-y-6" disabled={isSubmitting}>
-        <section className="space-y-4 rounded-[26px] border border-slate-200 bg-white/75 p-4 sm:p-5">
-          <div className="space-y-1">
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
-              Pemasukan Proyek
-            </p>
-          </div>
+        <FormLayout
+          embedded
+          sections={[
+            {
+              id: 'income-identity',
+              title: 'Identitas Termin',
+              description: 'Pilih proyek dan tanggal transaksi.',
+            },
+            {
+              id: 'income-details',
+              title: 'Nominal dan Deskripsi',
+              description: 'Isi nominal termin dan ringkasan singkat.',
+            },
+            {
+              id: 'income-preview',
+              title: 'Preview dan Simpan',
+              description: 'Cek estimasi fee lalu simpan data final.',
+            },
+          ]}
+        >
+          <FormSection
+            title="Identitas Termin"
+            description="Pilih proyek dan tanggal transaksi."
+          >
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="space-y-4">
+                <MasterPickerField
+                  disabled={isProjectDisabled}
+                  emptyMessage="Data proyek belum tersedia."
+                  label="Proyek"
+                  name="projectId"
+                  onChange={(nextValue) =>
+                    handleChange({
+                      target: {
+                        name: 'projectId',
+                        value: nextValue,
+                      },
+                    })
+                  }
+                  placeholder="Pilih proyek"
+                  required
+                  searchPlaceholder="Cari proyek..."
+                  title="Pilih Proyek"
+                  value={formData.projectId}
+                  options={projectPickerOptions}
+                />
+              </div>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-[var(--app-text-color)]">
-              Proyek
-            </span>
-            <select
-              className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              disabled={isProjectDisabled}
-              name="projectId"
-              onChange={handleChange}
-              required
-              value={formData.projectId}
-            >
-              {isMasterLoading ? (
-                <option value="">Memuat proyek...</option>
-              ) : projects.length > 0 ? (
-                <>
-                  <option value="">Pilih proyek</option>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </>
-              ) : (
-                <option value="">Data proyek belum tersedia</option>
-              )}
-            </select>
-          </label>
+              <div className="space-y-4">
+                <AppCard className="space-y-3 bg-white/80">
+                  <label className="block space-y-2">
+                    <span className="text-sm font-semibold text-[var(--app-text-color)]">
+                      Tanggal
+                    </span>
+                    <input
+                      className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                      name="date"
+                      onChange={handleChange}
+                      required
+                      type="date"
+                      value={formData.date}
+                    />
+                  </label>
+                </AppCard>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                Tanggal
-              </span>
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                name="date"
-                onChange={handleChange}
-                required
-                type="date"
-                value={formData.date}
-              />
-            </label>
-
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                Nominal Termin
-              </span>
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                inputMode="decimal"
-                min="0.01"
-                name="amount"
-                onChange={handleChange}
-                placeholder="Rp 0"
-                required
-                step="0.01"
-                type="number"
-                value={formData.amount}
-              />
-            </label>
-          </div>
-
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-[var(--app-text-color)]">
-              Deskripsi
-            </span>
-            <textarea
-              className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              name="description"
-              onChange={handleChange}
-              placeholder="Contoh: Termin 1 pekerjaan struktur."
-              required
-              value={formData.description}
-            />
-          </label>
-
-          <div className="rounded-[24px] border border-sky-200 bg-sky-50/80 p-4">
-            <div className="space-y-1">
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-700">
-                Preview Fee Staf
-              </p>
-              <p className="text-sm leading-6 text-sky-900">
-                Estimasi ini dibaca dari master data staf dan belum membuat bill fee.
-              </p>
+                <AppCard className="space-y-2 bg-sky-50/80">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700">
+                    Ringkasan Proyek
+                  </p>
+                  <p className="text-sm font-semibold text-sky-900">
+                    {selectedProject?.name ?? 'Pilih proyek untuk melihat ringkasan.'}
+                  </p>
+                  <p className="text-sm leading-6 text-sky-800">
+                    {selectedProject?.project_type
+                      ? `Tipe proyek: ${selectedProject.project_type}`
+                      : 'Ringkasan proyek akan membantu memastikan termin masuk ke konteks yang tepat.'}
+                  </p>
+                </AppCard>
+              </div>
             </div>
+          </FormSection>
 
-            {staffFeePreview.length === 0 ? (
-              <p className="mt-3 text-sm leading-6 text-sky-800">
-                Belum ada data staf. Tambahkan staf jika fee termin perlu dihitung.
-              </p>
-            ) : (
-              <div className="mt-4 space-y-3">
-                {staffFeePreview.map((staffPreview) => (
-                  <div
-                    key={staffPreview.id}
-                    className="rounded-2xl border border-sky-100 bg-white/90 px-4 py-3"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">
-                          {staffPreview.name}
-                        </p>
-                        <p className="mt-1 text-sm leading-6 text-slate-600">
-                          {staffPreview.description}
-                        </p>
-                      </div>
-                      <p className="text-sm font-semibold text-sky-700">
-                        {formatCurrency(staffPreview.estimatedFee)}
-                      </p>
-                    </div>
+          <FormSection
+            title="Nominal dan Deskripsi"
+            description="Isi nominal termin dan ringkasan singkat."
+          >
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+              <AppCard className="space-y-3 bg-white/80">
+                <label className="block space-y-2">
+                  <span className="text-sm font-semibold text-[var(--app-text-color)]">
+                    Nominal Termin
+                  </span>
+                  <AppNominalInput
+                    className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                    name="amount"
+                    onValueChange={(nextValue) =>
+                      handleChange({
+                        target: {
+                          name: 'amount',
+                          value: nextValue,
+                        },
+                      })
+                    }
+                    placeholder="Rp 0"
+                    required
+                    value={formData.amount}
+                  />
+                </label>
+              </AppCard>
+
+              <div className="space-y-4">
+                <AppCard className="space-y-3 bg-white/80">
+                  <label className="block space-y-2">
+                    <span className="text-sm font-semibold text-[var(--app-text-color)]">
+                      Deskripsi
+                    </span>
+                    <textarea
+                      className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                      name="description"
+                      onChange={handleChange}
+                      placeholder="Contoh: Termin 1 pekerjaan struktur."
+                      required
+                      value={formData.description}
+                    />
+                  </label>
+                </AppCard>
+
+                <AppCard className="space-y-2 bg-slate-50/80">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+                    Ringkasan Nominal
+                  </p>
+                  <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                    {formatCurrency(terminAmount)}
+                  </p>
+                  <p className="text-sm leading-6 text-[var(--app-hint-color)]">
+                    Estimasi fee staf akan dihitung berdasarkan nominal termin yang diisi.
+                  </p>
+                </AppCard>
+              </div>
+            </div>
+          </FormSection>
+
+          <FormSection
+            title="Preview dan Simpan"
+            description="Cek estimasi fee lalu simpan data final."
+          >
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+              <AppCard className="space-y-3 bg-white/80">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-700">
+                    Preview Fee Staf
+                  </p>
+                </div>
+
+                {staffFeePreview.length === 0 ? (
+                  <p className="text-sm leading-6 text-sky-800">
+                    Belum ada data staf. Tambahkan staf jika fee termin perlu dihitung.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {staffFeePreview.map((staffPreview) => (
+                      <AppCard
+                        key={staffPreview.id}
+                        className="space-y-2 bg-white/90 px-4 py-3"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {staffPreview.name}
+                            </p>
+                            <p className="mt-1 text-sm leading-6 text-slate-600">
+                              {staffPreview.description}
+                            </p>
+                          </div>
+                          <p className="text-sm font-semibold text-sky-700">
+                            {formatCurrency(staffPreview.estimatedFee)}
+                          </p>
+                        </div>
+                      </AppCard>
+                    ))}
                   </div>
-                ))}
+                )}
+              </AppCard>
 
-                <div className="rounded-2xl bg-sky-900 px-4 py-3 text-white">
+              <div className="space-y-4">
+                <AppCard className="space-y-3 bg-sky-900 text-white">
                   <p className="text-xs uppercase tracking-[0.18em] text-sky-100">
                     Total Estimasi Fee
                   </p>
-                  <p className="mt-2 text-xl font-semibold">
+                  <p className="text-xl font-semibold">
                     {formatCurrency(estimatedStaffFeeTotal)}
                   </p>
-                  <p className="mt-2 text-sm leading-6 text-sky-100">
-                    Estimasi dana bersih setelah fee:
-                    {' '}
+                  <p className="text-sm leading-6 text-sky-100">
+                    Estimasi dana bersih setelah fee:{' '}
                     {formatCurrency(Math.max(terminAmount - estimatedStaffFeeTotal, 0))}
                   </p>
-                </div>
+                </AppCard>
+
+                {error ? (
+                  <AppErrorState title="Form belum valid" description={error} />
+                ) : null}
+
+                {masterError ? (
+                  <AppErrorState
+                    title="Master data belum siap"
+                    description={masterError}
+                  />
+                ) : null}
+
+                {successMessage ? (
+                  <AppCard className="border-emerald-200 bg-emerald-50 text-sm leading-6 text-emerald-700">
+                    {successMessage}
+                  </AppCard>
+                ) : null}
+
+                <AppButton
+                  className="w-full"
+                  disabled={isSubmitting || !isMasterDataReady}
+                  type="submit"
+                >
+                  {isSubmitting
+                    ? 'Menyimpan...'
+                    : isEditMode
+                      ? 'Perbarui Pemasukan Proyek'
+                      : 'Simpan Termin Proyek'}
+                </AppButton>
               </div>
-            )}
-          </div>
-        </section>
-
-        {error ? (
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
-            {error}
-          </div>
-        ) : null}
-
-        {masterError ? (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-            {masterError}
-          </div>
-        ) : null}
-
-        {successMessage ? (
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-700">
-            {successMessage}
-          </div>
-        ) : null}
-
-        <button
-            className="flex w-full items-center justify-center rounded-[22px] bg-slate-950 px-5 py-4 text-base font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={isSubmitting || !isMasterDataReady}
-          type="submit"
-        >
-          {isSubmitting
-            ? 'Menyimpan...'
-            : isEditMode
-              ? 'Perbarui Pemasukan Proyek'
-              : 'Simpan Termin Proyek'}
-        </button>
+            </div>
+          </FormSection>
+        </FormLayout>
       </fieldset>
     </form>
   )

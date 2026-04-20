@@ -1,18 +1,18 @@
 import ProtectedRoute from '../components/ProtectedRoute'
 import ProjectReport from '../components/ProjectReport'
-import { PageHeader } from '../components/ui/AppPrimitives'
+import { PageHeader, PageShell } from '../components/ui/AppPrimitives'
 
 function ProjectsPage() {
   return (
-    <section className="space-y-4 px-2 py-2">
+    <PageShell>
       <PageHeader
         eyebrow="Pelaporan"
-        title="Projects"
+        title="Unit Kerja"
       />
       <ProtectedRoute allowedRoles={['Owner', 'Admin']}>
         <ProjectReport />
       </ProtectedRoute>
-    </section>
+    </PageShell>
   )
 }
 

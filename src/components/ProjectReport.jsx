@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { BarChart3, FileText, RefreshCcw, Sparkles, WalletCards } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import useReportStore from '../store/useReportStore'
 import {
   AppBadge,
@@ -11,6 +12,7 @@ import {
   AppErrorState,
   SectionHeader,
 } from './ui/AppPrimitives'
+import { formatAppDateLabel } from '../lib/date-time'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -25,23 +27,7 @@ function formatCurrency(value) {
 }
 
 function formatDate(value) {
-  const normalizedValue = String(value ?? '').trim()
-
-  if (!normalizedValue) {
-    return '-'
-  }
-
-  const parsedDate = new Date(normalizedValue)
-
-  if (!Number.isNaN(parsedDate.getTime())) {
-    return new Intl.DateTimeFormat('id-ID', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    }).format(parsedDate)
-  }
-
-  return normalizedValue
+  return formatAppDateLabel(value)
 }
 
 function getProfitStyles(value) {
@@ -62,36 +48,29 @@ function getProfitStyles(value) {
   }
 }
 
-function buildCompactSummary(projectSummaries) {
-  return projectSummaries.reduce(
-    (accumulator, summary) => {
-      accumulator.totalIncome += Number(summary.total_income ?? 0)
-      accumulator.materialExpense += Number(summary.material_expense ?? 0)
-      accumulator.operatingExpense += Number(summary.operating_expense ?? 0)
-      accumulator.salaryExpense += Number(summary.salary_expense ?? 0)
-      accumulator.grossProfit += Number(summary.gross_profit ?? 0)
-      accumulator.netProfit += Number(summary.net_profit ?? 0)
-
-      return accumulator
-    },
-    {
-      totalIncome: 0,
-      materialExpense: 0,
-      operatingExpense: 0,
-      salaryExpense: 0,
-      grossProfit: 0,
-      netProfit: 0,
-    }
-  )
-}
-
 function getProjectName(summary) {
   return summary.project_name ?? 'Proyek tanpa nama'
 }
 
+function getRelationRecord(value) {
+  if (Array.isArray(value)) {
+    return value[0] ?? null
+  }
+
+  return value ?? null
+}
+
+function getSalarySourceRoute(salary) {
+  const salaryBill = getRelationRecord(salary?.bills)
+
+  return salaryBill?.id ? `/tagihan/${salaryBill.id}` : null
+}
+
 function ProjectReport() {
+  const navigate = useNavigate()
   const [expandedProjectId, setExpandedProjectId] = useState(null)
   const projectSummaries = useReportStore((state) => state.projectSummaries)
+  const portfolioSummary = useReportStore((state) => state.portfolioSummary)
   const selectedProjectDetail = useReportStore((state) => state.selectedProjectDetail)
   const isLoading = useReportStore((state) => state.isLoading)
   const isDetailLoading = useReportStore((state) => state.isDetailLoading)
@@ -99,11 +78,6 @@ function ProjectReport() {
   const detailError = useReportStore((state) => state.detailError)
   const fetchProjectSummaries = useReportStore((state) => state.fetchProjectSummaries)
   const fetchProjectDetail = useReportStore((state) => state.fetchProjectDetail)
-
-  const compactSummary = useMemo(
-    () => buildCompactSummary(projectSummaries),
-    [projectSummaries]
-  )
 
   useEffect(() => {
     fetchProjectSummaries({ force: true }).catch((fetchError) => {
@@ -121,9 +95,17 @@ function ProjectReport() {
     await fetchProjectDetail(projectId)
   }
 
+  const handleOpenSource = (route) => {
+    if (!route) {
+      return
+    }
+
+    navigate(route)
+  }
+
   return (
     <section className="space-y-4">
-      <AppCardStrong className="space-y-4 p-4 sm:p-5">
+      <AppCardStrong className="space-y-4 sm:p-5">
         <SectionHeader
           eyebrow="Laporan Proyek"
           action={
@@ -154,7 +136,7 @@ function ProjectReport() {
                   Laba bersih seluruh proyek
                 </p>
                 <p className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-[var(--app-text-color)]">
-                  {formatCurrency(compactSummary.netProfit)}
+                  {formatCurrency(portfolioSummary.net_consolidated_profit)}
                 </p>
               </div>
             </div>
@@ -167,17 +149,13 @@ function ProjectReport() {
             <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
               <p className="app-meta">Total Pemasukan</p>
               <p className="text-lg font-semibold text-[var(--app-text-color)]">
-                {formatCurrency(compactSummary.totalIncome)}
+                {formatCurrency(portfolioSummary.total_income)}
               </p>
             </AppCard>
             <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
               <p className="app-meta">Total Biaya</p>
               <p className="text-lg font-semibold text-[var(--app-text-color)]">
-                {formatCurrency(
-                  compactSummary.materialExpense +
-                    compactSummary.operatingExpense +
-                    compactSummary.salaryExpense
-                )}
+                {formatCurrency(portfolioSummary.total_expense)}
               </p>
             </AppCard>
           </div>
@@ -200,6 +178,7 @@ function ProjectReport() {
 
             return (
               <AppCardStrong
+                key={summary.project_id}
                 className="space-y-4 overflow-hidden p-4 sm:p-5"
               >
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -272,7 +251,7 @@ function ProjectReport() {
                 {isActive ? (
                   <AppCard className="space-y-4 bg-[var(--app-surface-strong-color)]">
                     {isDetailLoading ? (
-                      <AppCardDashed className="space-y-4 p-4">
+                      <AppCardDashed className="space-y-4">
                         <div className="grid gap-3 sm:grid-cols-3">
                           <div className="h-20 animate-pulse rounded-[20px] bg-[var(--app-border-color)]" />
                           <div className="h-20 animate-pulse rounded-[20px] bg-[var(--app-border-color)]" />
@@ -315,8 +294,14 @@ function ProjectReport() {
                               {selectedProjectDetail.incomes.length > 0 ? (
                                 selectedProjectDetail.incomes.map((income) => (
                                   <AppCard
+                                    as={income?.id ? 'button' : 'section'}
                                     key={income.id}
-                                    className="space-y-1 bg-white px-4 py-3 text-sm"
+                                    className={[
+                                      'space-y-1 bg-white px-4 py-3 text-sm',
+                                      income?.id ? 'w-full cursor-pointer text-left transition active:scale-[0.99]' : '',
+                                    ].filter(Boolean).join(' ')}
+                                    onClick={income?.id ? () => handleOpenSource(`/transactions/${income.id}`) : undefined}
+                                    type={income?.id ? 'button' : undefined}
                                   >
                                     <p className="font-medium text-[var(--app-text-color)]">
                                       {formatDate(income.transaction_date)}
@@ -343,8 +328,14 @@ function ProjectReport() {
                               {selectedProjectDetail.expenses.length > 0 ? (
                                 selectedProjectDetail.expenses.map((expense) => (
                                   <AppCard
+                                    as={expense?.id ? 'button' : 'section'}
                                     key={expense.id}
-                                    className="space-y-1 bg-white px-4 py-3 text-sm"
+                                    className={[
+                                      'space-y-1 bg-white px-4 py-3 text-sm',
+                                      expense?.id ? 'w-full cursor-pointer text-left transition active:scale-[0.99]' : '',
+                                    ].filter(Boolean).join(' ')}
+                                    onClick={expense?.id ? () => handleOpenSource(`/transactions/${expense.id}`) : undefined}
+                                    type={expense?.id ? 'button' : undefined}
                                   >
                                     <p className="font-medium text-[var(--app-text-color)]">
                                       {formatDate(expense.expense_date)}
@@ -369,10 +360,19 @@ function ProjectReport() {
                             <p className="app-meta">Biaya Gaji</p>
                             <div className="space-y-2">
                               {selectedProjectDetail.salaries.length > 0 ? (
-                                selectedProjectDetail.salaries.map((salary) => (
+                                selectedProjectDetail.salaries.map((salary) => {
+                                  const salaryRoute = getSalarySourceRoute(salary)
+
+                                  return (
                                   <AppCard
+                                    as={salaryRoute ? 'button' : 'section'}
                                     key={salary.id}
-                                    className="space-y-1 bg-white px-4 py-3 text-sm"
+                                    className={[
+                                      'space-y-1 bg-white px-4 py-3 text-sm',
+                                      salaryRoute ? 'w-full cursor-pointer text-left transition active:scale-[0.99]' : '',
+                                    ].filter(Boolean).join(' ')}
+                                    onClick={salaryRoute ? () => handleOpenSource(salaryRoute) : undefined}
+                                    type={salaryRoute ? 'button' : undefined}
                                   >
                                     <p className="font-medium text-[var(--app-text-color)]">
                                       {formatDate(salary.attendance_date)}
@@ -384,7 +384,8 @@ function ProjectReport() {
                                       {formatCurrency(salary.total_pay)}
                                     </p>
                                   </AppCard>
-                                ))
+                                  )
+                                })
                               ) : (
                                 <AppCardDashed className="px-4 py-3 text-sm text-[var(--app-hint-color)]">
                                   Tidak ada biaya gaji yang sudah dibundel.

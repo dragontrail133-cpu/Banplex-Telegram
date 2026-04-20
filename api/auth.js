@@ -11,6 +11,7 @@ const validRoles = new Set([
   'Administrasi',
   'Viewer',
 ])
+let profilesRoleColumnState = 'unknown'
 
 function getEnv(name, fallback = '') {
   return String(globalThis.process?.env?.[name] ?? fallback).trim()
@@ -50,6 +51,22 @@ function buildTelegramSecretKey(botToken) {
 
 function normalizeTelegramIdentifier(value) {
   return String(value ?? '').trim()
+}
+
+function normalizeTelegramIdentifierList(value) {
+  return String(value ?? '')
+    .split(/[,\n;]/)
+    .map((identifier) => normalizeTelegramIdentifier(identifier))
+    .filter(Boolean)
+}
+
+function getOwnerTelegramIdentifiers() {
+  return [
+    ...normalizeTelegramIdentifierList(getEnv('OWNER_TELEGRAM_ID')),
+    ...normalizeTelegramIdentifierList(getEnv('OWNER_TELEGRAM_IDS')),
+    ...normalizeTelegramIdentifierList(getEnv('TELEGRAM_OWNER_ID')),
+    ...normalizeTelegramIdentifierList(getEnv('VITE_OWNER_TELEGRAM_ID')),
+  ]
 }
 
 function verifyInitData(initData, botToken) {
@@ -128,6 +145,21 @@ function verifyInitData(initData, botToken) {
 
 function getTelegramLoginEmail(telegramUserId) {
   return `telegram-${telegramUserId}@banplex.local`
+}
+
+function isMissingProfilesRoleColumnError(error) {
+  const normalizedMessage = String(error?.message ?? '').toLowerCase()
+
+  return (
+    normalizedMessage.includes('column "role" does not exist') ||
+    normalizedMessage.includes('column profiles.role does not exist')
+  )
+}
+
+function getProfilesSelectColumns() {
+  return profilesRoleColumnState === 'missing'
+    ? 'id, telegram_user_id, created_at'
+    : 'id, telegram_user_id, role, created_at'
 }
 
 function buildTelegramPassword(telegramUserId, secret) {
@@ -210,67 +242,130 @@ async function signInOrCreateTelegramUser({
 }
 
 async function ensureProfile(adminClient, authUserId, telegramUserId) {
-  const { data: existingProfiles, error: existingProfilesError } = await adminClient
+  let existingProfilesResult = await adminClient
     .from('profiles')
-    .select('id, telegram_user_id, role, created_at')
+    .select(getProfilesSelectColumns())
     .eq('telegram_user_id', telegramUserId)
     .order('created_at', { ascending: true })
     .limit(1)
 
-  if (existingProfilesError) {
-    throw existingProfilesError
+  if (existingProfilesResult.error && isMissingProfilesRoleColumnError(existingProfilesResult.error)) {
+    profilesRoleColumnState = 'missing'
+    existingProfilesResult = await adminClient
+      .from('profiles')
+      .select(getProfilesSelectColumns())
+      .eq('telegram_user_id', telegramUserId)
+      .order('created_at', { ascending: true })
+      .limit(1)
   }
 
-  const existingProfile = existingProfiles?.[0] ?? null
+  if (existingProfilesResult.error) {
+    throw existingProfilesResult.error
+  }
+
+  if (profilesRoleColumnState === 'unknown') {
+    profilesRoleColumnState = 'present'
+  }
+
+  const existingProfile = existingProfilesResult.data?.[0] ?? null
   const profileRole = validRoles.has(String(existingProfile?.role ?? '').trim())
     ? String(existingProfile.role).trim()
     : 'Viewer'
 
   if (!existingProfile) {
-    const insertResult = await adminClient
+    let insertResult = await adminClient
       .from('profiles')
-      .insert({
-        id: authUserId,
-        telegram_user_id: telegramUserId,
-        role: 'Viewer',
-      })
-      .select('id, telegram_user_id, role, created_at')
+      .insert(
+        profilesRoleColumnState === 'missing'
+          ? {
+              id: authUserId,
+              telegram_user_id: telegramUserId,
+            }
+          : {
+              id: authUserId,
+              telegram_user_id: telegramUserId,
+              role: 'Viewer',
+            }
+      )
+      .select(getProfilesSelectColumns())
       .single()
+
+    if (insertResult.error && isMissingProfilesRoleColumnError(insertResult.error)) {
+      profilesRoleColumnState = 'missing'
+      insertResult = await adminClient
+        .from('profiles')
+        .insert({
+          id: authUserId,
+          telegram_user_id: telegramUserId,
+        })
+        .select(getProfilesSelectColumns())
+        .single()
+    }
 
     if (insertResult.error) {
       throw insertResult.error
     }
 
+    if (profilesRoleColumnState === 'unknown') {
+      profilesRoleColumnState = 'present'
+    }
+
     return {
-      profile: insertResult.data,
+      profile: {
+        ...insertResult.data,
+        role: profilesRoleColumnState === 'missing' ? null : 'Viewer',
+      },
       hadExistingProfile: false,
     }
   }
 
   if (existingProfile.id !== authUserId) {
-    const updateResult = await adminClient
+    let updateResult = await adminClient
       .from('profiles')
-      .update({
-        id: authUserId,
-        telegram_user_id: telegramUserId,
-        role: profileRole,
-      })
+      .update(
+        profilesRoleColumnState === 'missing'
+          ? {
+              id: authUserId,
+              telegram_user_id: telegramUserId,
+            }
+          : {
+              id: authUserId,
+              telegram_user_id: telegramUserId,
+              role: profileRole,
+            }
+      )
       .eq('id', existingProfile.id)
-      .select('id, telegram_user_id, role, created_at')
+      .select(getProfilesSelectColumns())
       .single()
+
+    if (updateResult.error && isMissingProfilesRoleColumnError(updateResult.error)) {
+      profilesRoleColumnState = 'missing'
+      updateResult = await adminClient
+        .from('profiles')
+        .update({
+          id: authUserId,
+          telegram_user_id: telegramUserId,
+        })
+        .eq('id', existingProfile.id)
+        .select(getProfilesSelectColumns())
+        .single()
+    }
 
     if (updateResult.error) {
       throw updateResult.error
     }
 
     return {
-      profile: updateResult.data,
+      profile: {
+        ...updateResult.data,
+        role: profilesRoleColumnState === 'missing' ? null : profileRole,
+      },
       hadExistingProfile: true,
     }
   }
 
   return {
-      profile: {
+    profile: {
       ...existingProfile,
       role: profileRole,
     },
@@ -290,7 +385,17 @@ async function ensureProfileRole(
     : null
 
   if (!normalizedEnforcedRole || profile?.role === normalizedEnforcedRole) {
-    return profile
+    return {
+      ...profile,
+      role: profile?.role ?? normalizedEnforcedRole ?? null,
+    }
+  }
+
+  if (profilesRoleColumnState === 'missing') {
+    return {
+      ...profile,
+      role: normalizedEnforcedRole,
+    }
   }
 
   const updateResult = await adminClient
@@ -303,17 +408,37 @@ async function ensureProfileRole(
     .single()
 
   if (updateResult.error) {
+    if (isMissingProfilesRoleColumnError(updateResult.error)) {
+      profilesRoleColumnState = 'missing'
+
+      return {
+        ...profile,
+        role: normalizedEnforcedRole,
+      }
+    }
+
     throw updateResult.error
   }
 
   return updateResult.data
 }
 
-async function fetchMemberships(adminClient, telegramUserId) {
-  const { data: memberships, error: membershipsError } = await adminClient
+async function fetchMemberships(adminClient, telegramUserId, { includeInactive = false } = {}) {
+  let query = adminClient
     .from('team_members')
-    .select('id, team_id, telegram_user_id, role, is_default, status, approved_at')
+    .select(
+      'id, team_id, telegram_user_id, role, is_default, status, approved_at, teams:team_id ( id, name, slug, is_active )'
+    )
     .eq('telegram_user_id', telegramUserId)
+
+  if (!includeInactive) {
+    query = query.eq('status', 'active')
+  }
+
+  const { data: memberships, error: membershipsError } = await query
+    .order('is_default', { ascending: false })
+    .order('approved_at', { ascending: true })
+    .order('created_at', { ascending: true })
     .limit(5)
 
   if (membershipsError) {
@@ -324,19 +449,19 @@ async function fetchMemberships(adminClient, telegramUserId) {
 }
 
 async function resolveOwnerTeamId(adminClient) {
-  const defaultTeamResult = await adminClient
+  const activeDefaultTeamResult = await adminClient
     .from('teams')
     .select('id')
     .eq('slug', 'default-workspace')
     .eq('is_active', true)
     .maybeSingle()
 
-  if (defaultTeamResult.error) {
-    throw defaultTeamResult.error
+  if (activeDefaultTeamResult.error) {
+    throw activeDefaultTeamResult.error
   }
 
-  if (defaultTeamResult.data?.id) {
-    return defaultTeamResult.data.id
+  if (activeDefaultTeamResult.data?.id) {
+    return activeDefaultTeamResult.data.id
   }
 
   const fallbackTeamResult = await adminClient
@@ -351,59 +476,99 @@ async function resolveOwnerTeamId(adminClient) {
     throw fallbackTeamResult.error
   }
 
-  return fallbackTeamResult.data?.id ?? null
+  if (fallbackTeamResult.data?.id) {
+    return fallbackTeamResult.data.id
+  }
+
+  const inactiveDefaultTeamResult = await adminClient
+    .from('teams')
+    .select('id, is_active')
+    .eq('slug', 'default-workspace')
+    .maybeSingle()
+
+  if (inactiveDefaultTeamResult.error) {
+    throw inactiveDefaultTeamResult.error
+  }
+
+  if (inactiveDefaultTeamResult.data?.id) {
+    const reactivateResult = await adminClient
+      .from('teams')
+      .update({
+        is_active: true,
+      })
+      .eq('id', inactiveDefaultTeamResult.data.id)
+      .select('id')
+      .single()
+
+    if (reactivateResult.error) {
+      throw reactivateResult.error
+    }
+
+    return reactivateResult.data?.id ?? inactiveDefaultTeamResult.data.id
+  }
+
+  const defaultTeamResult = await adminClient
+    .from('teams')
+    .insert({
+      name: 'Default Workspace',
+      slug: 'default-workspace',
+      is_active: true,
+    })
+    .select('id')
+    .single()
+
+  if (defaultTeamResult.error) {
+    throw defaultTeamResult.error
+  }
+
+  return defaultTeamResult.data?.id ?? null
 }
 
 async function ensureOwnerMembership(adminClient, telegramUserId) {
   const normalizedTelegramUserId = normalizeTelegramIdentifier(telegramUserId)
   const approvalTimestamp = new Date().toISOString()
-  const existingMemberships = await fetchMemberships(
-    adminClient,
-    normalizedTelegramUserId
-  )
-
-  if (existingMemberships.length > 0) {
-    const updateResult = await adminClient
-      .from('team_members')
-      .update({
-        role: 'Owner',
-        status: 'active',
-        approved_at: approvalTimestamp,
-      })
-      .eq('telegram_user_id', normalizedTelegramUserId)
-      .select('id, team_id, telegram_user_id, role, is_default, status, approved_at')
-
-    if (updateResult.error) {
-      throw updateResult.error
-    }
-
-    return updateResult.data ?? []
-  }
-
   const ownerTeamId = await resolveOwnerTeamId(adminClient)
 
   if (!ownerTeamId) {
     throw createHttpError(500, 'Workspace aktif untuk Owner tidak ditemukan.')
   }
 
-  const insertResult = await adminClient
+  const upsertResult = await adminClient
     .from('team_members')
-    .insert({
-      team_id: ownerTeamId,
-      telegram_user_id: normalizedTelegramUserId,
-      role: 'Owner',
-      is_default: true,
-      status: 'active',
-      approved_at: approvalTimestamp,
-    })
-    .select('id, team_id, telegram_user_id, role, is_default, status, approved_at')
+    .upsert(
+      {
+        team_id: ownerTeamId,
+        telegram_user_id: normalizedTelegramUserId,
+        role: 'Owner',
+        is_default: true,
+        status: 'active',
+        approved_at: approvalTimestamp,
+      },
+      {
+        onConflict: 'team_id,telegram_user_id',
+      }
+    )
+    .select(
+      'id, team_id, telegram_user_id, role, is_default, status, approved_at, teams:team_id ( id, name, slug, is_active )'
+    )
     .single()
 
-  if (insertResult.error) {
-    throw insertResult.error
+  if (upsertResult.error) {
+    throw upsertResult.error
   }
 
-  return [insertResult.data]
+  const memberships = await fetchMemberships(
+    adminClient,
+    normalizedTelegramUserId,
+    {
+      includeInactive: true,
+    }
+  )
+
+  return [
+    upsertResult.data,
+    ...memberships.filter((membership) => membership.team_id !== ownerTeamId),
+  ]
 }
 
 export default async function handler(req, res) {
@@ -425,7 +590,6 @@ export default async function handler(req, res) {
   )
   const telegramBotToken = getEnv('TELEGRAM_BOT_TOKEN')
   const appAuthSecret = getEnv('APP_AUTH_SECRET', telegramBotToken)
-  const ownerTelegramId = getEnv('OWNER_TELEGRAM_ID')
 
   if (!supabaseUrl || !serviceRoleKey || !publishableKey || !telegramBotToken) {
     return res.status(500).json({
@@ -434,19 +598,23 @@ export default async function handler(req, res) {
     })
   }
 
+  let authStage = 'parse_request'
+
   try {
     const body = await parseRequestBody(req)
     const { initData } = body
+    authStage = 'verify_telegram_init_data'
     const { telegramUserId, telegramUser } = verifyInitData(initData, telegramBotToken)
     const normalizedTelegramUserId = normalizeTelegramIdentifier(telegramUserId)
-    const normalizedOwnerTelegramId = normalizeTelegramIdentifier(ownerTelegramId)
-    const isOwnerBypass =
-      normalizedOwnerTelegramId.length > 0 &&
-      String(normalizedTelegramUserId) === String(normalizedOwnerTelegramId)
+    const ownerTelegramIds = getOwnerTelegramIdentifiers()
+    const isOwnerBypass = ownerTelegramIds.some(
+      (candidateTelegramId) => candidateTelegramId === normalizedTelegramUserId
+    )
     const email = getTelegramLoginEmail(telegramUserId)
     const password = buildTelegramPassword(telegramUserId, appAuthSecret)
     const adminClient = createAdminClient(supabaseUrl, serviceRoleKey)
     const publicClient = createPublicClient(supabaseUrl, publishableKey)
+    authStage = 'sign_in_or_create_supabase_user'
     const signInResult = await signInOrCreateTelegramUser({
       adminClient,
       publicClient,
@@ -461,12 +629,14 @@ export default async function handler(req, res) {
       throw createHttpError(500, 'Session Supabase tidak lengkap.')
     }
 
+    authStage = 'ensure_profile'
     const profile = await ensureProfileRole(
       adminClient,
       authUser.id,
       normalizedTelegramUserId,
       isOwnerBypass ? 'Owner' : null
     )
+    authStage = isOwnerBypass ? 'ensure_owner_membership' : 'fetch_memberships'
     const memberships = isOwnerBypass
       ? await ensureOwnerMembership(adminClient, normalizedTelegramUserId)
       : await fetchMemberships(adminClient, normalizedTelegramUserId)
@@ -503,6 +673,16 @@ export default async function handler(req, res) {
   } catch (error) {
     const statusCode =
       typeof error?.statusCode === 'number' ? error.statusCode : 500
+
+    console.error('[api/auth] bootstrap failed', {
+      stage:
+        typeof authStage === 'string' && authStage.length > 0
+          ? authStage
+          : 'unknown',
+      message: error instanceof Error ? error.message : String(error),
+      statusCode,
+      profilesRoleColumnState,
+    })
 
     return res.status(statusCode).json({
       success: false,

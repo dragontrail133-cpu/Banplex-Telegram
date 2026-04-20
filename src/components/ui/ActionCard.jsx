@@ -49,6 +49,7 @@ function ActionButton({ action, onClick }) {
 function ActionCard({
   title,
   subtitle,
+  details = [],
   amount = null,
   amountClassName = '',
   badge = null,
@@ -101,6 +102,18 @@ function ActionCard({
               {title}
             </h3>
             <p className="mt-0.5 truncate text-xs text-[var(--app-hint-color)]">{subtitle}</p>
+            {details.length > 0 ? (
+              <div className="mt-1 space-y-0.5">
+                {details.slice(0, 3).map((detail, index) => (
+                  <p
+                    key={`${title}-${index}-${detail}`}
+                    className="truncate text-[11px] leading-4 text-[var(--app-hint-color)]"
+                  >
+                    {detail}
+                  </p>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
 

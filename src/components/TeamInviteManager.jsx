@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Copy, Link2, RefreshCcw, Shield, UserX } from 'lucide-react'
-import ProtectedRoute from './ProtectedRoute'
 import ActionCard from './ui/ActionCard'
+import {
+  AppButton,
+  AppCard,
+  AppCardDashed,
+  AppCardStrong,
+  AppWrapToggleGroup,
+  PageSection,
+} from './ui/AppPrimitives'
+import { formatAppDateTime } from '../lib/date-time'
 import useAuthStore from '../store/useAuthStore'
 import useTeamStore, { inviteRoleOptions } from '../store/useTeamStore'
-
-const approvedAtFormatter = new Intl.DateTimeFormat('id-ID', {
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-})
 
 function formatApprovedAt(value) {
   const normalizedValue = String(value ?? '').trim()
@@ -26,7 +26,7 @@ function formatApprovedAt(value) {
     return normalizedValue
   }
 
-  return approvedAtFormatter.format(parsedDate)
+  return formatAppDateTime(parsedDate)
 }
 
 function TeamInviteManagerContent() {
@@ -52,6 +52,7 @@ function TeamInviteManagerContent() {
     try {
       setCopyState('')
       await generateInviteLink(selectedRole)
+      await fetchActiveTeam()
     } catch (inviteError) {
       console.error('Gagal membuat invite link:', inviteError)
     }
@@ -74,6 +75,7 @@ function TeamInviteManagerContent() {
   const handleRoleChange = async (memberId, nextRole) => {
     try {
       await updateTeamMemberRole(memberId, nextRole)
+      await fetchActiveTeam()
     } catch (memberError) {
       console.error('Gagal memperbarui role anggota:', memberError)
     }
@@ -82,64 +84,45 @@ function TeamInviteManagerContent() {
   const handleSuspend = async (memberId) => {
     try {
       await suspendTeamMember(memberId)
+      await fetchActiveTeam()
     } catch (memberError) {
       console.error('Gagal menangguhkan anggota:', memberError)
     }
   }
 
   return (
-    <ProtectedRoute
-      allowedRoles={['Owner']}
-      description="Magic Invite Link dan manajemen anggota hanya tersedia untuk Owner."
-    >
-      <div className="space-y-5">
-        <section className="rounded-[28px] border border-white/70 bg-white/70 p-5 shadow-sm backdrop-blur">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-xl">
-              <p className="text-sm font-medium uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
-                Magic Invite Link
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
-                Onboarding tanpa approval manual
-              </h2>
-              <p className="mt-3 text-sm leading-7 text-[var(--app-hint-color)]">
-                Buat token sekali pakai berdurasi 24 jam, lalu bagikan deep link
-                Telegram Mini App ke anggota baru.
-              </p>
-            </div>
+    <div className="space-y-5">
+      <PageSection
+        eyebrow="Magic Invite Link"
+        title="Onboarding tanpa approval manual"
+      >
+        <div className="space-y-4">
+          <div className="grid gap-3 lg:max-w-sm">
+            <AppWrapToggleGroup
+              buttonSize="sm"
+              label="Role undangan"
+              onChange={setSelectedRole}
+              options={inviteRoleOptions.map((role) => ({
+                value: role,
+                label: role,
+              }))}
+              value={selectedRole}
+            />
 
-            <div className="grid w-full gap-3 lg:max-w-sm">
-              <label className="grid gap-2 text-sm font-medium text-[var(--app-text-color)]">
-                Role undangan
-                <select
-                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-[var(--app-text-color)] outline-none transition focus:border-sky-400"
-                  onChange={(event) => setSelectedRole(event.target.value)}
-                  value={selectedRole}
-                >
-                  {inviteRoleOptions.map((role) => (
-                    <option key={role} value={role}>
-                      {role}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <button
-                className="inline-flex items-center justify-center gap-2 rounded-[20px] bg-gradient-to-r from-sky-600 via-cyan-500 to-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-500/20 transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={isLoading}
-                onClick={() => {
-                  void handleGenerateInvite()
-                }}
-                type="button"
-              >
-                <Link2 className="h-4 w-4" />
-                Buat Link Undangan
-              </button>
-            </div>
+            <AppButton
+              disabled={isLoading}
+              onClick={() => {
+                void handleGenerateInvite()
+              }}
+              leadingIcon={<Link2 className="h-4 w-4" />}
+              type="button"
+            >
+              Buat Link Undangan
+            </AppButton>
           </div>
 
           {latestInvite?.invite_link ? (
-            <div className="mt-5 rounded-[24px] border border-sky-100 bg-sky-50/80 p-4">
+            <AppCard className="mt-0 space-y-3 border border-sky-100 bg-sky-50/80">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
@@ -153,76 +136,64 @@ function TeamInviteManagerContent() {
                       Role {latestInvite.role}
                     </span>
                     <span className="rounded-full border border-sky-200 bg-white/80 px-3 py-1.5">
+                      Status {latestInvite.lifecycle_status_label}
+                    </span>
+                    <span className="rounded-full border border-sky-200 bg-white/80 px-3 py-1.5">
                       Berlaku sampai {formatApprovedAt(latestInvite.expires_at)}
                     </span>
                   </div>
                 </div>
 
-                <button
-                  className="inline-flex items-center justify-center gap-2 rounded-[18px] border border-sky-200 bg-white px-4 py-3 text-sm font-semibold text-sky-800 transition hover:bg-sky-50"
+                <AppButton
+                  className="border-sky-200 bg-white text-sky-800"
                   onClick={() => {
                     void handleCopyLink()
                   }}
                   type="button"
+                  variant="secondary"
+                  leadingIcon={<Copy className="h-4 w-4" />}
                 >
-                  <Copy className="h-4 w-4" />
                   Copy Link
-                </button>
+                </AppButton>
               </div>
 
               {copyState ? (
                 <p className="mt-3 text-sm text-sky-700">{copyState}</p>
               ) : null}
-
-              {String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? '').trim() ? null : (
-                <p className="mt-3 text-sm text-amber-700">
-                  Set `VITE_TELEGRAM_BOT_USERNAME` agar link tidak memakai placeholder
-                  `NamaBotAnda`.
-                </p>
-              )}
-            </div>
+            </AppCard>
           ) : null}
 
           {error ? (
-            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+            <AppCardDashed className="app-tone-danger mt-0 text-sm leading-6 text-rose-700">
               {error}
-            </div>
+            </AppCardDashed>
           ) : null}
-        </section>
+        </div>
+      </PageSection>
 
-        <section className="rounded-[28px] border border-white/70 bg-white/70 p-5 shadow-sm backdrop-blur">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-medium uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
-                Active Team
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
-                Anggota aktif di workspace
-              </h2>
-              <p className="mt-2 text-sm leading-7 text-[var(--app-hint-color)]">
-                Owner dapat mengganti role anggota aktif atau langsung men-suspend
-                akses mereka.
-              </p>
-            </div>
-
-            <button
-              className="inline-flex items-center justify-center gap-2 rounded-[20px] border border-slate-200 bg-white/85 px-4 py-3 text-sm font-semibold text-[var(--app-text-color)] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={isLoading}
-              onClick={() => {
-                void fetchActiveTeam().catch((teamError) => {
-                  console.error('Gagal refresh tim aktif:', teamError)
-                })
-              }}
-              type="button"
-            >
-              <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-          </div>
-
-          <div className="mt-5 space-y-3">
-            {activeTeam.length > 0 ? (
-              activeTeam.map((member) => {
+      <PageSection
+        eyebrow="Active Team"
+        title="Anggota aktif di workspace"
+        action={
+          <AppButton
+            disabled={isLoading}
+            onClick={() => {
+              void fetchActiveTeam().catch((teamError) => {
+                console.error('Gagal refresh tim aktif:', teamError)
+              })
+            }}
+            variant="secondary"
+            type="button"
+          >
+            <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </AppButton>
+        }
+      >
+        <div className="space-y-3">
+          {activeTeam.length > 0 ? (
+            <AppCardStrong padded={false} className="overflow-hidden">
+              {activeTeam.map((member) => {
                 const isCurrentOwner =
                   member.telegram_user_id &&
                   member.telegram_user_id === authUser?.telegram_user_id &&
@@ -233,13 +204,14 @@ function TeamInviteManagerContent() {
                     key={member.id}
                     title={`Telegram ID ${member.telegram_user_id || '-'}`}
                     subtitle={`Aktif sejak ${formatApprovedAt(member.approved_at)}`}
-                    badge={member.status}
+                    badge={member.status_label || member.status}
                     badges={[
                       member.is_default ? 'Workspace utama' : '',
                       isCurrentOwner ? 'Owner Bypass' : '',
                     ].filter(Boolean)}
                     details={[
                       `Role saat ini: ${member.role || 'Viewer'}`,
+                      `Status anggota: ${member.status_label || member.status || 'Aktif'}`,
                       `Telegram: ${member.telegram_user_id || '-'}`,
                     ]}
                     leadingIcon={
@@ -277,16 +249,16 @@ function TeamInviteManagerContent() {
                     ]}
                   />
                 )
-              })
-            ) : (
-              <div className="rounded-[24px] border border-dashed border-slate-200 bg-white/70 px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
-                Belum ada anggota aktif selain akun yang sudah berhasil masuk ke workspace.
-              </div>
-            )}
-          </div>
-        </section>
-      </div>
-    </ProtectedRoute>
+              })}
+            </AppCardStrong>
+          ) : (
+            <AppCardDashed className="px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
+              Belum ada anggota aktif selain akun yang sudah berhasil masuk ke workspace.
+            </AppCardDashed>
+          )}
+        </div>
+      </PageSection>
+    </div>
   )
 }
 

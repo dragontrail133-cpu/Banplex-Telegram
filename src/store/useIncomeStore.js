@@ -5,6 +5,17 @@ import {
   resolveTeamId,
   resolveTelegramUserId,
 } from '../lib/auth-context'
+import {
+  buildLoanTermsSnapshot,
+  buildLoanLateChargeSummary,
+  normalizeLoanInterestType,
+  normalizeLoanLateInterestBasis,
+  normalizeLoanLatePenaltyType,
+} from '../lib/loan-business'
+import {
+  saveTransactionRecordFromApi,
+  softDeleteTransactionFromApi,
+} from '../lib/transactions-api'
 
 function normalizeText(value, fallback = null) {
   const normalizedValue = String(value ?? '').trim()
@@ -40,15 +51,10 @@ function notifyTelegram(payload) {
   })
 }
 
-function normalizeInterestType(value) {
-  const normalizedValue = normalizeText(value, 'none')
-
-  if (normalizedValue === 'no_interest') {
-    return 'none'
-  }
-
-  return ['none', 'interest'].includes(normalizedValue) ? normalizedValue : 'none'
-}
+const loanSelectColumns =
+  'id, telegram_user_id, created_by_user_id, team_id, creditor_id, transaction_date, disbursed_date, principal_amount, repayment_amount, interest_type, interest_rate, tenor_months, late_interest_rate, late_interest_basis, late_penalty_type, late_penalty_amount, loan_terms_snapshot, amount, description, notes, creditor_name_snapshot, status, paid_amount, created_at, updated_at, deleted_at'
+const billSelectColumns =
+  'id, expense_id, project_income_id, team_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, supplier_name_snapshot, project_name_snapshot, worker_name_snapshot, created_at, updated_at, deleted_at'
 
 function buildProjectIncomeNotificationPayload(data = {}, projectName = '-') {
   return {
@@ -65,6 +71,9 @@ function buildProjectIncomeNotificationPayload(data = {}, projectName = '-') {
 }
 
 function buildLoanNotificationPayload(data = {}, creditorName = '-') {
+  const repaymentAmount =
+    Number(data.repayment_amount ?? data.repaymentAmount ?? data.loan_terms_snapshot?.repayment_amount) || 0
+
   return {
     notificationType: 'loan',
     userName: normalizeText(data.userName, 'Pengguna Telegram'),
@@ -74,8 +83,8 @@ function buildLoanNotificationPayload(data = {}, creditorName = '-') {
       new Date().toISOString()
     ),
     principalAmount: Number(data.principal_amount ?? data.principalAmount) || 0,
-    repaymentAmount: Number(data.repayment_amount ?? data.repaymentAmount) || 0,
-    interestType: normalizeInterestType(data.interest_type ?? data.interestType),
+    repaymentAmount,
+    interestType: normalizeLoanInterestType(data.interest_type ?? data.interestType),
     description: normalizeText(data.description ?? data.notes, 'Pinjaman baru dicatat.'),
   }
 }
@@ -88,26 +97,62 @@ function mapProjectIncomeRow(projectIncome) {
   }
 }
 
+function mapBillSummaryRow(bill) {
+  if (!bill?.id) {
+    return null
+  }
+
+  const amount = toNumber(bill?.amount)
+  const paidAmount = toNumber(bill?.paid_amount)
+
+  return {
+    id: bill.id,
+    expenseId: bill.expense_id ?? null,
+    projectIncomeId: bill.project_income_id ?? null,
+    teamId: bill.team_id ?? null,
+    billType: bill.bill_type ?? null,
+    description: bill.description ?? null,
+    amount,
+    paidAmount,
+    remainingAmount: Math.max(amount - paidAmount, 0),
+    dueDate: bill.due_date ?? null,
+    status: normalizeText(bill?.status, 'unpaid'),
+    paidAt: bill.paid_at ?? null,
+    supplierName: normalizeText(
+      bill?.supplier_name_snapshot ?? bill?.worker_name_snapshot,
+      'Tagihan belum terhubung'
+    ),
+    projectName: normalizeText(bill?.project_name_snapshot, 'Proyek belum terhubung'),
+    deletedAt: bill.deleted_at ?? null,
+    updatedAt: bill.updated_at ?? null,
+  }
+}
+
 function mapLoanRow(loan) {
-  const repaymentAmount = toNumber(loan?.repayment_amount, 0)
+  const loanTermsSnapshot = buildLoanTermsSnapshot(loan)
+  const repaymentAmount = toNumber(loan?.repayment_amount ?? loanTermsSnapshot.repayment_amount, 0)
   const paidAmount = toNumber(loan?.paid_amount, 0)
   const remainingAmount = Math.max(repaymentAmount - paidAmount, 0)
+  const lateChargeSummary = buildLoanLateChargeSummary(loan)
 
   return {
     ...loan,
-    principal_amount: toNumber(loan?.principal_amount ?? loan?.amount),
+    ...loanTermsSnapshot,
+    late_charge_summary: lateChargeSummary,
+    lateChargeSummary,
+    principal_amount: loanTermsSnapshot.principal_amount,
     repayment_amount: repaymentAmount,
-    amount: toNumber(loan?.amount ?? loan?.principal_amount),
+    amount: loanTermsSnapshot.amount,
     paid_amount: paidAmount,
-    interest_rate: toNumber(loan?.interest_rate, 0),
-    tenor_months:
-      loan?.tenor_months === null || loan?.tenor_months === undefined
-        ? null
-        : Math.trunc(toNumber(loan?.tenor_months, 0)),
-    creditor_name_snapshot: normalizeText(loan?.creditor_name_snapshot, '-'),
+    base_repayment_amount: loanTermsSnapshot.base_repayment_amount,
+    baseRepaymentAmount: loanTermsSnapshot.base_repayment_amount,
+    due_date: loanTermsSnapshot.due_date,
+    dueDate: loanTermsSnapshot.due_date,
+    creditor_name_snapshot: loanTermsSnapshot.creditor_name_snapshot,
     status: normalizeText(loan?.status, 'unpaid'),
     remaining_amount: remainingAmount,
     remainingAmount,
+    loan_terms_snapshot: loan?.loan_terms_snapshot ?? loanTermsSnapshot,
   }
 }
 
@@ -122,20 +167,39 @@ async function loadProjectIncomeById(projectIncomeId) {
     throw new Error('ID pemasukan proyek tidak valid.')
   }
 
-  const { data, error } = await supabase
-    .from('project_incomes')
-    .select(
-      'id, telegram_user_id, created_by_user_id, team_id, project_id, transaction_date, income_date, amount, description, notes, project_name_snapshot, created_at, updated_at, deleted_at'
-    )
-    .eq('id', normalizedId)
-    .is('deleted_at', null)
-    .maybeSingle()
+  const [incomeResult, billResult] = await Promise.all([
+    supabase
+      .from('project_incomes')
+      .select(
+        'id, telegram_user_id, created_by_user_id, team_id, project_id, transaction_date, income_date, amount, description, notes, project_name_snapshot, created_at, updated_at, deleted_at'
+      )
+      .eq('id', normalizedId)
+      .is('deleted_at', null)
+      .maybeSingle(),
+    supabase
+      .from('bills')
+      .select(billSelectColumns)
+      .eq('project_income_id', normalizedId)
+      .is('deleted_at', null)
+      .maybeSingle(),
+  ])
 
-  if (error) {
-    throw error
+  if (incomeResult.error) {
+    throw incomeResult.error
   }
 
-  return data ? mapProjectIncomeRow(data) : null
+  if (billResult.error) {
+    throw billResult.error
+  }
+
+  if (!incomeResult.data) {
+    return null
+  }
+
+  return {
+    ...mapProjectIncomeRow(incomeResult.data),
+    bill: mapBillSummaryRow(billResult.data),
+  }
 }
 
 async function loadLoans(teamId) {
@@ -151,9 +215,7 @@ async function loadLoans(teamId) {
 
   const { data, error } = await supabase
     .from('loans')
-    .select(
-      'id, telegram_user_id, created_by_user_id, team_id, creditor_id, transaction_date, disbursed_date, principal_amount, repayment_amount, interest_type, interest_rate, tenor_months, amount, description, notes, creditor_name_snapshot, status, paid_amount, created_at, updated_at, deleted_at'
-    )
+    .select(loanSelectColumns)
     .eq('team_id', normalizedTeamId)
     .is('deleted_at', null)
     .order('transaction_date', { ascending: false })
@@ -176,123 +238,52 @@ async function loadLoanById(loanId) {
     throw new Error('Loan ID tidak valid.')
   }
 
-  const { data, error } = await supabase
-    .from('loans')
-    .select(
-      'id, telegram_user_id, created_by_user_id, team_id, creditor_id, transaction_date, disbursed_date, principal_amount, repayment_amount, interest_type, interest_rate, tenor_months, amount, description, notes, creditor_name_snapshot, status, paid_amount, created_at, updated_at, deleted_at'
-    )
-    .eq('id', normalizedLoanId)
-    .is('deleted_at', null)
-    .maybeSingle()
+  const [loanResult, paymentResult] = await Promise.all([
+    supabase
+      .from('loans')
+      .select(loanSelectColumns)
+      .eq('id', normalizedLoanId)
+      .is('deleted_at', null)
+      .maybeSingle(),
+    supabase
+      .from('loan_payments')
+      .select(
+        'id, loan_id, team_id, telegram_user_id, amount, payment_date, notes, created_at, updated_at, deleted_at, creditor_name_snapshot'
+      )
+      .eq('loan_id', normalizedLoanId)
+      .is('deleted_at', null)
+      .order('payment_date', { ascending: false })
+      .order('created_at', { ascending: false }),
+  ])
 
-  if (error) {
-    throw error
+  if (loanResult.error) {
+    throw loanResult.error
   }
 
-  return data ? mapLoanRow(data) : null
-}
-
-async function softDeleteProjectIncome(projectIncomeId) {
-  if (!supabase) {
-    throw new Error('Client Supabase belum dikonfigurasi.')
+  if (paymentResult.error) {
+    throw paymentResult.error
   }
 
-  const normalizedId = normalizeText(projectIncomeId)
-
-  if (!normalizedId) {
-    throw new Error('ID pemasukan proyek tidak valid.')
+  if (!loanResult.data) {
+    return null
   }
 
-  const { data: paidFeeBills, error: paidFeeBillsError } = await supabase
-    .from('bills')
-    .select('id')
-    .eq('project_income_id', normalizedId)
-    .is('deleted_at', null)
-    .gt('paid_amount', 0)
-    .limit(1)
-
-  if (paidFeeBillsError) {
-    throw paidFeeBillsError
+  return {
+    ...mapLoanRow(loanResult.data),
+    payments: (paymentResult.data ?? []).map((payment) => ({
+      id: payment?.id,
+      loanId: payment?.loan_id,
+      teamId: payment?.team_id,
+      telegramUserId: payment?.telegram_user_id,
+      amount: toNumber(payment?.amount),
+      paymentDate: payment?.payment_date,
+      notes: payment?.notes,
+      createdAt: payment?.created_at,
+      updatedAt: payment?.updated_at,
+      deletedAt: payment?.deleted_at,
+      creditorNameSnapshot: payment?.creditor_name_snapshot,
+    })),
   }
-
-  if ((paidFeeBills ?? []).length > 0) {
-    throw new Error(
-      'Pemasukan proyek yang sudah memiliki pembayaran fee tidak bisa dihapus.'
-    )
-  }
-
-  const timestamp = new Date().toISOString()
-
-  const { error: incomeError } = await supabase
-    .from('project_incomes')
-    .update({
-      deleted_at: timestamp,
-      updated_at: timestamp,
-    })
-    .eq('id', normalizedId)
-    .is('deleted_at', null)
-
-  if (incomeError) {
-    throw incomeError
-  }
-
-  const { error: billError } = await supabase
-    .from('bills')
-    .update({
-      deleted_at: timestamp,
-      updated_at: timestamp,
-      status: 'cancelled',
-    })
-    .eq('project_income_id', normalizedId)
-    .is('deleted_at', null)
-
-  if (billError) {
-    throw billError
-  }
-
-  return true
-}
-
-async function softDeleteLoan(loanId) {
-  if (!supabase) {
-    throw new Error('Client Supabase belum dikonfigurasi.')
-  }
-
-  const normalizedLoanId = String(loanId ?? '').trim()
-
-  if (!normalizedLoanId) {
-    throw new Error('Loan ID tidak valid.')
-  }
-
-  const { data: payments, error: paymentsError } = await supabase
-    .from('loan_payments')
-    .select('id')
-    .eq('loan_id', normalizedLoanId)
-    .is('deleted_at', null)
-    .limit(1)
-
-  if (paymentsError) {
-    throw paymentsError
-  }
-
-  if ((payments ?? []).length > 0) {
-    throw new Error('Pinjaman yang sudah memiliki pembayaran tidak bisa dihapus.')
-  }
-
-  const { error } = await supabase
-    .from('loans')
-    .update({
-      deleted_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', normalizedLoanId)
-    .is('deleted_at', null)
-
-  if (error) {
-    throw error
-  }
-
-  return true
 }
 
 const useIncomeStore = create((set) => ({
@@ -355,9 +346,14 @@ const useIncomeStore = create((set) => ({
       throw normalizedError
     }
   },
-  softDeleteProjectIncome: async (projectIncomeId) => {
+  softDeleteProjectIncome: async (projectIncomeId, expectedUpdatedAt = null) => {
     try {
-      await softDeleteProjectIncome(projectIncomeId)
+      await softDeleteTransactionFromApi(
+        'project-income',
+        projectIncomeId,
+        resolveTeamId(),
+        expectedUpdatedAt
+      )
       return true
     } catch (error) {
       const normalizedError = toError(
@@ -372,9 +368,9 @@ const useIncomeStore = create((set) => ({
       throw normalizedError
     }
   },
-  softDeleteLoan: async (loanId) => {
+  softDeleteLoan: async (loanId, expectedUpdatedAt = null) => {
     try {
-      await softDeleteLoan(loanId)
+      await softDeleteTransactionFromApi('loan', loanId, resolveTeamId(), expectedUpdatedAt)
       return true
     } catch (error) {
       const normalizedError = toError(error, 'Gagal menghapus pinjaman.')
@@ -451,25 +447,26 @@ const useIncomeStore = create((set) => ({
         notes,
         project_name_snapshot: projectName,
         updated_at: new Date().toISOString(),
+        expectedUpdatedAt: normalizeText(
+          patch.expectedUpdatedAt ?? patch.expected_updated_at ?? patch.updated_at ?? patch.updatedAt,
+          null
+        ),
       }
 
-      const { data: updatedIncome, error } = await supabase
-        .from('project_incomes')
-        .update(updatePayload)
-        .eq('id', normalizedId)
-        .is('deleted_at', null)
-        .select(
-          'id, telegram_user_id, created_by_user_id, team_id, project_id, transaction_date, income_date, amount, description, notes, project_name_snapshot, created_at, updated_at, deleted_at'
-        )
-        .single()
+      const apiRecord = await saveTransactionRecordFromApi('PATCH', {
+        recordType: 'project-income',
+        id: normalizedId,
+        teamId: resolveTeamId(),
+        ...updatePayload,
+      })
 
-      if (error) {
-        throw error
+      if (!apiRecord) {
+        throw new Error('Server tidak mengembalikan data pemasukan proyek.')
       }
 
       set({ error: null })
 
-      return mapProjectIncomeRow(updatedIncome)
+      return apiRecord
     } catch (error) {
       const normalizedError = toError(
         error,
@@ -538,24 +535,22 @@ const useIncomeStore = create((set) => ({
         project_name_snapshot: projectName,
       }
 
-      const { data: insertedIncome, error } = await supabase
-        .from('project_incomes')
-        .insert(insertPayload)
-        .select('id')
-        .single()
+      const apiRecord = await saveTransactionRecordFromApi('POST', {
+        recordType: 'project-income',
+        ...insertPayload,
+        project_name: projectName,
+        teamId,
+      })
 
-      if (error) {
-        throw error
+      if (!apiRecord) {
+        throw new Error('Server tidak mengembalikan data pemasukan proyek.')
       }
 
       notifyTelegram(buildProjectIncomeNotificationPayload(data, projectName))
 
       set({ error: null })
 
-      return {
-        ...insertPayload,
-        id: insertedIncome?.id ?? null,
-      }
+      return apiRecord
     } catch (error) {
       const normalizedError = toError(error, 'Gagal menyimpan pemasukan proyek.')
 
@@ -579,13 +574,32 @@ const useIncomeStore = create((set) => ({
       const creditorName = normalizeText(patch.creditor_name ?? patch.creditorName, '-')
       const transactionDate = normalizeText(patch.transaction_date ?? patch.transactionDate)
       const principalAmount = toNumber(patch.principal_amount ?? patch.principalAmount)
-      const repaymentAmount = toNumber(patch.repayment_amount ?? patch.repaymentAmount)
-      const interestType = normalizeInterestType(
+      const interestType = normalizeLoanInterestType(
         patch.interest_type ?? patch.interestType
       )
       const interestRate = toNumber(patch.interest_rate ?? patch.interestRate, 0)
       const tenorMonths = Math.trunc(
         toNumber(patch.tenor_months ?? patch.tenorMonths, 0)
+      )
+      const lateInterestRate = toNumber(
+        patch.late_interest_rate ?? patch.lateInterestRate,
+        0
+      )
+      const lateInterestBasis = normalizeText(
+        normalizeLoanLateInterestBasis(
+          patch.late_interest_basis ?? patch.lateInterestBasis
+        ),
+        'remaining'
+      )
+      const latePenaltyType = normalizeText(
+        normalizeLoanLatePenaltyType(
+          patch.late_penalty_type ?? patch.latePenaltyType
+        ),
+        'none'
+      )
+      const latePenaltyAmount = toNumber(
+        patch.late_penalty_amount ?? patch.latePenaltyAmount,
+        0
       )
       const description = normalizeText(patch.description)
       const notes = normalizeText(patch.notes, description)
@@ -605,8 +619,6 @@ const useIncomeStore = create((set) => ({
         throw currentLoanError
       }
 
-      const currentPaidAmount = toNumber(currentLoan?.paid_amount, 0)
-
       if (!creditorId) {
         throw new Error('Kreditur wajib dipilih.')
       }
@@ -619,9 +631,39 @@ const useIncomeStore = create((set) => ({
         throw new Error('Pokok pinjaman harus lebih dari 0.')
       }
 
-      if (!Number.isFinite(repaymentAmount) || repaymentAmount <= 0) {
-        throw new Error('Total pengembalian harus lebih dari 0.')
+      if (interestRate < 0) {
+        throw new Error('Suku bunga tidak valid.')
       }
+
+      if (tenorMonths < 0) {
+        throw new Error('Tenor pinjaman tidak valid.')
+      }
+
+      if (lateInterestRate < 0) {
+        throw new Error('Bunga keterlambatan tidak valid.')
+      }
+
+      if (latePenaltyAmount < 0) {
+        throw new Error('Penalti keterlambatan tidak valid.')
+      }
+
+      const loanTermsSnapshot = buildLoanTermsSnapshot({
+        principal_amount: principalAmount,
+        interest_type: interestType,
+        interest_rate: interestRate,
+        tenor_months: tenorMonths,
+        transaction_date: transactionDate,
+        disbursed_date: transactionDate,
+        late_interest_rate: lateInterestRate,
+        late_interest_basis: lateInterestBasis,
+        late_penalty_type: latePenaltyType,
+        late_penalty_amount: latePenaltyAmount,
+        creditor_name_snapshot: creditorName,
+        amount: principalAmount,
+      })
+      const repaymentAmount = loanTermsSnapshot.repayment_amount
+
+      const currentPaidAmount = toNumber(currentLoan?.paid_amount, 0)
 
       if (repaymentAmount < currentPaidAmount) {
         throw new Error(
@@ -638,30 +680,36 @@ const useIncomeStore = create((set) => ({
         interest_type: interestType,
         interest_rate: interestType === 'interest' ? interestRate : null,
         tenor_months: tenorMonths > 0 ? tenorMonths : null,
+        late_interest_rate: lateInterestRate > 0 ? lateInterestRate : 0,
+        late_interest_basis: lateInterestBasis,
+        late_penalty_type: latePenaltyType,
+        late_penalty_amount: latePenaltyType === 'flat' ? latePenaltyAmount : 0,
+        loan_terms_snapshot: loanTermsSnapshot,
         amount: principalAmount,
         description,
         notes,
         creditor_name_snapshot: creditorName,
         updated_at: new Date().toISOString(),
+        expectedUpdatedAt: normalizeText(
+          patch.expectedUpdatedAt ?? patch.expected_updated_at ?? patch.updated_at ?? patch.updatedAt,
+          null
+        ),
       }
 
-      const { data: updatedLoan, error } = await supabase
-        .from('loans')
-        .update(updatePayload)
-        .eq('id', normalizedLoanId)
-        .is('deleted_at', null)
-        .select(
-          'id, telegram_user_id, created_by_user_id, team_id, creditor_id, transaction_date, disbursed_date, principal_amount, repayment_amount, interest_type, interest_rate, tenor_months, amount, description, notes, creditor_name_snapshot, status, paid_amount, created_at, updated_at, deleted_at'
-        )
-        .single()
+      const apiRecord = await saveTransactionRecordFromApi('PATCH', {
+        recordType: 'loan',
+        id: normalizedLoanId,
+        teamId: resolveTeamId(),
+        ...updatePayload,
+      })
 
-      if (error) {
-        throw error
+      if (!apiRecord) {
+        throw new Error('Server tidak mengembalikan data pinjaman.')
       }
 
       set({ error: null })
 
-      return mapLoanRow(updatedLoan)
+      return apiRecord
     } catch (error) {
       const normalizedError = toError(error, 'Gagal memperbarui pinjaman.')
 
@@ -687,13 +735,32 @@ const useIncomeStore = create((set) => ({
       const creditorName = normalizeText(data.creditor_name ?? data.creditorName, '-')
       const transactionDate = normalizeText(data.transaction_date ?? data.transactionDate)
       const principalAmount = toNumber(data.principal_amount ?? data.principalAmount)
-      const repaymentAmount = toNumber(data.repayment_amount ?? data.repaymentAmount)
-      const interestType = normalizeInterestType(
+      const interestType = normalizeLoanInterestType(
         data.interest_type ?? data.interestType
       )
       const interestRate = toNumber(data.interest_rate ?? data.interestRate, 0)
       const tenorMonths = Math.trunc(
         toNumber(data.tenor_months ?? data.tenorMonths, 0)
+      )
+      const lateInterestRate = toNumber(
+        data.late_interest_rate ?? data.lateInterestRate,
+        0
+      )
+      const lateInterestBasis = normalizeText(
+        normalizeLoanLateInterestBasis(
+          data.late_interest_basis ?? data.lateInterestBasis
+        ),
+        'remaining'
+      )
+      const latePenaltyType = normalizeText(
+        normalizeLoanLatePenaltyType(
+          data.late_penalty_type ?? data.latePenaltyType
+        ),
+        'none'
+      )
+      const latePenaltyAmount = toNumber(
+        data.late_penalty_amount ?? data.latePenaltyAmount,
+        0
       )
       const description = normalizeText(data.description)
       const notes = normalizeText(data.notes, description)
@@ -718,10 +785,6 @@ const useIncomeStore = create((set) => ({
         throw new Error('Pokok pinjaman harus lebih dari 0.')
       }
 
-      if (!Number.isFinite(repaymentAmount) || repaymentAmount <= 0) {
-        throw new Error('Total pengembalian harus lebih dari 0.')
-      }
-
       if (interestType === 'interest' && interestRate < 0) {
         throw new Error('Suku bunga tidak valid.')
       }
@@ -729,6 +792,30 @@ const useIncomeStore = create((set) => ({
       if (tenorMonths < 0) {
         throw new Error('Tenor pinjaman tidak valid.')
       }
+
+      if (lateInterestRate < 0) {
+        throw new Error('Bunga keterlambatan tidak valid.')
+      }
+
+      if (latePenaltyAmount < 0) {
+        throw new Error('Penalti keterlambatan tidak valid.')
+      }
+
+      const loanTermsSnapshot = buildLoanTermsSnapshot({
+        principal_amount: principalAmount,
+        interest_type: interestType,
+        interest_rate: interestRate,
+        tenor_months: tenorMonths,
+        transaction_date: transactionDate,
+        disbursed_date: transactionDate,
+        late_interest_rate: lateInterestRate,
+        late_interest_basis: lateInterestBasis,
+        late_penalty_type: latePenaltyType,
+        late_penalty_amount: latePenaltyAmount,
+        creditor_name_snapshot: creditorName,
+        amount: principalAmount,
+      })
+      const repaymentAmount = loanTermsSnapshot.repayment_amount
 
       const insertPayload = {
         telegram_user_id: telegramUserId,
@@ -742,6 +829,11 @@ const useIncomeStore = create((set) => ({
         interest_type: interestType,
         interest_rate: interestType === 'interest' ? interestRate : null,
         tenor_months: tenorMonths > 0 ? tenorMonths : null,
+        late_interest_rate: lateInterestRate > 0 ? lateInterestRate : 0,
+        late_interest_basis: lateInterestBasis,
+        late_penalty_type: latePenaltyType,
+        late_penalty_amount: latePenaltyType === 'flat' ? latePenaltyAmount : 0,
+        loan_terms_snapshot: loanTermsSnapshot,
         amount: principalAmount,
         description,
         notes,
@@ -750,24 +842,21 @@ const useIncomeStore = create((set) => ({
         paid_amount: 0,
       }
 
-      const { data: insertedLoan, error } = await supabase
-        .from('loans')
-        .insert(insertPayload)
-        .select('id')
-        .single()
+      const apiRecord = await saveTransactionRecordFromApi('POST', {
+        recordType: 'loan',
+        ...insertPayload,
+        teamId,
+      })
 
-      if (error) {
-        throw error
+      if (!apiRecord) {
+        throw new Error('Server tidak mengembalikan data pinjaman.')
       }
 
-      notifyTelegram(buildLoanNotificationPayload(data, creditorName))
+      notifyTelegram(buildLoanNotificationPayload(apiRecord, creditorName))
 
       set({ error: null })
 
-      return {
-        ...insertPayload,
-        id: insertedLoan?.id ?? null,
-      }
+      return apiRecord
     } catch (error) {
       const normalizedError = toError(error, 'Gagal menyimpan pinjaman.')
 

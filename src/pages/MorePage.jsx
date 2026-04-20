@@ -1,15 +1,23 @@
 import { useNavigate } from 'react-router-dom'
-import { Briefcase, ChevronRight, HeartHandshake, Sparkles, UserCog, Users2 } from 'lucide-react'
-import { AppBadge, AppButton, AppCard, AppCardStrong, PageHeader } from '../components/ui/AppPrimitives'
+import {
+  Briefcase,
+  ChevronRight,
+  FolderKanban,
+  HeartHandshake,
+  Package,
+  Sparkles,
+  UserCog,
+} from 'lucide-react'
+import {
+  AppBadge,
+  AppButton,
+  AppCard,
+  AppCardStrong,
+  PageHeader,
+  PageShell,
+} from '../components/ui/AppPrimitives'
 
 const modules = [
-  {
-    title: 'SDM & Payroll',
-    description: 'Rekap absensi dan tagihan gaji.',
-    to: '/more/payroll',
-    icon: Users2,
-    toneClass: 'bg-[var(--app-tone-success-bg)] text-[var(--app-tone-success-text)]',
-  },
   {
     title: 'HRD & Rekrutmen',
     description: 'Kelola pelamar dan dokumen pendukung.',
@@ -25,11 +33,25 @@ const modules = [
     toneClass: 'bg-[var(--app-tone-warning-bg)] text-[var(--app-tone-warning-text)]',
   },
   {
-    title: 'Team Invite',
+    title: 'Tim',
     description: 'Magic invite link dan kontrol role anggota.',
     to: '/more/team-invite',
     icon: UserCog,
     toneClass: 'bg-[var(--app-brand-accent-muted)] text-[var(--app-brand-accent)]',
+  },
+  {
+    title: 'Stok Barang',
+    description: 'Pantau stok masuk dan kondisi material.',
+    to: '/stock',
+    icon: Package,
+    toneClass: 'bg-[var(--app-tone-success-bg)] text-[var(--app-tone-success-text)]',
+  },
+  {
+    title: 'Unit Kerja',
+    description: null,
+    to: '/projects',
+    icon: FolderKanban,
+    toneClass: 'bg-[var(--app-tone-info-bg)] text-[var(--app-tone-info-text)]',
   },
 ]
 
@@ -37,13 +59,13 @@ function MorePage() {
   const navigate = useNavigate()
 
   return (
-    <section className="space-y-4 px-2 py-2">
+    <PageShell>
       <PageHeader
         eyebrow="Aksi Cepat"
         title="More"
       />
 
-      <AppCardStrong className="space-y-4 p-4 sm:p-5">
+      <AppCardStrong className="space-y-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-2">
             <AppBadge tone="info" icon={Sparkles}>
@@ -74,9 +96,11 @@ function MorePage() {
                     <span className="block text-sm font-semibold text-[var(--app-text-color)]">
                       {module.title}
                     </span>
-                    <span className="block text-xs font-normal text-[var(--app-hint-color)]">
-                      {module.description}
-                    </span>
+                    {module.description ? (
+                      <span className="block text-xs font-normal text-[var(--app-hint-color)]">
+                        {module.description}
+                      </span>
+                    ) : null}
                   </span>
                 </AppButton>
               </AppCard>
@@ -84,7 +108,7 @@ function MorePage() {
           })}
         </div>
       </AppCardStrong>
-    </section>
+    </PageShell>
   )
 }
 

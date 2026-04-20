@@ -1,20 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { 
   AlertCircle,
   ArrowDownLeft,
-  ArrowDownRight, 
   ArrowUpRight,
   CalendarCheck2,
   ChevronRight,
-  Landmark,
-  LayoutGrid,
-  MoreHorizontal,
-  Pencil,
-  RefreshCw, 
+  Clock3,
+  FileText,
+  FolderKanban,
+  RefreshCw,
   Trash2,
   TrendingUp,
   User,
+  UsersRound,
   Wallet,
 } from 'lucide-react'
 import ActionCard from '../components/ui/ActionCard'
@@ -25,6 +24,14 @@ import useBillStore from '../store/useBillStore'
 import useDashboardStore from '../store/useDashboardStore'
 import useIncomeStore from '../store/useIncomeStore'
 import useReportStore from '../store/useReportStore'
+import {
+  formatAppCalendarLabel,
+  formatAppSyncLabel,
+  getAppTodayKey,
+  toAppDateKey,
+} from '../lib/date-time'
+import { logPerf, nowMs, roundMs } from '../lib/timing'
+import { getTransactionCreatorLabel } from '../lib/transaction-presentation'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -32,67 +39,48 @@ const currencyFormatter = new Intl.NumberFormat('id-ID', {
   maximumFractionDigits: 0,
 })
 
-const dateFormatter = new Intl.DateTimeFormat('id-ID', {
-  weekday: 'short',
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-})
-
-const listDateFormatter = new Intl.DateTimeFormat('id-ID', {
-  day: '2-digit',
-  month: 'short',
-  hour: '2-digit',
-  minute: '2-digit',
-})
-
 const quickFilters = [
   { value: 'all', label: 'Semua' },
   { value: 'today', label: 'Hari Ini' },
   { value: 'project', label: 'Proyek' },
 ]
+const dashboardPerfEnabled = import.meta.env.DEV
 
 const dashboardActions = [
   {
-    label: 'Pemasukan',
-    description: 'Catat termin proyek',
-    to: '/edit/project-income/new',
-    icon: ArrowUpRight,
+    label: 'Jurnal',
+    to: '/transactions',
+    icon: FileText,
     iconClassName: 'bg-[var(--app-tone-success-bg)] text-[var(--app-tone-success-text)]',
   },
   {
-    label: 'Pengeluaran',
-    description: 'Catat biaya harian',
-    to: '/edit/expense/new',
-    icon: ArrowDownRight,
+    label: 'Riwayat',
+    to: '/transactions/history',
+    icon: Clock3,
     iconClassName: 'bg-[var(--app-tone-warning-bg)] text-[var(--app-tone-warning-text)]',
   },
   {
-    label: 'Gaji & Absen',
-    description: 'Input absensi harian',
-    to: '/attendance/new',
-    icon: CalendarCheck2,
+    label: 'Halaman Sampah',
+    to: '/transactions/recycle-bin',
+    icon: Trash2,
     iconClassName: 'bg-[var(--app-tone-info-bg)] text-[var(--app-tone-info-text)]',
   },
   {
-    label: 'Pinjaman',
-    description: 'Tambah dana masuk',
-    to: '/edit/loan/new',
-    icon: Wallet,
+    label: 'Catatan Absensi',
+    to: '/payroll',
+    icon: CalendarCheck2,
     iconClassName: 'bg-[var(--app-tone-neutral-bg)] text-[var(--app-tone-neutral-text)]',
   },
   {
-    label: 'Master',
-    description: 'Kelola data inti',
-    to: '/master',
-    icon: LayoutGrid,
+    label: 'Unit Kerja',
+    to: '/projects',
+    icon: FolderKanban,
     iconClassName: 'bg-[var(--app-brand-accent-muted)] text-[var(--app-brand-accent)]',
   },
   {
-    label: 'Tim & Tools',
-    description: 'Invite, HRD, payroll',
-    to: '/more',
-    icon: MoreHorizontal,
+    label: 'Tim',
+    to: '/more/team-invite',
+    icon: UsersRound,
     iconClassName: 'bg-[var(--app-surface-low-color)] text-[var(--app-text-color)]',
   },
 ]
@@ -125,50 +113,12 @@ function formatCurrencyCompact(value) {
   return formatCurrency(amount)
 }
 
-function formatDateLabel(value) {
-  const parsedDate = new Date(String(value ?? ''))
-  if (Number.isNaN(parsedDate.getTime())) return ''
-  return dateFormatter.format(parsedDate)
-}
-
-function formatListDate(value) {
-  const parsedDate = new Date(String(value ?? ''))
-  if (Number.isNaN(parsedDate.getTime())) return ''
-  return listDateFormatter.format(parsedDate)
-}
-
-function formatSyncLabel(value) {
-  const parsedDate = new Date(String(value ?? ''))
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return 'belum sinkron'
-  }
-
-  return new Intl.DateTimeFormat('id-ID', {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(parsedDate)
-}
-
 function parseTimestamp(...values) {
   for (const value of values) {
     const parsedDate = new Date(String(value ?? ''))
     if (!Number.isNaN(parsedDate.getTime())) return parsedDate.getTime()
   }
   return 0
-}
-
-function getTodayKey() {
-  const today = new Date()
-  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-}
-
-function toDateKey(value) {
-  const parsedDate = new Date(String(value ?? ''))
-  if (Number.isNaN(parsedDate.getTime())) return ''
-  return `${parsedDate.getFullYear()}-${String(parsedDate.getMonth() + 1).padStart(2, '0')}-${String(parsedDate.getDate()).padStart(2, '0')}`
 }
 
 function getUserDisplayName(telegramUser, authUser) {
@@ -199,22 +149,29 @@ function buildTransactionItem(transaction) {
   const kind = transaction.type === 'expense' ? 'expense' : 'income'
   const isExpense = kind === 'expense'
   const timestamp = parseTimestamp(transaction.transaction_date, transaction.created_at, transaction.updated_at)
+  const creatorBadge = getTransactionCreatorLabel(transaction)
+  const fallbackTitle =
+    transaction.sourceType === 'loan-disbursement'
+      ? 'Dana Masuk / Pinjaman'
+      : transaction.sourceType === 'loan-payment'
+        ? 'Bayar Pinjaman'
+        : transaction.sourceType === 'bill-payment'
+          ? 'Bayar Tagihan'
+          : isExpense
+            ? 'Mutasi Keluar'
+            : 'Mutasi Masuk'
   
-  let badge = isExpense ? 'Mutasi Keluar' : 'Mutasi Masuk'
-  let badgeColorClass = isExpense ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+  let badge = creatorBadge
+  let badgeColorClass = 'bg-[var(--app-surface-low-color)] text-[var(--app-text-color)]'
   let Icon = isExpense ? ArrowUpRight : ArrowDownLeft
   let iconColorClass = isExpense ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'
   let amountColorClass = isExpense ? 'text-[var(--app-text-color)]' : 'text-emerald-700'
 
   if (transaction.sourceType === 'loan-disbursement') {
-    badge = 'Pinjaman'
-    badgeColorClass = 'bg-slate-200 text-slate-700'
     Icon = User
     iconColorClass = 'bg-slate-100 text-slate-700'
     amountColorClass = 'text-on-surface'
   } else if (transaction.sourceType === 'loan-payment' || transaction.sourceType === 'bill-payment') {
-    badge = 'Pending'
-    badgeColorClass = 'bg-amber-100 text-amber-800'
     Icon = ArrowUpRight
     iconColorClass = 'bg-amber-50 text-amber-700'
     amountColorClass = 'text-on-surface'
@@ -224,8 +181,12 @@ function buildTransactionItem(transaction) {
     id: transaction.id,
     kind,
     sourceType: transaction.sourceType,
-    title: pickText(transaction.description, badge),
-    subtitle: pickText(transaction.project_name, transaction.party_label, formatListDate(transaction.transaction_date)),
+    title: pickText(transaction.description, fallbackTitle),
+    subtitle: pickText(
+      transaction.project_name,
+      transaction.party_label,
+      formatAppSyncLabel(transaction.transaction_date)
+    ),
     amount: Number(transaction.amount) || 0,
     amountColorClass,
     badge,
@@ -233,7 +194,7 @@ function buildTransactionItem(transaction) {
     Icon,
     iconColorClass,
     timestamp,
-    dateKey: toDateKey(transaction.transaction_date || transaction.created_at),
+    dateKey: toAppDateKey(transaction.transaction_date || transaction.created_at),
     editType: transaction.sourceType === 'project-income' ? 'project-income' : transaction.sourceType === 'loan-disbursement' ? 'loan' : transaction.sourceType,
     raw: transaction,
     projectLabel: transaction.project_name || '',
@@ -243,116 +204,111 @@ function buildTransactionItem(transaction) {
   }
 }
 
-function buildBillItem(bill) {
-  const timestamp = parseTimestamp(bill.dueDate, bill.created_at, bill.updated_at)
-  const isPayable = String(bill.status ?? 'unpaid').toLowerCase() !== 'paid'
-  const statusLabel = bill.status === 'paid' ? 'Lunas' : 'Pending'
-  
-  return {
-    id: bill.id,
-    kind: 'bill',
-    sourceType: 'bill',
-    title: pickText(bill.supplierName, bill.description, 'Tagihan'),
-    subtitle: pickText(bill.projectName, formatListDate(bill.dueDate)),
-    amount: -Math.abs(Number(bill.remainingAmount ?? bill.amount ?? 0)),
-    amountColorClass: 'text-[var(--app-text-color)]',
-    badge: statusLabel,
-    badgeColorClass: bill.status === 'paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800',
-    Icon: ArrowUpRight,
-    iconColorClass: 'bg-amber-50 text-amber-700',
-    timestamp,
-    dateKey: toDateKey(bill.dueDate || bill.created_at),
-    editType: 'bill',
-    raw: bill,
-    projectLabel: bill.projectName || '',
-    payable: isPayable,
-    editable: false,
-    deletable: true,
-  }
-}
-
-function buildLoanItem(loan) {
-  const timestamp = parseTimestamp(loan.transaction_date, loan.disbursed_date, loan.created_at, loan.updated_at)
-  const remainingAmount = Math.max(Number(loan.remaining_amount ?? 0), 0)
-  
-  return {
-    id: loan.id,
-    kind: 'loan',
-    sourceType: 'loan',
-    title: pickText(loan.creditor_name_snapshot, loan.description, 'Pinjaman'),
-    subtitle: pickText(loan.interest_type ? `Bunga ${loan.interest_type}` : '', formatListDate(loan.transaction_date)),
-    amount: -remainingAmount,
-    amountColorClass: 'text-[var(--app-text-color)]',
-    badge: 'Pinjaman',
-    badgeColorClass: 'bg-slate-200 text-slate-700',
-    Icon: User,
-    iconColorClass: 'bg-slate-100 text-slate-700',
-    timestamp,
-    dateKey: toDateKey(loan.transaction_date || loan.created_at),
-    editType: 'loan',
-    raw: loan,
-    projectLabel: '',
-    payable: remainingAmount > 0,
-    editable: true,
-    deletable: true,
-  }
-}
-
 function Dashboard() {
   const navigate = useNavigate()
   const { user: telegramUser } = useTelegram()
   const authUser = useAuthStore((state) => state.user)
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
   const summary = useDashboardStore((state) => state.summary)
-  const cashMutations = useDashboardStore((state) => state.cashMutations)
+  const workspaceTransactions = useDashboardStore((state) => state.workspaceTransactions)
   const dashboardError = useDashboardStore((state) => state.error)
+  const workspaceError = useDashboardStore((state) => state.workspaceError)
   const dashboardLoading = useDashboardStore((state) => state.isLoading)
+  const isWorkspaceLoading = useDashboardStore((state) => state.isWorkspaceLoading)
   const isRefreshing = useDashboardStore((state) => state.isRefreshing)
   const refreshDashboard = useDashboardStore((state) => state.refreshDashboard)
+  const fetchWorkspaceTransactions = useDashboardStore(
+    (state) => state.fetchWorkspaceTransactions
+  )
   const lastUpdatedAt = useDashboardStore((state) => state.lastUpdatedAt)
   const bills = useBillStore((state) => state.bills)
   const billsError = useBillStore((state) => state.error)
   const billsLoading = useBillStore((state) => state.isLoading)
   const fetchUnpaidBills = useBillStore((state) => state.fetchUnpaidBills)
-  const softDeleteBill = useBillStore((state) => state.softDeleteBill)
   const loans = useIncomeStore((state) => state.loans)
   const loansError = useIncomeStore((state) => state.error)
   const isLoansLoading = useIncomeStore((state) => state.isLoadingLoans)
   const fetchLoans = useIncomeStore((state) => state.fetchLoans)
-  const softDeleteProjectIncome = useIncomeStore((state) => state.softDeleteProjectIncome)
-  const softDeleteLoan = useIncomeStore((state) => state.softDeleteLoan)
   const portfolioSummary = useReportStore((state) => state.portfolioSummary)
   const reportError = useReportStore((state) => state.error)
   const reportLoading = useReportStore((state) => state.isLoading)
   const fetchProjectSummaries = useReportStore((state) => state.fetchProjectSummaries)
-  
+
+  const dashboardMountedAtRef = useRef(nowMs())
+  const dashboardFirstUsableLoggedRef = useRef(false)
   const [activeFilter, setActiveFilter] = useState('all')
 
   const userDisplayName = getUserDisplayName(telegramUser, authUser)
   const userInitials = useMemo(() => getUserInitials(userDisplayName), [userDisplayName])
-  const todayKey = useMemo(() => getTodayKey(), [])
-  const todayLabel = useMemo(() => formatDateLabel(new Date().toISOString()), [])
+  const todayKey = getAppTodayKey()
+  const todayLabel = formatAppCalendarLabel(new Date())
 
   const refreshAllData = useCallback(async () => {
     if (!currentTeamId) return
-    await Promise.all([
-      refreshDashboard(currentTeamId),
-      fetchUnpaidBills({ teamId: currentTeamId }),
-      fetchLoans({ teamId: currentTeamId }),
-      fetchProjectSummaries({ force: true }),
+    const measureBranch = async (label, run) => {
+      const branchStartedAt = nowMs()
+      try {
+        return await run()
+      } finally {
+        logPerf(
+          `Dashboard ${label}`,
+          {
+            durationMs: roundMs(nowMs() - branchStartedAt),
+          },
+          dashboardPerfEnabled
+        )
+      }
+    }
+
+    const fastBranches = Promise.all([
+      measureBranch('summary refresh', () => refreshDashboard(currentTeamId)),
+      measureBranch('unpaid bills', () => fetchUnpaidBills({ teamId: currentTeamId })),
+      measureBranch('loan list', () => fetchLoans({ teamId: currentTeamId })),
+      measureBranch('project summaries', () => fetchProjectSummaries({ force: true })),
     ])
-  }, [currentTeamId, fetchLoans, fetchProjectSummaries, fetchUnpaidBills, refreshDashboard])
+
+    if (typeof window !== 'undefined') {
+      const scheduleWorkspaceTransactions = () => {
+        void measureBranch('workspace transactions', () =>
+          fetchWorkspaceTransactions(currentTeamId, { silent: true })
+        )
+      }
+
+      if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(scheduleWorkspaceTransactions)
+      } else {
+        window.setTimeout(scheduleWorkspaceTransactions, 0)
+      }
+    } else {
+      void measureBranch('workspace transactions', () =>
+        fetchWorkspaceTransactions(currentTeamId, { silent: true })
+      )
+    }
+
+    return fastBranches
+  }, [
+    currentTeamId,
+    fetchLoans,
+    fetchProjectSummaries,
+    fetchUnpaidBills,
+    fetchWorkspaceTransactions,
+    refreshDashboard,
+  ])
 
   useEffect(() => {
     void refreshAllData()
   }, [refreshAllData])
 
+  useEffect(() => {
+    dashboardMountedAtRef.current = nowMs()
+    dashboardFirstUsableLoggedRef.current = false
+  }, [currentTeamId])
+
   const unifiedItems = useMemo(() => {
-    const transactionItems = cashMutations.map(buildTransactionItem)
-    const billItems = bills.map(buildBillItem)
-    const loanItems = loans.filter((loan) => Number(loan.remaining_amount ?? 0) > 0).map(buildLoanItem)
-    return [...transactionItems, ...billItems, ...loanItems].sort((left, right) => right.timestamp - left.timestamp)
-  }, [bills, cashMutations, loans])
+    return [...workspaceTransactions.map(buildTransactionItem)].sort(
+      (left, right) => right.timestamp - left.timestamp
+    )
+  }, [workspaceTransactions])
 
   const filteredItems = useMemo(() => {
     if (activeFilter === 'today') return unifiedItems.filter((item) => item.dateKey === todayKey)
@@ -360,9 +316,15 @@ function Dashboard() {
     return unifiedItems
   }, [activeFilter, todayKey, unifiedItems])
 
+  const recentItems = useMemo(() => {
+    return filteredItems.slice(0, 5)
+  }, [filteredItems])
+
   const combinedError = useMemo(() => {
-    return [dashboardError, billsError, loansError, reportError].filter((message, index, list) => Boolean(message) && list.indexOf(message) === index).join(' | ')
-  }, [billsError, dashboardError, loansError, reportError])
+    return [dashboardError, workspaceError, billsError, loansError, reportError]
+      .filter((message, index, list) => Boolean(message) && list.indexOf(message) === index)
+      .join(' | ')
+  }, [billsError, dashboardError, loansError, reportError, workspaceError])
 
   const pendingBillAmount = useMemo(() => {
     return bills.reduce((total, bill) => total + Number(bill.remainingAmount ?? 0), 0)
@@ -376,19 +338,7 @@ function Dashboard() {
     return activeLoans.reduce((total, loan) => total + Number(loan.remaining_amount ?? 0), 0)
   }, [activeLoans])
 
-  const handleDeleteItem = async (item) => {
-    if (!window.confirm(`Hapus ${item.title}?`)) return
-    try {
-      if (item.sourceType === 'project-income') await softDeleteProjectIncome(item.id)
-      else if (['loan', 'loan-disbursement'].includes(item.sourceType)) await softDeleteLoan(item.id)
-      else if (item.sourceType === 'bill') await softDeleteBill(item.id)
-      await refreshAllData()
-    } catch (err) {
-      console.error(err)
-    }
-  }
-
-  const isLoading = Boolean(currentTeamId) && (dashboardLoading || billsLoading || isLoansLoading || reportLoading || isRefreshing)
+  const isLoading = Boolean(currentTeamId) && (dashboardLoading || isWorkspaceLoading || billsLoading || isLoansLoading || reportLoading || isRefreshing)
   const currentProfit = portfolioSummary?.net_consolidated_profit ?? 0
   const cashBalance = summary?.endingBalance ?? 0
   const firstName = userDisplayName.split(' ')[0] || userDisplayName
@@ -397,8 +347,35 @@ function Dashboard() {
     currentProfit >= 0
       ? 'bg-[var(--app-tone-success-bg)] text-[var(--app-tone-success-text)]'
       : 'bg-[var(--app-tone-danger-bg)] text-[var(--app-tone-danger-text)]'
-  const showDashboardSkeleton = isLoading && filteredItems.length === 0 && !combinedError
+  const showDashboardSkeleton = isLoading && recentItems.length === 0 && !combinedError
   const hasWorkspace = Boolean(currentTeamId)
+
+  useEffect(() => {
+    if (!dashboardPerfEnabled || dashboardFirstUsableLoggedRef.current) {
+      return
+    }
+
+    if (!currentTeamId || isLoading || combinedError || recentItems.length === 0) {
+      return
+    }
+
+    dashboardFirstUsableLoggedRef.current = true
+    logPerf(
+      'Dashboard first usable state',
+      {
+        mountMs: roundMs(nowMs() - dashboardMountedAtRef.current),
+        recentCount: recentItems.length,
+        activeLoans: activeLoans.length,
+      },
+      dashboardPerfEnabled
+    )
+  }, [
+    activeLoans.length,
+    combinedError,
+    currentTeamId,
+    isLoading,
+    recentItems.length,
+  ])
 
   return (
     <section className="space-y-4 pb-4">
@@ -436,8 +413,8 @@ function Dashboard() {
 
         <div className="mt-4 flex flex-wrap gap-2">
           <span className="app-chip">Team {currentTeamId || '-'}</span>
-          <span className="app-chip">Sinkron {formatSyncLabel(lastUpdatedAt)}</span>
-          <span className="app-chip">{filteredItems.length} mutasi</span>
+          <span className="app-chip">Sinkron {formatAppSyncLabel(lastUpdatedAt)}</span>
+          <span className="app-chip">{recentItems.length} mutasi terbaru</span>
         </div>
 
         <div className="mt-4 space-y-3">
@@ -543,7 +520,7 @@ function Dashboard() {
             return (
               <button
                 key={action.to}
-                className="app-card flex min-h-[106px] items-start gap-3 px-4 py-4 text-left transition active:scale-[0.985]"
+                className="app-card flex min-h-[88px] items-center gap-3 px-4 py-4 text-left transition active:scale-[0.985]"
                 onClick={() => navigate(action.to)}
                 type="button"
               >
@@ -554,9 +531,11 @@ function Dashboard() {
                   <span className="block text-sm font-semibold text-[var(--app-text-color)]">
                     {action.label}
                   </span>
-                  <span className="mt-1 block text-xs leading-5 text-[var(--app-hint-color)]">
-                    {action.description}
-                  </span>
+                  {action.description ? (
+                    <span className="mt-1 block text-xs leading-5 text-[var(--app-hint-color)]">
+                      {action.description}
+                    </span>
+                  ) : null}
                 </span>
               </button>
             )
@@ -567,8 +546,8 @@ function Dashboard() {
       <section className="app-page-surface px-3 py-3">
         <div className="flex items-start justify-between gap-3 px-1">
           <div>
-            <p className="app-kicker">Mutasi Terpadu</p>
-            <h2 className="app-section-title">Aktivitas kas</h2>
+            <p className="app-kicker">Jurnal</p>
+            <h2 className="app-section-title">Aktivitas terbaru</h2>
           </div>
           <button
             className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--app-brand-accent-muted)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--app-brand-accent)] transition active:scale-[0.98]"
@@ -627,10 +606,9 @@ function Dashboard() {
           </div>
         ) : (
           <SmartList
-            key={`${activeFilter}-${filteredItems.length}`}
-            data={filteredItems}
-            initialCount={12}
-            loadMoreStep={12}
+            key={`${activeFilter}-${recentItems.length}`}
+            data={recentItems}
+            initialCount={recentItems.length}
             className="flex flex-col gap-3 px-1 pt-3"
             emptyState={
               <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
@@ -646,62 +624,42 @@ function Dashboard() {
               </div>
             }
             renderItem={(item) => (
-              <ActionCard
-                key={item.id}
-                title={item.title}
-                subtitle={item.subtitle || 'Mutasi tercatat di workspace aktif'}
-                amount={`${item.amount < 0 ? '-' : '+'}${formatCurrency(Math.abs(item.amount))}`}
+                <ActionCard
+                  key={item.id}
+                  title={item.title}
+                  subtitle={item.subtitle || 'Jurnal'}
+                  amount={`${item.amount < 0 ? '-' : '+'}${formatCurrency(Math.abs(item.amount))}`}
                 amountClassName={item.amountColorClass}
                 badge={item.badge}
-                badges={item.projectLabel ? [item.projectLabel] : []}
-                details={[
-                  item.kind === 'bill' ? 'Tagihan' : item.kind === 'loan' ? 'Pinjaman' : 'Mutasi',
-                  item.sourceType,
+                actions={[
+                  {
+                    id: 'open-detail',
+                    label: 'Detail',
+                    icon: <ChevronRight className="h-4 w-4" />,
+                    onClick: () =>
+                      navigate(
+                        item.sourceType === 'bill-payment' || item.sourceType === 'loan-payment'
+                          ? `/transactions/${item.id}?surface=pembayaran`
+                          : `/transactions/${item.id}`,
+                        {
+                          state:
+                            item.sourceType === 'bill-payment' || item.sourceType === 'loan-payment'
+                              ? {
+                                  transaction: item.raw,
+                                  detailSurface: 'pembayaran',
+                                }
+                              : {
+                                  transaction: item.raw,
+                                },
+                        }
+                      ),
+                  },
                 ]}
                 leadingIcon={
                   <div className={`flex h-11 w-11 items-center justify-center rounded-[18px] ${item.iconColorClass}`}>
                     <item.Icon className="h-5 w-5" />
                   </div>
                 }
-                actions={[
-                  {
-                    id: 'detail',
-                    label: 'Detail',
-                    icon: <ChevronRight className="h-3.5 w-3.5" />,
-                    onClick: () => navigate('/transactions'),
-                  },
-                  ...(item.editable
-                    ? [
-                        {
-                          id: 'edit',
-                          label: 'Edit',
-                          icon: <Pencil className="h-3.5 w-3.5" />,
-                          onClick: () => navigate(`/edit/${item.editType}/${item.id}`, { state: { item: item.raw } }),
-                        },
-                      ]
-                    : []),
-                  ...(item.payable
-                    ? [
-                        {
-                          id: 'pay',
-                          label: 'Bayar',
-                          icon: <Landmark className="h-3.5 w-3.5" />,
-                          onClick: () => navigate(item.sourceType === 'loan' ? `/loan-payment/${item.id}` : `/payment/${item.id}`, { state: { item: item.raw } }),
-                        },
-                      ]
-                    : []),
-                  ...(item.deletable
-                    ? [
-                        {
-                          id: 'delete',
-                          label: 'Hapus',
-                          icon: <Trash2 className="h-3.5 w-3.5" />,
-                          destructive: true,
-                          onClick: () => handleDeleteItem(item),
-                        },
-                      ]
-                    : []),
-                ]}
                 className="app-card px-4 py-4"
               />
             )}

@@ -1,162 +1,90 @@
-import { useEffect, useMemo, useState } from 'react'
-import {
-  ArrowDownLeft,
-  ArrowUpRight,
-  Eye,
-  Pencil,
-  Trash2,
-} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowDownLeft, ArrowUpRight, Clock3, MoreVertical, Pencil, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import ActionCard from '../components/ui/ActionCard'
-import SmartList from '../components/ui/SmartList'
 import {
-  AppBadge,
   AppButton,
-  AppCard,
   AppCardDashed,
   AppCardStrong,
   AppEmptyState,
+  AppInput,
   AppSheet,
+  PageShell,
   PageHeader,
 } from '../components/ui/AppPrimitives'
+import {
+  canDeleteTransaction,
+  canEditTransaction,
+  canOpenTransactionPayment,
+  formatCurrency,
+  formatTransactionDateTime,
+  getTransactionEditRoute,
+  getTransactionCreatorLabel,
+  getTransactionLedgerFilterOptions,
+  getTransactionLedgerSummary,
+  getTransactionPaymentLabel,
+  getTransactionPaymentRoute,
+  getTransactionTitle,
+} from '../lib/transaction-presentation'
+import { logPerf, nowMs, roundMs } from '../lib/timing'
+import { fetchWorkspaceTransactionPageFromApi } from '../lib/transactions-api'
 import useAuthStore from '../store/useAuthStore'
 import useDashboardStore from '../store/useDashboardStore'
+import useAttendanceStore from '../store/useAttendanceStore'
 import useIncomeStore from '../store/useIncomeStore'
+import useTransactionStore from '../store/useTransactionStore'
 
-const filters = [
-  { value: 'all', label: 'Semua' },
-  { value: 'income', label: 'Uang Masuk' },
-  { value: 'expense', label: 'Uang Keluar' },
-]
+const filters = getTransactionLedgerFilterOptions()
+const ledgerPageSize = 20
+const ledgerListStateStorageKey = 'banplex:transactions-list-state'
+const ledgerPerfEnabled = import.meta.env.DEV
 
-const currencyFormatter = new Intl.NumberFormat('id-ID', {
-  style: 'currency',
-  currency: 'IDR',
-  maximumFractionDigits: 0,
-})
-
-const syncFormatter = new Intl.DateTimeFormat('id-ID', {
-  day: '2-digit',
-  month: 'short',
-  hour: '2-digit',
-  minute: '2-digit',
-})
-
-const timeFormatter = new Intl.DateTimeFormat('id-ID', {
-  hour: '2-digit',
-  minute: '2-digit',
-})
-
-function formatCurrency(value) {
-  return currencyFormatter.format(Number.isFinite(Number(value)) ? Number(value) : 0)
-}
-
-function formatSyncLabel(value) {
-  const parsedDate = new Date(String(value ?? ''))
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return 'belum ada'
+function readLedgerListState(teamId) {
+  if (!teamId || typeof window === 'undefined') {
+    return null
   }
 
-  return syncFormatter.format(parsedDate)
-}
+  try {
+    const rawValue = window.sessionStorage.getItem(ledgerListStateStorageKey)
 
-function formatTimeLabel(value) {
-  const parsedDate = new Date(String(value ?? ''))
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return 'waktu belum tersedia'
-  }
-
-  return timeFormatter.format(parsedDate)
-}
-
-function getTodayKey() {
-  const today = new Date()
-  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-}
-
-function toDateKey(value) {
-  const parsedDate = new Date(String(value ?? ''))
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return ''
-  }
-
-  return `${parsedDate.getFullYear()}-${String(parsedDate.getMonth() + 1).padStart(2, '0')}-${String(parsedDate.getDate()).padStart(2, '0')}`
-}
-
-function getSectionLabel(dateKey, referenceTodayKey) {
-  if (!dateKey) {
-    return 'Tanpa Tanggal'
-  }
-
-  if (dateKey === referenceTodayKey) {
-    return 'Hari Ini'
-  }
-
-  const today = new Date(referenceTodayKey)
-
-  if (!Number.isNaN(today.getTime())) {
-    const yesterday = new Date(today)
-    yesterday.setDate(today.getDate() - 1)
-    const yesterdayKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`
-
-    if (dateKey === yesterdayKey) {
-      return 'Kemarin'
+    if (!rawValue) {
+      return null
     }
+
+    const parsedValue = JSON.parse(rawValue)
+
+    if (parsedValue?.teamId !== teamId) {
+      return null
+    }
+
+    return parsedValue
+  } catch (error) {
+    console.error('Gagal membaca state Jurnal:', error)
+    return null
   }
-
-  const parsedDate = new Date(dateKey)
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return dateKey
-  }
-
-  return new Intl.DateTimeFormat('id-ID', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(parsedDate)
 }
 
-function getBadgeLabel(transaction) {
-  if (transaction.sourceType === 'project-income') {
-    return 'Termin Proyek'
+function saveLedgerListState(teamId, state) {
+  if (!teamId || typeof window === 'undefined') {
+    return
   }
 
-  if (transaction.sourceType === 'loan-disbursement') {
-    return 'Pinjaman Masuk'
+  try {
+    window.sessionStorage.setItem(
+      ledgerListStateStorageKey,
+      JSON.stringify({
+        teamId,
+        ...state,
+      })
+    )
+  } catch (error) {
+    console.error('Gagal menyimpan state Jurnal:', error)
   }
-
-  if (transaction.sourceType === 'loan-payment') {
-    return 'Bayar Pinjaman'
-  }
-
-  return 'Bayar Tagihan'
-}
-
-function getSourceLabel(transaction) {
-  if (transaction.sourceType === 'project-income') {
-    return transaction.project_name || 'Proyek'
-  }
-
-  if (transaction.sourceType === 'loan-disbursement') {
-    return transaction.party_label || 'Kreditor'
-  }
-
-  if (transaction.sourceType === 'loan-payment') {
-    return transaction.party_label || 'Pembayaran pinjaman'
-  }
-
-  return transaction.party_label || transaction.project_name || 'Pembayaran'
 }
 
 function getTransactionPresentation(transaction) {
   if (transaction.type === 'expense') {
     return {
       Icon: ArrowUpRight,
-      tone: 'warning',
       iconClassName: 'app-tone-warning',
       amountClassName: 'text-[var(--app-destructive-color)]',
     }
@@ -164,138 +92,361 @@ function getTransactionPresentation(transaction) {
 
   return {
     Icon: ArrowDownLeft,
-    tone: 'success',
     iconClassName: 'app-tone-success',
     amountClassName: 'text-[var(--app-success-color)]',
   }
 }
 
-function getTransactionEditRoute(transaction) {
-  if (transaction.sourceType === 'project-income') {
-    return `/edit/project-income/${transaction.id}`
-  }
+function isMaterialExpense(transaction) {
+  const expenseType = String(transaction?.expense_type ?? '').trim().toLowerCase()
+  const documentType = String(transaction?.document_type ?? '').trim().toLowerCase()
 
-  if (transaction.sourceType === 'loan-disbursement') {
-    return `/edit/loan/${transaction.id}`
-  }
-
-  return null
-}
-
-function canDeleteTransaction(transaction) {
-  return ['project-income', 'loan-disbursement'].includes(transaction.sourceType)
-}
-
-function canEditTransaction(transaction) {
-  return Boolean(getTransactionEditRoute(transaction))
+  return expenseType === 'material' || expenseType === 'material_invoice' || documentType === 'surat_jalan'
 }
 
 function TransactionsPage() {
   const navigate = useNavigate()
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
-  const summary = useDashboardStore((state) => state.summary)
-  const cashMutations = useDashboardStore((state) => state.cashMutations)
-  const error = useDashboardStore((state) => state.error)
-  const isLoading = useDashboardStore((state) => state.isLoading)
-  const isRefreshing = useDashboardStore((state) => state.isRefreshing)
-  const lastUpdatedAt = useDashboardStore((state) => state.lastUpdatedAt)
-  const refreshDashboard = useDashboardStore((state) => state.refreshDashboard)
+  const restoredLedgerState = useMemo(
+    () => readLedgerListState(currentTeamId),
+    [currentTeamId]
+  )
+  const shouldSkipInitialLoadRef = useRef(Boolean(restoredLedgerState?.hasLoaded))
+  const savedScrollPositionRef = useRef(Number(restoredLedgerState?.scrollY ?? 0))
+  const ledgerMountedAtRef = useRef(nowMs())
+  const ledgerFirstUsableLoggedRef = useRef(false)
+  const refreshWorkspaceTransactions = useDashboardStore(
+    (state) => state.fetchWorkspaceTransactions
+  )
   const softDeleteProjectIncome = useIncomeStore((state) => state.softDeleteProjectIncome)
   const softDeleteLoan = useIncomeStore((state) => state.softDeleteLoan)
+  const softDeleteExpense = useTransactionStore((state) => state.softDeleteExpense)
+  const softDeleteMaterialInvoice = useTransactionStore(
+    (state) => state.softDeleteMaterialInvoice
+  )
+  const softDeleteAttendanceRecord = useAttendanceStore(
+    (state) => state.softDeleteAttendanceRecord
+  )
   const clearIncomeError = useIncomeStore((state) => state.clearError)
-  const [filter, setFilter] = useState('all')
-  const [selectedTransaction, setSelectedTransaction] = useState(null)
+  const [filter, setFilter] = useState(restoredLedgerState?.filter ?? 'all')
+  const [searchTerm, setSearchTerm] = useState(restoredLedgerState?.searchTerm ?? '')
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(
+    restoredLedgerState?.debouncedSearchTerm ?? restoredLedgerState?.searchTerm ?? ''
+  )
+  const [transactions, setTransactions] = useState(restoredLedgerState?.transactions ?? [])
+  const [pageInfo, setPageInfo] = useState(
+    restoredLedgerState?.pageInfo ?? {
+      hasMore: false,
+      nextCursor: null,
+      totalCount: 0,
+    }
+  )
+  const [isLoadingTransactions, setIsLoadingTransactions] = useState(false)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const [ledgerError, setLedgerError] = useState(null)
+  const [selectedActionTransaction, setSelectedActionTransaction] = useState(null)
   const [actionError, setActionError] = useState(null)
-  const todayKey = useMemo(() => getTodayKey(), [])
+  const [hasLoadedLedger, setHasLoadedLedger] = useState(
+    Boolean(restoredLedgerState?.hasLoaded)
+  )
+  const requestSequenceRef = useRef(0)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm.trim())
+    }, 250)
+
+    return () => window.clearTimeout(timer)
+  }, [searchTerm])
+
+  useEffect(() => {
+    return () => {
+      clearIncomeError()
+    }
+  }, [clearIncomeError])
+
+  useEffect(() => {
+    ledgerMountedAtRef.current = nowMs()
+    ledgerFirstUsableLoggedRef.current = false
+  }, [currentTeamId])
+
+  useEffect(() => {
+    if (!ledgerPerfEnabled || ledgerFirstUsableLoggedRef.current) {
+      return
+    }
+
+    if (!currentTeamId || isLoadingTransactions || ledgerError || transactions.length === 0) {
+      return
+    }
+
+    ledgerFirstUsableLoggedRef.current = true
+    logPerf(
+      'Jurnal first usable list',
+      {
+        mountMs: roundMs(nowMs() - ledgerMountedAtRef.current),
+        itemCount: transactions.length,
+        hasMore: pageInfo.hasMore,
+      },
+      ledgerPerfEnabled
+    )
+  }, [
+    currentTeamId,
+    isLoadingTransactions,
+    ledgerError,
+    pageInfo.hasMore,
+    transactions.length,
+  ])
+
+  const loadLedgerPage = useCallback(
+    async ({ cursor = null, append = false } = {}) => {
+      const requestId = ++requestSequenceRef.current
+      const requestStartedAt = nowMs()
+
+      if (!currentTeamId) {
+        if (!append) {
+          setTransactions([])
+          setPageInfo({
+            hasMore: false,
+            nextCursor: null,
+            totalCount: 0,
+          })
+          setHasLoadedLedger(false)
+        }
+
+        setLedgerError(null)
+        return
+      }
+
+      if (append) {
+        setIsLoadingMore(true)
+      } else {
+        setIsLoadingTransactions(true)
+        setHasLoadedLedger(false)
+      }
+
+      try {
+        const result = await fetchWorkspaceTransactionPageFromApi(currentTeamId, {
+          cursor,
+          limit: ledgerPageSize,
+          search: debouncedSearchTerm,
+          filter,
+        })
+
+        if (requestId !== requestSequenceRef.current) {
+          return
+        }
+
+        const nextTransactions = result.workspaceTransactions ?? []
+
+        setTransactions((currentTransactions) =>
+          append ? [...currentTransactions, ...nextTransactions] : nextTransactions
+        )
+        setPageInfo(
+          result.pageInfo ?? {
+            hasMore: false,
+            nextCursor: null,
+            totalCount: 0,
+          }
+        )
+        setHasLoadedLedger(true)
+        setLedgerError(null)
+
+        if (ledgerPerfEnabled && !append) {
+          logPerf(
+            'Jurnal first-page fetch',
+            {
+              fetchMs: roundMs(nowMs() - requestStartedAt),
+              serverTiming: result.timing ?? null,
+              itemCount: nextTransactions.length,
+              hasMore: result.pageInfo?.hasMore ?? false,
+            },
+            ledgerPerfEnabled
+          )
+        }
+      } catch (error) {
+        if (requestId !== requestSequenceRef.current) {
+          return
+        }
+
+        const message =
+          error instanceof Error ? error.message : 'Gagal memuat ledger transaksi.'
+
+        setLedgerError(message)
+
+        if (!append) {
+          setTransactions([])
+          setPageInfo({
+            hasMore: false,
+            nextCursor: null,
+            totalCount: 0,
+          })
+        }
+      } finally {
+        if (requestId === requestSequenceRef.current) {
+          setIsLoadingTransactions(false)
+          setIsLoadingMore(false)
+        }
+      }
+    },
+    [currentTeamId, debouncedSearchTerm, filter]
+  )
+
+  useEffect(() => {
+    if (shouldSkipInitialLoadRef.current) {
+      shouldSkipInitialLoadRef.current = false
+      return
+    }
+
+    setSelectedActionTransaction(null)
+    setActionError(null)
+    setLedgerError(null)
+    setTransactions([])
+    setPageInfo({
+      hasMore: false,
+      nextCursor: null,
+      totalCount: 0,
+    })
+    void loadLedgerPage({ cursor: null, append: false })
+  }, [filter, loadLedgerPage])
 
   useEffect(() => {
     if (!currentTeamId) {
       return
     }
 
-    void refreshDashboard(currentTeamId, { silent: true }).catch((dashboardError) => {
-      console.error('Gagal memuat transaksi:', dashboardError)
+    saveLedgerListState(currentTeamId, {
+      filter,
+      searchTerm,
+      debouncedSearchTerm,
+      transactions,
+      pageInfo,
+      hasLoaded: hasLoadedLedger,
+      scrollY: savedScrollPositionRef.current,
     })
-  }, [currentTeamId, refreshDashboard])
+  }, [
+    currentTeamId,
+    debouncedSearchTerm,
+    filter,
+    hasLoadedLedger,
+    pageInfo,
+    searchTerm,
+    transactions,
+  ])
 
-  useEffect(() => () => clearIncomeError(), [clearIncomeError])
-
-  const filteredTransactions = useMemo(() => {
-    if (filter === 'income') {
-      return cashMutations.filter((transaction) => transaction.type !== 'expense')
+  useEffect(() => {
+    if (
+      !restoredLedgerState?.hasLoaded ||
+      typeof window === 'undefined'
+    ) {
+      return
     }
 
-    if (filter === 'expense') {
-      return cashMutations.filter((transaction) => transaction.type === 'expense')
+    const scrollY = Number(restoredLedgerState.scrollY ?? 0)
+
+    if (!Number.isFinite(scrollY) || scrollY <= 0) {
+      return
     }
 
-    return cashMutations
-  }, [cashMutations, filter])
+    const frameId = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollY, behavior: 'auto' })
+    })
 
-  const groupedTransactions = useMemo(() => {
-    return filteredTransactions.reduce((groups, transaction) => {
-      const dateKey = toDateKey(transaction.transaction_date || transaction.created_at)
-      const sectionKey = dateKey || 'unknown'
-      const existingGroup = groups.find((group) => group.key === sectionKey)
+    return () => window.cancelAnimationFrame(frameId)
+  }, [restoredLedgerState])
 
-      if (existingGroup) {
-        existingGroup.items.push(transaction)
-        return groups
-      }
-
-      groups.push({
-        key: sectionKey,
-        label: getSectionLabel(dateKey, todayKey),
-        items: [transaction],
-      })
-
-      return groups
-    }, [])
-  }, [filteredTransactions, todayKey])
-
-  const transactionSummary = useMemo(() => {
-    return filteredTransactions.reduce(
-      (accumulator, transaction) => {
-        const amount = Number(transaction.amount ?? 0)
-
-        if (transaction.type === 'expense') {
-          accumulator.expense += amount
-        } else {
-          accumulator.income += amount
-        }
-
-        return accumulator
-      },
-      { income: 0, expense: 0 }
-    )
-  }, [filteredTransactions])
-
-  const showSkeleton = Boolean(currentTeamId) && isLoading && filteredTransactions.length === 0 && !error
+  const showSkeleton =
+    Boolean(currentTeamId) &&
+    isLoadingTransactions &&
+    transactions.length === 0 &&
+    !ledgerError
 
   const handleOpenDetail = (transaction) => {
     setActionError(null)
-    setSelectedTransaction(transaction)
+    if (typeof window !== 'undefined') {
+      savedScrollPositionRef.current = window.scrollY
+      saveLedgerListState(currentTeamId, {
+        filter,
+        searchTerm,
+        debouncedSearchTerm,
+        transactions,
+        pageInfo,
+        hasLoaded: hasLoadedLedger,
+        scrollY: savedScrollPositionRef.current,
+      })
+    }
+    const isPaymentLeaf =
+      transaction.sourceType === 'bill-payment' || transaction.sourceType === 'loan-payment'
+
+    navigate(transaction.detailRoute ?? `/transactions/${transaction.id}`, {
+      state: isPaymentLeaf
+        ? {
+            transaction,
+            detailSurface: 'pembayaran',
+          }
+        : {
+            transaction,
+          },
+    })
   }
 
   const handleEditTransaction = (transaction) => {
-    const editRoute = getTransactionEditRoute(transaction)
+    const editRoute = transaction.editRoute ?? getTransactionEditRoute(transaction)
 
     if (!editRoute) {
       return
     }
 
-    setSelectedTransaction(null)
+    setSelectedActionTransaction(null)
+    if (typeof window !== 'undefined') {
+      savedScrollPositionRef.current = window.scrollY
+      saveLedgerListState(currentTeamId, {
+        filter,
+        searchTerm,
+        debouncedSearchTerm,
+        transactions,
+        pageInfo,
+        hasLoaded: hasLoadedLedger,
+        scrollY: savedScrollPositionRef.current,
+      })
+    }
     navigate(editRoute, { state: { item: transaction } })
   }
 
-  const handleDeleteTransaction = async (transaction) => {
-    if (!canDeleteTransaction(transaction)) {
+  const handleOpenPayment = (transaction) => {
+    const paymentRoute = getTransactionPaymentRoute(transaction)
+
+    if (!paymentRoute) {
       return
     }
 
-    const shouldDelete = window.confirm(
-      `Hapus ${transaction.description || getBadgeLabel(transaction)}?`
-    )
+    setActionError(null)
+    setSelectedActionTransaction(null)
+    if (typeof window !== 'undefined') {
+      savedScrollPositionRef.current = window.scrollY
+      saveLedgerListState(currentTeamId, {
+        filter,
+        searchTerm,
+        debouncedSearchTerm,
+        transactions,
+        pageInfo,
+        hasLoaded: hasLoadedLedger,
+        scrollY: savedScrollPositionRef.current,
+      })
+    }
+    navigate(paymentRoute, {
+      state: {
+        transaction,
+        returnTo: '/transactions',
+      },
+    })
+  }
+
+  const handleDeleteTransaction = async (transaction) => {
+    if (!(transaction.canDelete ?? canDeleteTransaction(transaction))) {
+      return
+    }
+
+    const shouldDelete = window.confirm(`Hapus ${getTransactionTitle(transaction)}?`)
 
     if (!shouldDelete) {
       return
@@ -305,15 +456,41 @@ function TransactionsPage() {
       setActionError(null)
 
       if (transaction.sourceType === 'project-income') {
-        await softDeleteProjectIncome(transaction.id)
+        await softDeleteProjectIncome(
+          transaction.id,
+          transaction.updated_at ?? transaction.updatedAt ?? null
+        )
       } else if (transaction.sourceType === 'loan-disbursement') {
-        await softDeleteLoan(transaction.id)
+        await softDeleteLoan(
+          transaction.id,
+          transaction.updated_at ?? transaction.updatedAt ?? null
+        )
+      } else if (transaction.sourceType === 'expense') {
+        if (isMaterialExpense(transaction)) {
+          await softDeleteMaterialInvoice(
+            transaction.id,
+            transaction.updated_at ?? transaction.updatedAt ?? null
+          )
+        } else {
+          await softDeleteExpense(
+            transaction.id,
+            transaction.updated_at ?? transaction.updatedAt ?? null
+          )
+        }
+      } else if (transaction.sourceType === 'attendance-record') {
+        await softDeleteAttendanceRecord({
+          attendanceId: transaction.id,
+          teamId: transaction.team_id ?? currentTeamId,
+        })
       }
 
-      setSelectedTransaction(null)
+      setSelectedActionTransaction(null)
+      await loadLedgerPage({ cursor: null, append: false })
 
       if (currentTeamId) {
-        await refreshDashboard(currentTeamId, { silent: true })
+        void refreshWorkspaceTransactions(currentTeamId, { silent: true }).catch((error) => {
+          console.error('Gagal menyinkronkan transaksi workspace:', error)
+        })
       }
     } catch (deleteError) {
       const message =
@@ -323,73 +500,91 @@ function TransactionsPage() {
     }
   }
 
+  const handleLoadMore = () => {
+    if (!pageInfo.hasMore || !pageInfo.nextCursor) {
+      return
+    }
+
+    void loadLedgerPage({
+      cursor: pageInfo.nextCursor,
+      append: true,
+    })
+  }
+
   return (
-    <section className="space-y-4 px-2 py-2">
+    <PageShell>
       <PageHeader
-        eyebrow="Riwayat"
-        title="Transaksi"
+        title="Jurnal"
+        action={
+          <div className="flex items-center gap-2">
+            <AppButton
+              onClick={() => navigate('/transactions/history')}
+              size="sm"
+              type="button"
+              variant="secondary"
+              iconOnly
+              aria-label="Buka riwayat transaksi"
+              leadingIcon={<Clock3 className="h-4 w-4" />}
+            >
+              <span className="sr-only">Riwayat</span>
+            </AppButton>
+            <AppButton
+              onClick={() => navigate('/transactions/recycle-bin')}
+              size="sm"
+              type="button"
+              variant="secondary"
+              iconOnly
+              aria-label="Buka Halaman Sampah"
+              leadingIcon={<Trash2 className="h-4 w-4" />}
+            >
+              <span className="sr-only">Halaman Sampah</span>
+            </AppButton>
+          </div>
+        }
       />
 
-      <section className="space-y-3">
-        <AppCardStrong className="px-4 py-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-            Total Balance
-          </p>
-          <p className="mt-3 text-[1.75rem] font-bold tracking-[-0.045em] text-[var(--app-brand-accent)]">
-            {formatCurrency(summary?.endingBalance ?? 0)}
-          </p>
-          <p className="mt-2 text-xs text-[var(--app-hint-color)]">
-            Sinkron {formatSyncLabel(lastUpdatedAt)}{isRefreshing ? ' • memperbarui' : ''}
-          </p>
-        </AppCardStrong>
-
-        <AppCardStrong className="px-4 py-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-            Uang Masuk
-          </p>
-          <p className="mt-3 text-lg font-bold tracking-[-0.03em] text-[var(--app-success-color)]">
-            {formatCurrency(transactionSummary.income)}
-          </p>
-        </AppCardStrong>
-
-        <AppCardStrong className="px-4 py-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-            Uang Keluar
-          </p>
-          <p className="mt-3 text-lg font-bold tracking-[-0.03em] text-[var(--app-destructive-color)]">
-            {formatCurrency(transactionSummary.expense)}
-          </p>
-        </AppCardStrong>
-      </section>
-
-      <div className="flex flex-wrap gap-2">
-        {filters.map((item) => (
-          <AppButton
-            key={item.value}
-            className="rounded-full"
-            onClick={() => setFilter(item.value)}
-            size="sm"
-            type="button"
-            variant={filter === item.value ? 'primary' : 'secondary'}
-          >
-            {item.label}
-          </AppButton>
-        ))}
+      <div className="space-y-3">
+        <AppInput
+          aria-label="Cari ledger transaksi"
+          className="w-full"
+          onChange={(event) => setSearchTerm(event.target.value)}
+          type="search"
+          value={searchTerm}
+        />
+        <div className="flex flex-wrap gap-2">
+          {filters.map((item) => (
+            <AppButton
+              key={item.value}
+              className="rounded-full"
+              onClick={() => setFilter(item.value)}
+              size="sm"
+              type="button"
+              variant={filter === item.value ? 'primary' : 'secondary'}
+            >
+              {item.label}
+            </AppButton>
+          ))}
+        </div>
       </div>
 
-      {error ? (
-        <AppCardDashed className="px-4 py-4">
+      {ledgerError ? (
+        <AppCardDashed>
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--app-destructive-color)]">
-            Gagal Memuat Transaksi
+            Gagal Memuat Ledger
           </p>
-          <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">{error}</p>
+          <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">{ledgerError}</p>
+          <div className="mt-4">
+            <AppButton onClick={() => void loadLedgerPage({ cursor: null, append: false })} type="button" variant="secondary">
+              Coba Lagi
+            </AppButton>
+          </div>
         </AppCardDashed>
       ) : null}
 
       {actionError ? (
-        <AppCardDashed className="px-4 py-4">
+        <AppCardDashed>
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--app-destructive-color)]">
-            Aksi Mutasi Gagal
+            Aksi Transaksi Gagal
           </p>
           <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">{actionError}</p>
         </AppCardDashed>
@@ -407,7 +602,7 @@ function TransactionsPage() {
       ) : showSkeleton ? (
         <div className="space-y-3">
           {[1, 2, 3].map((item) => (
-            <AppCardStrong key={item} className="px-4 py-4">
+            <AppCardStrong key={item}>
               <div className="flex items-start gap-3">
                 <div className="h-11 w-11 animate-pulse rounded-full bg-[var(--app-surface-low-color)]" />
                 <div className="min-w-0 flex-1">
@@ -418,200 +613,155 @@ function TransactionsPage() {
             </AppCardStrong>
           ))}
         </div>
-      ) : (
-        <SmartList
-          key={`${filter}-${groupedTransactions.length}`}
-          data={groupedTransactions}
-          as="div"
-          className="space-y-5"
-          initialCount={10}
-          loadMoreStep={5}
-          loadMoreLabel="Muat Hari Berikutnya"
-          renderItem={(group) => (
-            <section className="space-y-3">
-              <div className="flex items-center justify-between px-1">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                  {group.label}
-                </p>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                  {group.items.length} item
-                </p>
-              </div>
-
-              <div className="space-y-3">
-                {group.items.map((transaction) => {
-                  const presentation = getTransactionPresentation(transaction)
-                  const Icon = presentation.Icon
-                  const amount = Math.abs(Number(transaction.amount ?? 0))
-
-                  return (
-                    <AppCardStrong key={transaction.id} className="px-4 py-4">
-                      <ActionCard
-                        title={transaction.description || 'Mutasi kas tanpa deskripsi'}
-                        subtitle={`${getSourceLabel(transaction)} · ${formatTimeLabel(transaction.transaction_date || transaction.created_at)}`}
-                        amount={`${transaction.type === 'expense' ? '-' : '+'}${formatCurrency(amount)}`}
-                        amountClassName={presentation.amountClassName}
-                        badge={getBadgeLabel(transaction)}
-                        badges={[getSourceLabel(transaction)]}
-                        details={[
-                          transaction.type === 'expense' ? 'Pengeluaran' : 'Pemasukan',
-                          transaction.project_name || transaction.party_label || 'Sumber mutasi kas',
-                        ]}
-                        className="border-b-0 p-0"
-                        leadingIcon={
-                          <div
-                            className={`flex h-11 w-11 items-center justify-center rounded-full ${presentation.iconClassName}`}
-                          >
-                            <Icon className="h-[18px] w-[18px]" />
-                          </div>
-                        }
-                        actions={[
-                          {
-                            id: 'detail',
-                            label: 'Detail',
-                            icon: <Eye className="h-3.5 w-3.5" />,
-                            onClick: () => handleOpenDetail(transaction),
-                          },
-                          ...(canEditTransaction(transaction)
-                            ? [
-                                {
-                                  id: 'edit',
-                                  label: 'Edit',
-                                  icon: <Pencil className="h-3.5 w-3.5" />,
-                                  onClick: () => handleEditTransaction(transaction),
-                                },
-                              ]
-                            : []),
-                          ...(canDeleteTransaction(transaction)
-                            ? [
-                                {
-                                  id: 'delete',
-                                  label: 'Hapus',
-                                  icon: <Trash2 className="h-3.5 w-3.5" />,
-                                  destructive: true,
-                                  onClick: () => handleDeleteTransaction(transaction),
-                                },
-                              ]
-                            : []),
-                        ]}
-                      />
-                    </AppCardStrong>
-                  )
-                })}
-              </div>
-            </section>
-          )}
-          emptyState={
-            <AppEmptyState
-              className="px-4 py-5"
-              title="Belum Ada Catatan"
-              description="Catatan kas akan muncul di sini setelah transaksi pertama tersimpan untuk workspace ini."
-            />
-          }
+      ) : transactions.length === 0 ? (
+        <AppEmptyState
+          className="px-4 py-5"
+          title="Belum Ada Catatan"
+          description="Catatan kas akan muncul di sini setelah transaksi pertama tersimpan untuk workspace ini."
         />
+      ) : (
+        <div className="space-y-3">
+          {transactions.map((transaction) => {
+            const presentation = getTransactionPresentation(transaction)
+            const Icon = presentation.Icon
+            const amount = Math.abs(Number(transaction.amount ?? 0))
+            const canEdit = Boolean(transaction.canEdit ?? canEditTransaction(transaction))
+            const canDelete = Boolean(transaction.canDelete ?? canDeleteTransaction(transaction))
+            const canPay = Boolean(transaction.canPay ?? canOpenTransactionPayment(transaction))
+            const ledgerSummary = getTransactionLedgerSummary(transaction)
+            const hasCreatorIdentity = Boolean(
+              transaction?.created_by_user_id ??
+                transaction?.createdByUserId ??
+                transaction?.telegram_user_id ??
+                transaction?.telegramUserId
+            )
+            const creatorLabel = hasCreatorIdentity ? getTransactionCreatorLabel(transaction) : null
+
+            return (
+              <AppCardStrong key={`${transaction.sourceType ?? 'transaction'}-${transaction.id}`}>
+                <div className="flex items-center gap-3">
+                  <button
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    onClick={() => handleOpenDetail(transaction)}
+                    type="button"
+                  >
+                    <div
+                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${presentation.iconClassName}`}
+                    >
+                      <Icon className="h-[18px] w-[18px]" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
+                        {getTransactionTitle(transaction)}
+                      </p>
+                      <p className="mt-0.5 text-xs text-[var(--app-hint-color)]">
+                        {formatTransactionDateTime(
+                          transaction.transaction_date || transaction.created_at
+                        )}
+                      </p>
+                      {ledgerSummary ? (
+                        <p className="mt-1 truncate text-[11px] font-medium text-[var(--app-hint-color)]">
+                          {ledgerSummary}
+                        </p>
+                      ) : null}
+                      {creatorLabel ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <span className="inline-flex items-center rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-hint-color)]">
+                            {creatorLabel}
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
+                  </button>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className={`text-sm font-semibold ${presentation.amountClassName}`}>
+                      {Number(transaction.amount ?? 0) < 0 || transaction.type === 'expense'
+                        ? '-'
+                        : '+'}
+                      {formatCurrency(amount)}
+                    </span>
+                    {canEdit || canDelete || canPay ? (
+                      <button
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] text-[var(--app-text-color)]"
+                        onClick={() => {
+                          setActionError(null)
+                          setSelectedActionTransaction(transaction)
+                        }}
+                        type="button"
+                        aria-label={`Buka menu aksi untuk ${getTransactionTitle(transaction)}`}
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </AppCardStrong>
+            )
+          })}
+
+          {pageInfo.hasMore ? (
+            <div className="flex justify-center pt-1">
+              <AppButton
+                onClick={handleLoadMore}
+                type="button"
+                variant="secondary"
+                disabled={isLoadingMore}
+              >
+                {isLoadingMore ? 'Memuat...' : 'Muat Berikutnya'}
+              </AppButton>
+            </div>
+          ) : null}
+        </div>
       )}
 
       <AppSheet
-        open={Boolean(selectedTransaction)}
-        onClose={() => setSelectedTransaction(null)}
-        title="Detail Mutasi"
-        description={selectedTransaction ? getBadgeLabel(selectedTransaction) : null}
-        footer={
-          selectedTransaction && canDeleteTransaction(selectedTransaction) ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {canEditTransaction(selectedTransaction) ? (
-                <AppButton
-                  onClick={() => handleEditTransaction(selectedTransaction)}
-                  type="button"
-                  variant="secondary"
-                >
-                  Edit
-                </AppButton>
-              ) : null}
+        open={Boolean(selectedActionTransaction)}
+        onClose={() => setSelectedActionTransaction(null)}
+        title="Aksi Transaksi"
+        description={
+          selectedActionTransaction ? getTransactionTitle(selectedActionTransaction) : null
+        }
+      >
+        {selectedActionTransaction ? (
+          <div className="space-y-3">
+            {(selectedActionTransaction.canPay ??
+              canOpenTransactionPayment(selectedActionTransaction)) ? (
               <AppButton
-                onClick={() => handleDeleteTransaction(selectedTransaction)}
+                onClick={() => handleOpenPayment(selectedActionTransaction)}
+                type="button"
+                variant="secondary"
+                leadingIcon={<ArrowUpRight className="h-4 w-4" />}
+              >
+                {getTransactionPaymentLabel(selectedActionTransaction)}
+              </AppButton>
+            ) : null}
+            {(selectedActionTransaction.canEdit ??
+              canEditTransaction(selectedActionTransaction)) ? (
+              <AppButton
+                onClick={() => handleEditTransaction(selectedActionTransaction)}
+                type="button"
+                variant="secondary"
+                leadingIcon={<Pencil className="h-4 w-4" />}
+              >
+                Edit
+              </AppButton>
+            ) : null}
+            {(selectedActionTransaction.canDelete ??
+              canDeleteTransaction(selectedActionTransaction)) ? (
+              <AppButton
+                onClick={() => handleDeleteTransaction(selectedActionTransaction)}
                 type="button"
                 variant="danger"
+                leadingIcon={<Trash2 className="h-4 w-4" />}
               >
                 Hapus
               </AppButton>
-            </div>
-          ) : null
-        }
-      >
-        {selectedTransaction ? (
-          <div className="space-y-4">
-            <AppCardStrong className="space-y-3 px-4 py-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <AppBadge tone={selectedTransaction.type === 'expense' ? 'warning' : 'success'}>
-                    {selectedTransaction.type === 'expense' ? 'Pengeluaran' : 'Pemasukan'}
-                  </AppBadge>
-                  <p className="mt-3 text-lg font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
-                    {selectedTransaction.description || getBadgeLabel(selectedTransaction)}
-                  </p>
-                  <p className="mt-1 text-sm leading-6 text-[var(--app-hint-color)]">
-                    {getSourceLabel(selectedTransaction)}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                    Nominal
-                  </p>
-                  <p
-                    className={`mt-2 text-xl font-bold tracking-[-0.04em] ${
-                      selectedTransaction.type === 'expense'
-                        ? 'text-[var(--app-destructive-color)]'
-                        : 'text-[var(--app-success-color)]'
-                    }`}
-                  >
-                    {selectedTransaction.type === 'expense' ? '-' : '+'}
-                    {formatCurrency(Math.abs(Number(selectedTransaction.amount ?? 0)))}
-                  </p>
-                </div>
-              </div>
-            </AppCardStrong>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-                <p className="app-meta">Tanggal</p>
-                <p className="text-sm font-semibold text-[var(--app-text-color)]">
-                  {selectedTransaction.transaction_date || '-'}
-                </p>
-              </AppCard>
-              <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-                <p className="app-meta">Sumber</p>
-                <p className="text-sm font-semibold text-[var(--app-text-color)]">
-                  {getSourceLabel(selectedTransaction)}
-                </p>
-              </AppCard>
-              <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-                <p className="app-meta">Mutasi</p>
-                <p className="text-sm font-semibold text-[var(--app-text-color)]">
-                  {getBadgeLabel(selectedTransaction)}
-                </p>
-              </AppCard>
-              <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-                <p className="app-meta">ID</p>
-                <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
-                  {selectedTransaction.id}
-                </p>
-              </AppCard>
-            </div>
-
-            <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-              <p className="app-meta">Keterangan</p>
-              <p className="text-sm leading-6 text-[var(--app-text-color)]">
-                {selectedTransaction.project_name ||
-                  selectedTransaction.party_label ||
-                  selectedTransaction.description ||
-                  '-'}
-              </p>
-            </AppCard>
+            ) : null}
           </div>
         ) : null}
       </AppSheet>
-    </section>
+    </PageShell>
   )
 }
 

@@ -180,6 +180,27 @@ create table if not exists public.file_assets (
   created_at timestamptz not null default now()
 );
 
+alter table public.file_assets
+  add column if not exists team_id uuid references public.teams(id) on delete cascade,
+  add column if not exists storage_bucket text,
+  add column if not exists bucket_name text,
+  add column if not exists public_url text,
+  add column if not exists original_name text,
+  add column if not exists size_bytes bigint,
+  add column if not exists uploaded_by_user_id uuid references public.profiles(id) on delete set null;
+
+update public.file_assets
+set storage_bucket = coalesce(
+  nullif(btrim(storage_bucket), ''),
+  nullif(btrim(bucket_name), ''),
+  'hrd_documents'
+)
+where storage_bucket is null
+   or btrim(storage_bucket) = '';
+
+alter table public.file_assets
+  alter column storage_bucket set not null;
+
 create unique index if not exists file_assets_storage_bucket_path_key
   on public.file_assets(storage_bucket, storage_path);
 

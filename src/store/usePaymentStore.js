@@ -1,8 +1,17 @@
 import { create } from 'zustand'
-import { supabase } from '../lib/supabase'
 import { resolveTeamId, resolveTelegramUserId } from '../lib/auth-context'
-import useBillStore from './useBillStore'
+import {
+  createBillPaymentFromApi,
+  deleteBillPaymentFromApi,
+  updateBillPaymentFromApi,
+} from '../lib/records-api'
+import {
+  createLoanPaymentFromApi,
+  deleteLoanPaymentFromApi,
+  updateLoanPaymentFromApi,
+} from '../lib/transactions-api'
 import useIncomeStore from './useIncomeStore'
+import useBillStore from './useBillStore'
 
 function normalizeText(value, fallback = null) {
   const normalizedValue = String(value ?? '').trim()
@@ -14,7 +23,7 @@ function toError(error) {
   const message =
     typeof error?.message === 'string' && error.message.trim().length > 0
       ? error.message
-      : 'Gagal menyimpan pembayaran tagihan. Silakan coba lagi.'
+      : 'Gagal menyimpan pembayaran. Silakan coba lagi.'
 
   return error instanceof Error ? error : new Error(message)
 }
@@ -76,6 +85,65 @@ function buildBillPaymentPayload(paymentData = {}) {
     supplier_name_snapshot: normalizeText(paymentData.supplierName, null),
     project_name_snapshot: normalizeText(paymentData.projectName, null),
     updated_at: new Date().toISOString(),
+    expectedUpdatedAt: normalizeText(
+      paymentData.expectedUpdatedAt ?? paymentData.expected_updated_at ?? paymentData.updated_at ?? paymentData.updatedAt,
+      null
+    ),
+  }
+}
+
+function buildBillPaymentUpdatePayload(paymentData = {}) {
+  const paymentId = normalizeText(paymentData.payment_id ?? paymentData.paymentId)
+  const teamId = resolveTeamId(paymentData.team_id ?? paymentData.teamId)
+  const amount = Number(paymentData.amount)
+  const paymentDate = normalizeText(
+    paymentData.payment_date ?? paymentData.paymentDate
+  )
+
+  if (!paymentId) {
+    throw new Error('Bill payment ID tidak valid.')
+  }
+
+  if (!teamId) {
+    throw new Error('Akses workspace tidak ditemukan.')
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Nominal pembayaran harus lebih dari 0.')
+  }
+
+  if (!paymentDate) {
+    throw new Error('Tanggal pembayaran wajib diisi.')
+  }
+
+  return {
+    paymentId,
+    teamId,
+    amount,
+    paymentDate,
+    notes: normalizeText(paymentData.notes),
+    expectedUpdatedAt: normalizeText(
+      paymentData.expectedUpdatedAt ?? paymentData.expected_updated_at ?? paymentData.updated_at ?? paymentData.updatedAt,
+      null
+    ),
+  }
+}
+
+function buildBillPaymentDeletePayload(paymentData = {}) {
+  const paymentId = normalizeText(paymentData.payment_id ?? paymentData.paymentId)
+  const teamId = resolveTeamId(paymentData.team_id ?? paymentData.teamId)
+
+  if (!paymentId) {
+    throw new Error('Bill payment ID tidak valid.')
+  }
+
+  if (!teamId) {
+    throw new Error('Akses workspace tidak ditemukan.')
+  }
+
+  return {
+    paymentId,
+    teamId,
   }
 }
 
@@ -142,6 +210,65 @@ function buildLoanPaymentPayload(paymentData = {}) {
     notes: normalizeText(paymentData.notes),
     creditor_name_snapshot: normalizeText(paymentData.creditorName, null),
     updated_at: new Date().toISOString(),
+    expectedUpdatedAt: normalizeText(
+      paymentData.expectedUpdatedAt ?? paymentData.expected_updated_at ?? paymentData.updated_at ?? paymentData.updatedAt,
+      null
+    ),
+  }
+}
+
+function buildLoanPaymentUpdatePayload(paymentData = {}) {
+  const paymentId = normalizeText(paymentData.payment_id ?? paymentData.paymentId)
+  const teamId = resolveTeamId(paymentData.team_id ?? paymentData.teamId)
+  const amount = Number(paymentData.amount)
+  const paymentDate = normalizeText(
+    paymentData.payment_date ?? paymentData.paymentDate
+  )
+
+  if (!paymentId) {
+    throw new Error('Loan payment ID tidak valid.')
+  }
+
+  if (!teamId) {
+    throw new Error('Akses workspace tidak ditemukan.')
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Nominal pembayaran pinjaman harus lebih dari 0.')
+  }
+
+  if (!paymentDate) {
+    throw new Error('Tanggal pembayaran wajib diisi.')
+  }
+
+  return {
+    paymentId,
+    teamId,
+    amount,
+    paymentDate,
+    notes: normalizeText(paymentData.notes),
+    expectedUpdatedAt: normalizeText(
+      paymentData.expectedUpdatedAt ?? paymentData.expected_updated_at ?? paymentData.updated_at ?? paymentData.updatedAt,
+      null
+    ),
+  }
+}
+
+function buildLoanPaymentDeletePayload(paymentData = {}) {
+  const paymentId = normalizeText(paymentData.payment_id ?? paymentData.paymentId)
+  const teamId = resolveTeamId(paymentData.team_id ?? paymentData.teamId)
+
+  if (!paymentId) {
+    throw new Error('Loan payment ID tidak valid.')
+  }
+
+  if (!teamId) {
+    throw new Error('Akses workspace tidak ditemukan.')
+  }
+
+  return {
+    paymentId,
+    teamId,
   }
 }
 
@@ -172,20 +299,8 @@ const usePaymentStore = create((set) => ({
     set({ isSubmitting: true, error: null })
 
     try {
-      if (!supabase) {
-        throw new Error('Client Supabase belum dikonfigurasi.')
-      }
-
       const payload = buildBillPaymentPayload(paymentData)
-      const { data, error } = await supabase
-        .from('bill_payments')
-        .insert(payload)
-        .select('id, bill_id, amount, payment_date')
-        .single()
-
-      if (error) {
-        throw error
-      }
+      const { payment } = await createBillPaymentFromApi(payload)
 
       await useBillStore.getState().fetchUnpaidBills({
         teamId: payload.team_id,
@@ -196,7 +311,114 @@ const usePaymentStore = create((set) => ({
 
       set({ error: null })
 
-      return data
+      return payment
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    } finally {
+      set({ isSubmitting: false })
+    }
+  },
+  updateBillPayment: async (paymentData = {}) => {
+    set({ isSubmitting: true, error: null })
+
+    try {
+      const payload = buildBillPaymentUpdatePayload(paymentData)
+      const { payment, bill } = await updateBillPaymentFromApi(payload.paymentId, payload)
+
+      await useBillStore.getState().fetchUnpaidBills({
+        teamId: payload.teamId,
+        silent: true,
+      })
+
+      set({ error: null })
+
+      return {
+        payment,
+        bill,
+      }
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    } finally {
+      set({ isSubmitting: false })
+    }
+  },
+  deleteBillPayment: async (paymentData = {}) => {
+    set({ isSubmitting: true, error: null })
+
+    try {
+      const payload = buildBillPaymentDeletePayload(paymentData)
+      const { bill } = await deleteBillPaymentFromApi(payload.paymentId, payload.teamId)
+
+      await useBillStore.getState().fetchUnpaidBills({
+        teamId: payload.teamId,
+        silent: true,
+      })
+
+      set({ error: null })
+
+      return bill
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    } finally {
+      set({ isSubmitting: false })
+    }
+  },
+  updateLoanPayment: async (paymentData = {}) => {
+    set({ isSubmitting: true, error: null })
+
+    try {
+      const payload = buildLoanPaymentUpdatePayload(paymentData)
+      const { payment, loan } = await updateLoanPaymentFromApi(payload.paymentId, payload)
+
+      await useIncomeStore.getState().fetchLoans({
+        teamId: payload.teamId,
+      })
+
+      set({ error: null })
+
+      return {
+        payment,
+        loan,
+      }
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+
+      throw normalizedError
+    } finally {
+      set({ isSubmitting: false })
+    }
+  },
+  deleteLoanPayment: async (paymentData = {}) => {
+    set({ isSubmitting: true, error: null })
+
+    try {
+      const payload = buildLoanPaymentDeletePayload(paymentData)
+      const { payment, loan } = await deleteLoanPaymentFromApi(payload.paymentId, payload.teamId)
+
+      await useIncomeStore.getState().fetchLoans({
+        teamId: payload.teamId,
+      })
+
+      set({ error: null })
+
+      return {
+        payment,
+        loan,
+      }
     } catch (error) {
       const normalizedError = toError(error)
 
@@ -211,20 +433,8 @@ const usePaymentStore = create((set) => ({
     set({ isSubmitting: true, error: null })
 
     try {
-      if (!supabase) {
-        throw new Error('Client Supabase belum dikonfigurasi.')
-      }
-
       const payload = buildLoanPaymentPayload(paymentData)
-      const { data, error } = await supabase
-        .from('loan_payments')
-        .insert(payload)
-        .select('id, loan_id, amount, payment_date')
-        .single()
-
-      if (error) {
-        throw error
-      }
+      const { payment } = await createLoanPaymentFromApi(payload)
 
       await useIncomeStore.getState().fetchLoans({
         teamId: payload.team_id,
@@ -234,7 +444,7 @@ const usePaymentStore = create((set) => ({
 
       set({ error: null })
 
-      return data
+      return payment
     } catch (error) {
       const normalizedError = toError(error)
 

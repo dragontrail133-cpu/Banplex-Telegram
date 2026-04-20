@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileClock, Loader2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import useTelegram from '../hooks/useTelegram'
 import useAuthStore from '../store/useAuthStore'
 import useAttendanceStore from '../store/useAttendanceStore'
+import { formatAppDateLabel, getAppTodayKey } from '../lib/date-time'
+import { AppButton, AppCardDashed, PageSection } from './ui/AppPrimitives'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -18,23 +21,7 @@ function formatCurrency(value) {
 }
 
 function formatDate(value) {
-  const normalizedValue = String(value ?? '').trim()
-
-  if (!normalizedValue) {
-    return '-'
-  }
-
-  const parsedDate = new Date(`${normalizedValue}T00:00:00`)
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return normalizedValue
-  }
-
-  return new Intl.DateTimeFormat('id-ID', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(parsedDate)
+  return formatAppDateLabel(value)
 }
 
 function getStatusLabel(status) {
@@ -50,9 +37,7 @@ function getStatusLabel(status) {
 }
 
 function getTodayDateString() {
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'Asia/Jakarta',
-  }).format(new Date())
+  return getAppTodayKey()
 }
 
 function getUserDisplayName(user, authUser) {
@@ -116,7 +101,8 @@ function notifyTelegram(payload) {
   })
 }
 
-function PayrollManager({ onSuccess }) {
+function PayrollManager({ onSuccess, recapContext = null }) {
+  const navigate = useNavigate()
   const { user } = useTelegram()
   const authUser = useAuthStore((state) => state.user)
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
@@ -130,11 +116,93 @@ function PayrollManager({ onSuccess }) {
   const clearError = useAttendanceStore((state) => state.clearError)
   const [activeWorkerId, setActiveWorkerId] = useState(null)
   const [successMessage, setSuccessMessage] = useState(null)
+  const [lastCreatedBillId, setLastCreatedBillId] = useState(null)
+  const groupRefs = useRef(new Map())
+  const lastFocusedRecapKeyRef = useRef('')
+
+  const highlightedWorkerIds = useMemo(() => {
+    if (recapContext?.tab === 'daily') {
+      return new Set(
+        (recapContext.workerIds ?? []).map((workerId) => String(workerId ?? '').trim()).filter(Boolean)
+      )
+    }
+
+    if (recapContext?.tab === 'worker' && recapContext.workerId) {
+      return new Set([String(recapContext.workerId).trim()])
+    }
+
+    return new Set()
+  }, [recapContext])
+
+  const recapFocusKey = useMemo(() => {
+    if (recapContext?.tab === 'daily') {
+      const workerIds = Array.from(highlightedWorkerIds)
+
+      if (workerIds.length > 0) {
+        return `daily:${workerIds.join('|')}`
+      }
+
+      return recapContext.dateKey ? `daily:${recapContext.dateKey}` : 'daily'
+    }
+
+    if (recapContext?.tab === 'worker' && recapContext.workerId) {
+      return `worker:${String(recapContext.workerId).trim()}`
+    }
+
+    return ''
+  }, [highlightedWorkerIds, recapContext])
 
   const groupedAttendances = useMemo(
     () => groupAttendances(unbilledAttendances),
     [unbilledAttendances]
   )
+
+  const orderedGroupedAttendances = useMemo(() => {
+    if (!highlightedWorkerIds.size) {
+      return groupedAttendances
+    }
+
+    return [...groupedAttendances].sort((left, right) => {
+      const leftKey = String(left.workerId ?? '').trim()
+      const rightKey = String(right.workerId ?? '').trim()
+      const leftPriority = highlightedWorkerIds.has(leftKey) ? 0 : 1
+      const rightPriority = highlightedWorkerIds.has(rightKey) ? 0 : 1
+
+      if (leftPriority !== rightPriority) {
+        return leftPriority - rightPriority
+      }
+
+      return String(left.workerName ?? '').localeCompare(String(right.workerName ?? ''), 'id', {
+        sensitivity: 'base',
+      })
+    })
+  }, [groupedAttendances, highlightedWorkerIds])
+
+  useEffect(() => {
+    if (!recapFocusKey || lastFocusedRecapKeyRef.current === recapFocusKey) {
+      return
+    }
+
+    const firstTarget = orderedGroupedAttendances.find((group) =>
+      highlightedWorkerIds.has(String(group.workerId ?? '').trim())
+    )
+
+    if (!firstTarget) {
+      return
+    }
+
+    lastFocusedRecapKeyRef.current = recapFocusKey
+    const targetKey = String(firstTarget.workerId ?? firstTarget.workerName ?? '').trim()
+
+    if (!targetKey) {
+      return
+    }
+
+    groupRefs.current.get(targetKey)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    })
+  }, [highlightedWorkerIds, orderedGroupedAttendances, recapFocusKey])
 
   useEffect(() => {
     fetchUnbilledAttendances({
@@ -154,6 +222,7 @@ function PayrollManager({ onSuccess }) {
 
     setActiveWorkerId(group.workerId)
     setSuccessMessage(null)
+    setLastCreatedBillId(null)
 
     try {
       const recordIds = group.records.map((record) => record.id)
@@ -188,6 +257,7 @@ function PayrollManager({ onSuccess }) {
       setSuccessMessage(
         `Tagihan gaji untuk ${group.workerName} sebesar ${formatCurrency(group.totalAmount)} telah dibuat.`
       )
+      setLastCreatedBillId(newBillId ? String(newBillId) : null)
 
       await fetchUnbilledAttendances({
         teamId: currentTeamId,
@@ -210,40 +280,51 @@ function PayrollManager({ onSuccess }) {
   }
 
   return (
-    <section className="space-y-5 rounded-[28px] border border-white/70 bg-white/70 p-4 shadow-sm backdrop-blur sm:p-5">
-      <div className="space-y-2">
-        <p className="text-sm font-medium uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
-          Rekap Gaji
-        </p>
-        <h2 className="text-xl font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
-          Bundel absensi menjadi tagihan gaji
-        </h2>
-        <p className="text-sm leading-6 text-[var(--app-hint-color)]">
-          Pilih kelompok pekerja, lalu buat satu tagihan gaji dari absensi yang
-          belum ditagihkan.
-        </p>
-      </div>
+    <PageSection
+      eyebrow="Rekap Gaji"
+      title="Bundel absensi menjadi tagihan gaji"
+      description="Pilih kelompok pekerja, lalu buat satu tagihan gaji dari absensi yang belum ditagihkan."
+    >
 
       {error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+        <AppCardDashed className="app-tone-danger text-sm leading-6 text-rose-700">
           {error}
-        </div>
+        </AppCardDashed>
       ) : null}
 
       {successMessage ? (
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-700">
-          {successMessage}
+        <div className="space-y-3">
+          <AppCardDashed className="border-emerald-200 bg-emerald-50 text-sm leading-6 text-emerald-700">
+            {successMessage}
+          </AppCardDashed>
+          {lastCreatedBillId ? (
+            <AppButton
+              onClick={() =>
+                navigate(`/tagihan/${lastCreatedBillId}`, {
+                  state: {
+                    surface: 'tagihan',
+                    detailSurface: 'tagihan',
+                  },
+                })
+              }
+              type="button"
+              variant="secondary"
+            >
+              Buka Tagihan Gaji
+            </AppButton>
+          ) : null}
         </div>
       ) : null}
 
-      {isLoading && groupedAttendances.length === 0 ? (
-        <div className="rounded-3xl border border-slate-200 bg-white/80 px-4 py-5 text-sm text-[var(--app-hint-color)]">
+      {isLoading && orderedGroupedAttendances.length === 0 ? (
+        <AppCardDashed className="px-4 py-5 text-sm text-[var(--app-hint-color)]">
           Memuat absensi yang belum ditagihkan...
-        </div>
-      ) : groupedAttendances.length > 0 ? (
+        </AppCardDashed>
+      ) : orderedGroupedAttendances.length > 0 ? (
         <div className="space-y-4">
-          {groupedAttendances.map((group) => {
+          {orderedGroupedAttendances.map((group) => {
             const isProcessing = activeWorkerId === group.workerId
+            const isHighlighted = highlightedWorkerIds.has(String(group.workerId ?? '').trim())
             const dateValues = group.records.map((record) => record.attendance_date)
             const firstDate = dateValues[0] ?? null
             const lastDate = dateValues[dateValues.length - 1] ?? null
@@ -251,7 +332,25 @@ function PayrollManager({ onSuccess }) {
             return (
               <article
                 key={group.workerId ?? group.workerName}
-                className="rounded-[26px] border border-slate-200 bg-white/90 p-4 shadow-sm"
+                ref={(node) => {
+                  const groupKey = String(group.workerId ?? group.workerName ?? '').trim()
+
+                  if (!groupKey) {
+                    return
+                  }
+
+                  if (node) {
+                    groupRefs.current.set(groupKey, node)
+                    return
+                  }
+
+                  groupRefs.current.delete(groupKey)
+                }}
+                className={`rounded-[26px] border p-4 shadow-sm transition ${
+                  isHighlighted
+                    ? 'border-sky-300 bg-sky-50/80'
+                    : 'border-slate-200 bg-white/90'
+                }`}
               >
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="space-y-2">
@@ -301,31 +400,25 @@ function PayrollManager({ onSuccess }) {
                   ))}
                 </div>
 
-                <button
-                  className="mt-4 inline-flex items-center justify-center gap-2 rounded-[20px] bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+                <AppButton
+                  className="mt-4"
                   disabled={isProcessing}
                   onClick={() => handleCreateBill(group)}
+                  leadingIcon={isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                   type="button"
                 >
-                  {isProcessing ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Membuat Tagihan...
-                    </>
-                  ) : (
-                    'Buat Tagihan Gaji'
-                  )}
-                </button>
+                  {isProcessing ? 'Membuat Tagihan...' : 'Buat Tagihan Gaji'}
+                </AppButton>
               </article>
             )
           })}
         </div>
       ) : (
-        <div className="rounded-3xl border border-dashed border-slate-200 bg-white/70 px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
+        <AppCardDashed className="px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
           Belum ada absensi yang belum ditagihkan.
-        </div>
+        </AppCardDashed>
       )}
-    </section>
+    </PageSection>
   )
 }
 

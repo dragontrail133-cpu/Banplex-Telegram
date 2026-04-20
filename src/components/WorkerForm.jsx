@@ -6,8 +6,10 @@ import {
   AppCard,
   AppErrorState,
   AppInput,
+  AppNominalInput,
   AppSelect,
   AppTextarea,
+  AppToggleGroup,
 } from './ui/AppPrimitives'
 import useMasterStore from '../store/useMasterStore'
 
@@ -259,19 +261,24 @@ function WorkerForm({
             </AppSelect>
           </AppCard>
 
-          <AppCard className="space-y-3 bg-white">
-            <p className="text-sm font-semibold text-[var(--app-text-color)]">
-              Status
-            </p>
-            <AppSelect
-              name="status"
-              onChange={handleFieldChange}
-              value={formState.status}
-            >
-              <option value="active">Aktif</option>
-              <option value="inactive">Nonaktif</option>
-            </AppSelect>
-          </AppCard>
+          <AppToggleGroup
+            buttonSize="sm"
+            description="Status pekerja hanya punya dua mode."
+            label="Status"
+            onChange={(nextValue) =>
+              handleFieldChange({
+                target: {
+                  name: 'status',
+                  value: nextValue,
+                },
+              })
+            }
+            options={[
+              { value: 'active', label: 'Aktif' },
+              { value: 'inactive', label: 'Nonaktif' },
+            ]}
+            value={formState.status}
+          />
         </div>
       </AppCard>
 
@@ -424,15 +431,11 @@ function WorkerForm({
                       Nominal Upah
                     </p>
                   </div>
-                  <AppInput
-                    inputMode="decimal"
-                    min="0"
-                    onChange={(event) =>
-                      handleWageRateChange(rate.id, 'wageAmount', event.target.value)
+                  <AppNominalInput
+                    onValueChange={(nextValue) =>
+                      handleWageRateChange(rate.id, 'wageAmount', nextValue)
                     }
                     placeholder="0"
-                    step="0.01"
-                    type="number"
                     value={rate.wageAmount}
                   />
                 </AppCard>

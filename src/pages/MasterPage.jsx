@@ -1,18 +1,33 @@
+import { Trash2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import ProtectedRoute from '../components/ProtectedRoute'
 import MasterDataManager from '../components/MasterDataManager'
-import { PageHeader } from '../components/ui/AppPrimitives'
+import { AppButton, PageHeader, PageShell } from '../components/ui/AppPrimitives'
 
 function MasterPage() {
+  const navigate = useNavigate()
+
   return (
-    <section className="space-y-4 px-2 py-2">
+    <PageShell>
       <PageHeader
         eyebrow="Data Referensi"
         title="Master"
+        action={
+          <AppButton
+            leadingIcon={<Trash2 className="h-4 w-4" />}
+            onClick={() => navigate('/master/recycle-bin')}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Recycle Bin
+          </AppButton>
+        }
       />
-      <ProtectedRoute allowedRoles={['Owner', 'Admin']}>
+      <ProtectedRoute requiredCapability="master_data_admin">
         <MasterDataManager />
       </ProtectedRoute>
-    </section>
+    </PageShell>
   )
 }
 
