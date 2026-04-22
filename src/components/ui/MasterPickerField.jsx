@@ -31,6 +31,7 @@ function MasterPickerField({
   onChange,
   disabled = false,
   required = false,
+  compact = false,
   placeholder = 'Pilih data',
   searchPlaceholder = 'Cari data...',
   emptyMessage = 'Data belum tersedia.',
@@ -76,7 +77,7 @@ function MasterPickerField({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="min-w-0 space-y-2">
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm font-semibold text-[var(--app-text-color)]">
           {label}
@@ -86,10 +87,11 @@ function MasterPickerField({
 
       <button
         className={[
-          'flex w-full items-start justify-between gap-3 rounded-2xl border px-4 py-3 text-left outline-none transition',
+          'flex w-full justify-between gap-3 rounded-2xl border px-4 text-left outline-none transition',
+          compact ? 'items-center py-2.5' : 'items-start py-3',
           disabled
             ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
-            : 'border-slate-200 bg-white/90 text-[var(--app-text-color)] hover:border-sky-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200',
+            : 'border-slate-200 bg-white text-[var(--app-text-color)] hover:border-sky-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200',
         ]
           .filter(Boolean)
           .join(' ')}
@@ -98,9 +100,14 @@ function MasterPickerField({
         type="button"
       >
         <div className="min-w-0 flex-1 space-y-1">
-          <p className="truncate text-base font-semibold">
+          <p className={`${compact ? 'text-sm leading-5' : 'text-base leading-6'} truncate font-semibold`}>
             {selectedOption?.label ?? placeholder}
           </p>
+          {selectedOption?.description ? (
+            <p className={`${compact ? 'text-xs leading-4' : 'text-sm leading-5'} text-[var(--app-hint-color)]`}>
+              {selectedOption.description}
+            </p>
+          ) : null}
         </div>
         <span className="shrink-0 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--app-accent-color)]">
           Ubah
@@ -149,9 +156,9 @@ function MasterPickerField({
                   <button
                     key={option.value}
                     className={[
-                      'w-full rounded-[20px] border px-4 py-3 text-left transition',
+                      'flex w-full items-start gap-3 rounded-[20px] border px-4 py-3 text-left transition',
                       isActive
-                        ? 'border-[var(--app-accent-color)] bg-[var(--app-accent-color)]/10'
+                        ? 'border-[var(--app-accent-color)] bg-[var(--app-brand-accent-muted)]'
                         : 'border-[var(--app-outline-soft)] bg-[var(--app-surface-strong-color)]',
                     ]
                       .filter(Boolean)
@@ -159,8 +166,8 @@ function MasterPickerField({
                     onClick={() => handleSelect(option.value)}
                     type="button"
                   >
-                    <div className="min-w-0 space-y-1">
-                      <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <p className="text-sm font-semibold leading-5 text-[var(--app-text-color)]">
                         {option.label}
                       </p>
                       {option.description ? (

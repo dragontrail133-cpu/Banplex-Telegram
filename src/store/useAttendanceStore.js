@@ -7,12 +7,14 @@ import {
   restoreAttendanceFromApi,
   softDeleteAttendanceFromApi,
   saveAttendanceSheetFromApi,
+  updateAttendanceRecordFromApi,
 } from '../lib/records-api'
 
 const ATTENDANCE_STATUS_OPTIONS = [
   { value: 'full_day', label: 'Full Day', multiplier: 1 },
   { value: 'half_day', label: 'Half Day', multiplier: 0.5 },
   { value: 'overtime', label: 'Lembur', multiplier: 1.5 },
+  { value: 'absent', label: 'Tidak Hadir', multiplier: 0 },
 ]
 
 function toError(error, fallbackMessage) {
@@ -60,6 +62,66 @@ const useAttendanceStore = create((set, get) => ({
       return attendance
     } catch (error) {
       const normalizedError = toError(error, 'Gagal memuat detail absensi.')
+      throw normalizedError
+    }
+  },
+  updateAttendanceRecord: async ({
+    attendanceId,
+    teamId,
+    attendanceStatus,
+    overtimeFee,
+    totalPay,
+    notes,
+    expectedUpdatedAt = null,
+  } = {}) => {
+    if (!attendanceId) {
+      throw new Error('Attendance ID wajib diisi.')
+    }
+
+    set({
+      isSubmitting: true,
+      error: null,
+    })
+
+    try {
+      const attendance = await updateAttendanceRecordFromApi(attendanceId, {
+        teamId: resolveTeamId(teamId),
+        attendanceStatus,
+        overtimeFee,
+        totalPay,
+        notes,
+        expectedUpdatedAt,
+      })
+
+      if (attendance?.id) {
+        set((state) => ({
+          sheetAttendances: state.sheetAttendances.map((record) =>
+            record.id === attendance.id ? attendance : record
+          ),
+          unbilledAttendances: state.unbilledAttendances.map((record) =>
+            record.id === attendance.id ? attendance : record
+          ),
+          isSubmitting: false,
+          error: null,
+          lastUpdatedAt: new Date().toISOString(),
+        }))
+      } else {
+        set({
+          isSubmitting: false,
+          error: null,
+          lastUpdatedAt: new Date().toISOString(),
+        })
+      }
+
+      return attendance
+    } catch (error) {
+      const normalizedError = toError(error, 'Gagal memperbarui absensi.')
+
+      set({
+        isSubmitting: false,
+        error: normalizedError.message,
+      })
+
       throw normalizedError
     }
   },
@@ -262,6 +324,7 @@ const useAttendanceStore = create((set, get) => ({
             worker_name: data.worker_name,
             project_name: data.project_name,
             attendance_status: data.attendance_status ?? data.attendanceStatus,
+            overtime_fee: data.overtime_fee ?? data.overtimeFee ?? null,
             total_pay: data.total_pay ?? data.totalPay,
             notes: data.notes,
           },

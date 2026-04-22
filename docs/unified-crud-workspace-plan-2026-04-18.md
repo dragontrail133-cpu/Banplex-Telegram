@@ -75,7 +75,7 @@ Kalau kolom `restore rule` atau `payment rule` belum punya handler UI/API khusus
 | --- | --- | --- | --- | --- | --- | --- |
 | `project-income` | `project_incomes` | `bills.project_income_id` untuk fee bill staf | Hapus/edit diblokir bila ada fee bill aktif yang sudah punya `paid_amount > 0` | Restore parent membuka lagi fee bill anak, set `deleted_at = null`, `status = unpaid`, `paid_at = null` | Insert/update `project_incomes` memicu `fn_sync_fee_bills_from_project_income()`; pembayaran fee masuk ke `bill_payments` lewat bill anak | `api/transactions.js`, `supabase/migrations/20260417193000_add_project_income_fee_bills_and_loan_payment_status.sql` |
 | `expense umum` | `expenses` | `bills` otomatis dari `fn_auto_create_bill_from_expense()` | Hapus destruktif tidak boleh dilakukan jika bill anak atau `bill_payments` sudah aktif | Restore parent harus membuka lagi bill anak dan menjaga audit pembayaran; jika handler belum ada, targetnya masuk `UCW-11` | `status = paid` membuat bill anak dan `bill_payments` awal; `status = unpaid` hanya membuat bill | `api/records.js`, `supabase/migrations/20260410233000_add_bills_stock_automation.sql`, `supabase/migrations/20260417213000_fix_public_trigger_security_for_expenses_and_bills.sql` |
-| `material invoice` | `expenses` dengan `expense_type = material` atau `material_invoice` | `expense_line_items`, lalu `bills` dan `bill_payments` | Hapus destruktif diblokir jika invoice sudah settle atau child payment masih hidup; line item memang cascade dari `expense_id` | Restore header harus menghidupkan lagi bill dan line item turunan; jika belum ada handler, menjadi target `UCW-12` dan `UCW-20` | Total line item menjadi amount bill; invoice `paid` memicu bill payment awal | `api/records.js`, `supabase/migrations/20260410224500_create_material_invoice_tables.sql`, `supabase/migrations/20260417213000_fix_public_trigger_security_for_expenses_and_bills.sql` |
+| `material invoice` | `expenses` dengan `expense_type = material` | `expense_line_items`, lalu `bills` dan `bill_payments` | Hapus destruktif diblokir jika invoice sudah settle atau child payment masih hidup; line item memang cascade dari `expense_id` | Restore header harus menghidupkan lagi bill dan line item turunan; jika belum ada handler, menjadi target `UCW-12` dan `UCW-20` | Total line item menjadi amount bill; invoice `paid` memicu bill payment awal | `api/records.js`, `supabase/migrations/20260410224500_create_material_invoice_tables.sql`, `supabase/migrations/20260417213000_fix_public_trigger_security_for_expenses_and_bills.sql` |
 | `bill` | `bills` | `bill_payments` | Hapus diblokir bila ada `bill_payments` aktif; fee bill dari `project-income` juga harus menunggu parent income dipulihkan | Restore bill yang berasal dari `project-income` wajib menunggu parent income hidup lagi; bill dari attendance mengikuti flow attendance restore | Insert ke `bill_payments` mengubah `paid_amount`, `status`, dan `paid_at` pada parent bill | `api/records.js`, `api/transactions.js`, `supabase/migrations/20260410144525_add_bill_payments_and_cash_mutation.sql`, `supabase/migrations/20260417213000_fix_public_trigger_security_for_expenses_and_bills.sql` |
 | `bill_payment` | `bill_payments` | tidak ada child tambahan; ini leaf audit untuk bill | Current API tidak membuka edit/delete; bila nanti diaktifkan, harus pakai void/reverse, bukan mutasi diam-diam | Restore leaf belum dijalankan sekarang; kalau soft delete ditambah, parent bill harus dihitung ulang | `fn_update_bill_status_on_payment()` mengakumulasi pembayaran dan mengubah status bill menjadi `unpaid`, `partial`, atau `paid` | `api/records.js`, `src/store/usePaymentStore.js`, `supabase/migrations/20260410144525_add_bill_payments_and_cash_mutation.sql`, `supabase/migrations/20260417213000_fix_public_trigger_security_for_expenses_and_bills.sql` |
 | `loan` | `loans` | `loan_payments` | Hapus diblokir bila ada `loan_payments` aktif | Restore loan hanya membuka parent loan; pembayaran tetap melekat di riwayat child | `principal_amount`, `repayment_amount`, `interest_type`, `interest_rate`, dan `tenor_months` disimpan di parent; pembayaran masuk lewat `loan_payments` | `api/transactions.js`, `src/store/useIncomeStore.js`, `src/store/usePaymentStore.js`, `supabase/migrations/20260417193000_add_project_income_fee_bills_and_loan_payment_status.sql` |
@@ -113,6 +113,8 @@ Kalau kolom `restore rule` atau `payment rule` belum punya handler UI/API khusus
 3. Task aktif utama berpindah ke `UCW-77` sampai `UCW-90` agar repo lebih cepat mencapai kondisi operasional yang benar-benar bisa dipakai harian.
 4. `PRD_APP_IMPROVEMENT.md` diperlakukan sebagai referensi legacy dan bukan lagi source of truth produk untuk stream ini.
 5. Task implementasi yang menyentuh `bill`, `partial payment`, `attendance journal`, `salary bill`, `ledger besar`, atau `multi-user CRUD` tidak boleh dimulai sebelum paket keputusan produk detailnya dikunci di task desain terkait.
+6. Residual page-level `allowedRoles` arrays di `AttendancePage`, `HrdPage`, `BeneficiariesPage`, `ProjectsPage`, dan `MaterialInvoicePage` adalah explicit legacy gates; jangan diformalisasi kecuali freeze menambahkan contract resmi role-group baru.
+7. `UCW-90` audit memakai baseline final: capability contract sudah dipusatkan, `Master` tetap core-release fondasional, dan `Stok Barang` tetap supporting aktif; blocker release inti hanya yang masih benar-benar tersisa di matrix.
 
 ## Lifecycle Status Task
 
@@ -214,7 +216,7 @@ Aturan:
 | `UCW-75` | Putus dimensi intrinsik gambar dari layout preview draft | `src/components/ExpenseAttachmentSection.jsx` | `UCW-74` | Preview draft tidak lagi dirender dengan elemen `<img>`; gambar dipasang sebagai `background-image` pada frame crop tetap dan section dikunci `overflow-x-hidden`, sehingga browser tidak punya kesempatan memperluas layout berdasarkan ukuran asli screenshot | `npm run lint`, `npm run build` | `validated` |
 | `UCW-76` | Perbaiki contract `supplier_name` expense agar save tidak gagal 23502 | `src/components/ExpenseForm.jsx`, `src/store/useTransactionStore.js`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-02`, `UCW-15` | Create/edit expense selalu mengirim `supplier_name` non-null ke API/DB, field supplier menjadi required di UI, dan edit tetap bisa mempertahankan nama supplier existing dari snapshot bila relasi aktif tidak tersedia | `npm run lint`, `npm run build` | `validated` |
 | `UCW-77` | Audit repo menyeluruh, reprioritasi backlog, dan buat PRD core feature release | `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`, `docs/prd-core-feature-release-2026-04-18.md` | `UCW-76` | Ada audit repo aktual per fitur inti, backlog bergeser ke target core release full-stack, task UI non-blocker ditandai `deferred`, dan PRD baru terbit sebagai source of truth produk | audit konsistensi dokumen | `validated` |
-| `UCW-78` | Kunci matriks source of truth release untuk semua core feature | `docs/unified-crud-workspace-plan-2026-04-18.md`, `src/App.jsx`, `src/pages/Dashboard.jsx`, `src/pages/TransactionsPage.jsx`, `src/pages/PaymentPage.jsx`, store/API terkait | `UCW-77` | Ada matriks final route -> store -> API -> tabel/view untuk pemasukan, expense, invoice/surat jalan, loan, attendance, salary bill, payment, attachment, report, dan PDF tanpa ambiguitas legacy | audit dokumen + mapping repo | `ready` |
+| `UCW-78` | Kunci matriks source of truth release untuk semua core feature | `docs/unified-crud-workspace-plan-2026-04-18.md`, `src/App.jsx`, `src/pages/Dashboard.jsx`, `src/pages/TransactionsPage.jsx`, `src/pages/PaymentPage.jsx`, store/API terkait | `UCW-77` | Ada matriks final route -> store -> API -> tabel/view untuk pemasukan, expense, invoice/surat jalan, loan, attendance, salary bill, payment, attachment, report, dan PDF tanpa ambiguitas legacy | audit dokumen + mapping repo | `validated` |
 | `UCW-98` | Selaraskan read model `Jurnal` agar `Tagihan Upah` tampil sebagai row bill dan attendance tidak lagi jadi row ledger utama | `api/transactions.js`, `src/lib/transaction-presentation.js`, `src/pages/TransactionDetailPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-97` | Workspace `Jurnal` sekarang menampilkan payroll payable sebagai `Tagihan Upah` dari source `bill`, attendance record tidak lagi muncul sebagai row ledger utama, search/filter tetap stabil, dan detail/payment flow payroll tetap berjalan | `npm run lint`, `npm run build` | `validated` |
 | `UCW-97` | Bekukan keputusan audit dan brainstorming menjadi package `docs/freeze` | `docs/freeze/*`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-77`, `UCW-91`, `UCW-96` | Ada package freeze resmi enam dokumen yang menggantikan docs lama sebagai authority utama untuk produk, PRD, contract map, lifecycle, dan guardrail AI | audit dokumen + `rg` section check | `validated` |
 | `UCW-91` | Brainstorm lanjutan dan kunci keputusan produk detail sebelum implementasi core release | `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`, `docs/prd-core-feature-release-2026-04-18.md` | `UCW-77` | PRD dan plan memuat keputusan produk detail untuk bill, partial payment, jurnal absensi, rekap salary bill, ledger besar, dan multi-user CRUD sehingga implementasi berikutnya tidak berjalan dengan asumsi kabur | audit konsistensi dokumen | `validated` |
@@ -249,12 +251,187 @@ Aturan:
 | `UCW-128` | Implementasikan `Riwayat` v1 sebagai completed-only surface | `src/pages/HistoryPage.jsx`, `src/App.jsx`, `src/pages/TransactionsPage.jsx`, `src/lib/transactions-api.js`, `api/transactions.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-127` | `Riwayat` membaca completed/history record server-side, tetap terpisah dari `Jurnal` aktif dan `Recycle Bin` deleted/recovery, dan tidak mencampur deleted row ke histori biasa | `npm run lint`, `npm run build` | `validated` |
 | `UCW-129` | Hardening detail `Riwayat` agar back-navigation dan CTA tetap completed/history-aware | `src/pages/HistoryPage.jsx`, `src/pages/TransactionDetailPage.jsx`, `src/components/ExpenseAttachmentSection.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-128` | Detail yang dibuka dari `Riwayat` membawa context completed/history yang jelas, kembali ke `Riwayat` saat entry point-nya dari sana, dan tidak membuka CTA write/active workspace yang milik `Jurnal` | `npm run lint`, `npm run build` | `validated` |
 | `UCW-130` | Hardening detail `Recycle Bin` agar back-navigation dan CTA tetap deleted/recovery-aware | `src/pages/TransactionsRecycleBinPage.jsx`, `src/pages/DeletedTransactionDetailPage.jsx`, `src/App.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-129` | Detail yang dibuka dari `Recycle Bin` membawa context deleted/recovery yang jelas, kembali ke `Recycle Bin` secara eksplisit, dan tidak membuka CTA write/active workspace yang milik surface lain | `npm run lint`, `npm run build` | `validated` |
-| `UCW-85` | Seragamkan `soft delete`, `restore`, dan `permanent delete` lintas domain inti | `api/transactions.js`, `api/records.js`, `src/pages/TransactionsRecycleBinPage.jsx`, `src/pages/MasterRecycleBinPage.jsx`, store/detail terkait | `UCW-79`, `UCW-80`, `UCW-81`, `UCW-82`, `UCW-83`, `UCW-84` | Setiap domain inti punya matriks delete yang jelas: boleh, diblokir, cara restore, dan kapan permanent delete aman dijalankan | `npm run lint`, `npm run build` | `planned` |
-| `UCW-86` | Finalkan attachment platform lintas core feature termasuk bukti bayar | `src/store/useFileStore.js`, `src/components/ExpenseAttachmentSection.jsx`, payment forms/pages terkait, `api/records.js`, helper/schema bila perlu | `UCW-80`, `UCW-81`, `UCW-82`, `UCW-83` | Expense, invoice, salary/payment proof, dan dokumen inti lain berbagi policy upload, preview, cleanup orphan, dan role matrix yang seragam | `npm run lint`, `npm run build` | `planned` |
+| `UCW-85` | Seragamkan `soft delete`, `restore`, dan `permanent delete` lintas domain inti | `api/transactions.js`, `api/records.js`, `src/pages/TransactionsRecycleBinPage.jsx`, `src/pages/MasterRecycleBinPage.jsx`, store/detail terkait | `UCW-79`, `UCW-80`, `UCW-81`, `UCW-82`, `UCW-83`, `UCW-84` | Setiap domain inti punya matriks delete yang jelas: boleh, diblokir, cara restore, dan kapan permanent delete aman dijalankan | `npm run lint`, `npm run build` | `validated` |
+| `UCW-86` | Finalkan attachment platform lintas core feature termasuk bukti bayar | `src/store/useFileStore.js`, `src/components/ExpenseAttachmentSection.jsx`, payment forms/pages terkait, `api/records.js`, helper/schema bila perlu | `UCW-80`, `UCW-81`, `UCW-82`, `UCW-83` | Expense, invoice, salary/payment proof, dan dokumen inti lain berbagi policy upload, preview, cleanup orphan, dan role matrix yang seragam | `npm run lint`, `npm run build` | `validated` |
 | `UCW-87` | Hardening `Unit Kerja` summary agar report hanya membaca server truth final | `src/store/useReportStore.js`, `src/lib/reports-api.js`, `src/components/ProjectReport.jsx`, `api/records.js` | `UCW-79`, `UCW-80`, `UCW-81`, `UCW-82`, `UCW-83`, `UCW-85`, `UCW-95` | Summary `Unit Kerja` dan portfolio overview membaca `vw_project_financial_summary` / `api/records` server-side, agregasi lintas domain tidak dihitung liar di client, dan layar report tetap ringkas mobile-first | `npm run lint`, `npm run build`, audit data mapping | `validated` |
-| `UCW-88` | Deliver PDF bisnis user-facing dan `pdf_settings` dari app | `docs/prd-core-feature-release-2026-04-18.md`, `src/store/useReportStore.js`, UI report/settings terkait, `api/notify.js` atau service PDF baru, `api/records.js`, `supabase/migrations/*` bila perlu | `UCW-87`, `UCW-95` | Minimal satu PDF bisnis profesional bisa diunduh dari app, `pdf_settings` punya boundary UI yang jelas, dan PDF notifikasi Telegram tidak lagi menjadi satu-satunya artefak PDF | `npm run lint`, `npm run build`, uji manual export | `planned` |
-| `UCW-89` | Hardening mobile-first dan scalable data untuk release core | `src/components/layouts/FormLayout.jsx`, `src/components/ui/*`, `src/pages/TransactionsPage.jsx`, halaman report terkait, picker/list helpers | `UCW-84`, `UCW-86`, `UCW-87`, `UCW-95` | List besar, picker master, ledger, dan report dataset tetap usable di mobile tanpa menunggu gelombang polish UI besar berikutnya | `npm run lint`, `npm run build` | `planned` |
-| `UCW-90` | Audit release readiness core feature end-to-end | `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`, representative UI/store/API files | `UCW-85`, `UCW-86`, `UCW-87`, `UCW-88`, `UCW-89` | Semua fitur inti punya jalur create/edit/delete/pay/report yang sudah diaudit, backlog tersinkron, dan scope sisanya tertulis jelas sebagai follow-up setelah core release | audit dokumen + `npm run lint` + `npm run build` smoke | `planned` |
+| `UCW-88` | Deliver PDF bisnis user-facing dan `pdf_settings` dari app | `docs/prd-core-feature-release-2026-04-18.md`, `src/store/useReportStore.js`, UI report/settings terkait, `api/notify.js` atau service PDF baru, `api/records.js`, `supabase/migrations/*` bila perlu | `UCW-87`, `UCW-95` | Minimal satu PDF bisnis profesional bisa diunduh dari app, `pdf_settings` punya boundary UI yang jelas, dan PDF notifikasi Telegram tidak lagi menjadi satu-satunya artefak PDF | `npm run lint`, `npm run build`, uji manual export | `validated` |
+| `UCW-89` | Hardening mobile-first dan scalable data untuk release core | `src/components/layouts/FormLayout.jsx`, `src/components/ui/*`, `src/pages/TransactionsPage.jsx`, halaman report terkait, picker/list helpers | `UCW-84`, `UCW-86`, `UCW-87`, `UCW-95` | List besar, picker master, ledger, dan report dataset tetap usable di mobile tanpa menunggu gelombang polish UI besar berikutnya | `npm run lint`, `npm run build` | `validated` |
+| `UCW-90` | Audit release readiness core feature end-to-end (backend + frontend) | `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`, `src/App.jsx`, `src/pages/*`, `src/store/*`, `src/components/*`, `api/*`, `supabase/migrations/*` | `UCW-85`, `UCW-86`, `UCW-87`, `UCW-88`, `UCW-89` | Ada gap matrix backend/frontend terhadap freeze contract final, residual legacy gates sudah dibekukan dan tidak dihitung sebagai blocker, urutan micro-task implementasi berikutnya tertulis eksplisit, dan blocker release inti terpisah jelas sebelum coding | audit dokumen + `rg` mapping repo | `validated` |
+| `UCW-169` | Pusatkan boundary `auth/workspace` dan `master` agar runtime exception tidak menyebar | `src/store/useTeamStore.js`, `src/store/useMasterStore.js`, `src/lib/capabilities.js`, `src/components/ProtectedRoute.jsx`, `src/pages/TeamInvitePage.jsx`, `src/pages/MasterPage.jsx`, `src/pages/MasterFormPage.jsx`, `src/pages/MasterRecycleBinPage.jsx`, `api/auth.js`, `api/records.js` | `UCW-90`, `UCW-96`, `UCW-84` | Direct-write transisional untuk `Tim` dan boundary runtime `Master` dipusatkan ke contract yang eksplisit; `Master` tetap core-release fondasional walau implementasinya sementara transitional, UI/server capability gate baca contract yang sama, dan exception runtime terdokumentasi tanpa memperluas pola inti | audit dokumen + mapping repo | `validated` |
+| `UCW-171` | Buka create/edit `Barang` di master/reference dengan backing contract `materials` | `src/components/master/masterTabs.js`, `src/pages/MasterFormPage.jsx`, `src/pages/MasterRecycleBinPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-90`, `UCW-169`, `UCW-170` | Tab `Barang` aktif dari contract `materials`, route legacy `material` tetap kompatibel, create/edit material terhydrate ke form master, dan label recycle bin konsisten tanpa rename internal | `rg`, `npm.cmd run lint`, `npm run build`, manual browser check | `blocked` |
+| `UCW-172` | Selaraskan write contract `expense_type` saat simpan faktur agar check constraint tidak gagal | `src/components/MaterialInvoiceForm.jsx`, `src/store/useTransactionStore.js`, `api/records.js`, `supabase/migrations/*`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-81`, `UCW-90` | Save/update faktur atau surat jalan tidak lagi memicu error `expenses_expense_type_check` 23514 karena canonical write value `expense_type='material'` selaras dengan schema final, sementara read path tetap kompatibel dengan row legacy `material_invoice` bila masih ada | `rg`, `npm.cmd run lint`, `npm run build`, manual create/save faktur | `blocked` |
+| `UCW-175` | Pastikan notifikasi loan create tetap audit-passed dan sediakan PDF receipt user-facing terpisah dari PDF bisnis | `src/store/useIncomeStore.js`, `src/store/usePaymentStore.js`, `src/pages/PaymentPage.jsx`, `src/lib/report-pdf.js`, `api/notify.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-88`, `UCW-90` | Audit menunjukkan create loan hanya lewat entrypoint yang sudah menempel notify Telegram, payment history punya receipt PDF user-facing sendiri dengan tombol unduh, dan kwitansi Telegram tetap terpisah dari receipt bisnis | `rg`, `npm.cmd run lint`, `npm run build`, manual browser check receipt | `blocked` |
+| `UCW-176` | Seragamkan komposisi row list global dan hilangkan tombol `More` | `src/components/ui/ActionCard.jsx`, `src/components/ui/AppPrimitives.jsx`, `src/lib/transaction-presentation.js`, `api/transactions.js`, `src/pages/Dashboard.jsx`, `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/pages/TransactionsRecycleBinPage.jsx`, `src/components/PayrollAttendanceHistory.jsx`, `src/components/MasterDataManager.jsx`, `src/components/BeneficiaryList.jsx`, `src/components/TeamInviteManager.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-90`, `UCW-173`, `UCW-174` | Komposisi row yang dipakai lintas list menjadi seragam dari kiri ke kanan: icon, title, tanggal, nominal, lalu badge nama user yang terbaca; tap row membuka bottom sheet aksi; tombol `More` di semua list terdampak dihapus; creator badge tidak lagi menampilkan Telegram ID mentah | `rg`, audit payload/row pattern, `npm.cmd run lint`, `npm run build`, manual tap row vs sheet | `validated` |
+| `UCW-177` | Audit dan perbaiki RLS `stock_transactions` agar simpan faktur/material invoice tidak gagal `42501` | `supabase/migrations/20260411190000_setup_telegram_auth_rbac_rls.sql`, `supabase/migrations/20260411200000_strict_alignment_master_expenses_loans.sql`, `api/records.js`, `src/store/useTransactionStore.js`, `src/components/MaterialInvoiceForm.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-22`, `UCW-103` | Insert/update/delete `stock_transactions` punya policy yang sesuai dengan flow save faktur/surat jalan, dan error RLS 42501 tidak lagi memblokir simpan invoice material | audit policy + `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-178` | Audit delivery notifikasi create `loan` dan surface kegagalan `/api/notify` dari entrypoint aktif | `src/components/LoanForm.jsx`, `src/store/useIncomeStore.js`, `api/notify.js`, `src/lib/transactions-api.js`, `api/transactions.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-175`, `UCW-176` | Create `loan` tetap memakai satu entrypoint notify yang tervalidasi, tetapi kegagalan `/api/notify` atau konfigurasi Telegram tidak lagi silent; record kasbon tetap tersimpan dan user/operator mendapat warning yang bisa diaudit saat chat bot gagal | audit entrypoint + `rg` + `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-179` | Tutup celah overpayment saat edit/restore pembayaran `loan` dan `bill` | `api/transactions.js`, `api/records.js`, `src/pages/TransactionsRecycleBinPage.jsx`, `src/store/usePaymentStore.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-90`, `UCW-175` | Update `loan_payment`, restore `loan_payment`, dan restore `bill_payment` tidak bisa membuat total `paid_amount` parent melebihi target; pesan error konsisten lintas active flow dan recycle bin; status parent tetap sinkron setelah edit/restore | audit sibling-payment guard + `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-180` | Seragamkan payload notifikasi `Pembayaran` ke truth server pasca write | `src/store/usePaymentStore.js`, `src/pages/PaymentPage.jsx`, `api/records.js`, `api/transactions.js`, `api/notify.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-175`, `UCW-179` | Notifikasi bill/loan payment dibangun dari response server final `payment` + parent `bill/loan`, bukan dari kalkulasi client pra-submit, sehingga nominal tersisa dan status settlement yang dikirim ke Telegram selalu cocok dengan hasil server | audit notify payload + `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-181` | Selaraskan rekap payroll dengan eligible rows server dan deskripsi tagihan final | `src/pages/PayrollPage.jsx`, `api/records.js`, `supabase/migrations/20260419103000_fix_salary_bill_function_runtime_and_scope.sql`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-90`, `UCW-173` | Deskripsi `Tagihan Upah`, toast hasil, dan notifikasi Telegram memakai `attendanceCount`/`totalAmount` yang benar-benar diproses server; partial recap tidak lagi menyimpan jumlah absensi atau nominal yang salah ketika server memfilter row eligible | audit recap payload + `npm.cmd run lint`, `npm run build`, manual rekap payroll | `validated` |
+| `UCW-182` | Tambahkan bypass auth Telegram lokal untuk smoke test browser | `src/store/useAuthStore.js`, `src/lib/dev-auth-bypass.js`, `api/auth.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-90`, `UCW-169` | Browser lokal bisa bootstrap auth/session nyata tanpa container Telegram lewat bypass dev yang eksplisit, memakai owner Telegram env sebagai identitas default, dan tidak mengubah jalur auth production atau kontrak API core | `rg`, `npm.cmd run lint`, `npm run build`, smoke auth browser lokal | `validated` |
+| `UCW-183` | Audit smoke Chrome untuk core CRUD, payment, dan restore pasca bypass lokal | `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-182` | Ada bukti browser untuk dashboard, jurnal, detail/edit, payment bill/loan, material invoice, recycle bin, dan restore; error console/network dan boundary pertama yang rusak tercatat jelas; follow-up task diturunkan spesifik dari temuan nyata | `browser smoke audit + capture console/network`, `npm.cmd run lint`, `npm run build` bila task `UCW-182` menyentuh runtime | `validated` |
+| `UCW-187` | Pulihkan read model `Jurnal` / `Riwayat` yang gagal `User not allowed` pada session owner valid | `api/transactions.js`, `supabase/migrations/20260420090000_create_vw_workspace_transactions.sql`, `supabase/migrations/20260420113000_create_vw_history_transactions.sql`, `src/lib/transactions-api.js`, `src/pages/Dashboard.jsx`, `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-183` | Owner/session valid bisa memuat branch workspace `Dashboard`, `Jurnal`, dan `Riwayat` tanpa 500 `User not allowed`; penyebab RLS/view/auth-context terdokumentasi jelas; branch summary, recycle bin, dan payment yang sudah sehat tidak diregresikan | `browser smoke audit`, `npm.cmd run lint`, `npm run build`, audit query/view/RLS | `validated` |
+| `UCW-188` | Perbaiki restore `bill_payment` yang mengembalikan 200 tetapi tidak benar-benar memulihkan row | `api/records.js`, `src/pages/TransactionsRecycleBinPage.jsx`, `src/pages/PaymentPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-183` | Restore payment bill benar-benar menghapus `deleted_at`, item hilang dari `Halaman Sampah`, histori pembayaran aktif muncul lagi, dan total parent bill ikut sinkron; audit field-mapping restore bill/loan tidak lagi mismatch camelCase vs snake_case | `browser archive/restore smoke`, `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-189` | Audit smoke Chrome lanjutan untuk create/edit/delete/restore/payment/payroll/material flow | `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-182`, `UCW-183` | Ada bukti browser + DB untuk state lokal auth, create payment bill/loan, archive payment, restore recycle bin, create/edit material flow, dan attendance/payroll; blocker baru dipisah menjadi task sempit yang tidak tumpang tindih dengan `UCW-187` / `UCW-188` | `browser smoke audit`, audit query DB, `npm.cmd run lint`, `npm run build` bila runtime berubah | `validated` |
+| `UCW-190` | Pulihkan create route berbasis `EditRecordPage` yang menggantung atau menjatuhkan `vercel dev` pada `/edit/*/new` | `src/App.jsx`, `src/pages/EditRecordPage.jsx`, `src/components/ui/BottomNav.jsx`, `src/store/useTransactionStore.js`, `src/store/useIncomeStore.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-189` | Route create `Pengeluaran` dan `Pinjaman` terbuka konsisten dari quick action `/edit/expense/new` dan `/edit/loan/new`, lazy route tidak lagi tertahan pada fetch module `src/pages/EditRecordPage.jsx`, dan `vercel dev` tidak crash saat smoke create dijalankan | `browser smoke create route`, `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-191` | Perbaiki hydrate sheet `Absensi Harian` yang berhenti di state loading meski fetch master + attendance 200 | `src/pages/AttendancePage.jsx`, `src/components/AttendanceForm.jsx`, `src/store/useAttendanceStore.js`, `src/store/useMasterStore.js`, `src/lib/records-api.js`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-189` | `attendance/new` merender worker row yang bisa diedit setelah master data dan `GET /api/records?resource=attendance` sukses; spinner `Memuat worker dan absensi...` tidak tertahan; create attendance dan jalur rekap harian kembali bisa diuji dari browser | `browser smoke attendance/new + payroll`, `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-192` | Perbaiki create `surat_jalan` yang masih memicu `bills_status_check` 23514 di `material-invoices` | `src/components/MaterialInvoiceForm.jsx`, `src/store/useTransactionStore.js`, `api/records.js`, `supabase/migrations/20260419104000_allow_non_expense_bills.sql`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-177`, `UCW-189` | Wizard `material-invoice/new` dalam mode `Surat Jalan` bisa tersimpan dari browser tanpa memaksa insert `bills.status` yang melanggar constraint; row surat jalan dan stock movement tercipta sesuai contract tanpa meregresikan flow `Faktur` | `browser smoke create surat jalan`, `npm.cmd run lint`, `npm run build`, audit insert bill/material invoice | `validated` |
+| `UCW-193` | Perbaiki soft delete `material invoice` yang gagal rollback stok dengan `materials.current_stock` null violation | `src/pages/EditRecordPage.jsx`, `src/store/useTransactionStore.js`, `api/records.js`, `supabase/migrations/20260419090000_create_atomic_manual_stock_out_function.sql`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-177`, `UCW-189` | Tombol `Hapus` pada edit material invoice melakukan soft delete tanpa error `materials_current_stock` 23502, stock rollback/cleanup tetap konsisten, dan record bisa muncul benar di `Halaman Sampah` untuk flow restore selanjutnya | `browser delete smoke material invoice`, `npm.cmd run lint`, `npm run build`, audit stock rollback SQL/API | `validated` |
+| `UCW-194` | Smoke create `loan` saja | `src/components/LoanForm.jsx`, `src/store/useIncomeStore.js`, `src/pages/PaymentPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-182`, `UCW-189` | Satu aksi `create loan` dijalankan end-to-end dari browser, hasilnya dicatat ringkas, dan bila ada blocker/bug maka perbaikannya dipecah ke backlog task terpisah | browser smoke create loan + catatan hasil | `validated` |
+| `UCW-195` | Smoke update `expense` saja | `src/pages/EditRecordPage.jsx`, `src/store/useTransactionStore.js`, `src/pages/TransactionsPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-182`, `UCW-189` | Satu aksi `update expense` dijalankan end-to-end dari browser, hasilnya dicatat ringkas, dan bila ada blocker/bug maka perbaikannya dipecah ke backlog task terpisah | browser smoke update expense + catatan hasil | `validated` |
+| `UCW-196` | Smoke delete `material invoice` saja | `src/pages/EditRecordPage.jsx`, `src/store/useTransactionStore.js`, `src/pages/TransactionsRecycleBinPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-182`, `UCW-189` | Satu aksi `delete material invoice` dijalankan end-to-end dari browser, hasilnya dicatat ringkas, dan bila ada blocker/bug maka perbaikannya dipecah ke backlog task terpisah | browser smoke delete material invoice + catatan hasil | `validated` |
+| `UCW-197` | Smoke payment `bill` saja | `src/pages/PaymentPage.jsx`, `src/store/usePaymentStore.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-182`, `UCW-189` | Satu aksi `payment bill` dijalankan end-to-end dari browser, hasilnya dicatat ringkas, dan bila ada blocker/bug maka perbaikannya dipecah ke backlog task terpisah | browser smoke bill payment + catatan hasil | `validated` |
+| `UCW-198` | Smoke record `attendance` saja | `src/pages/AttendancePage.jsx`, `src/components/AttendanceForm.jsx`, `src/store/useAttendanceStore.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-182`, `UCW-189` | Satu aksi `record attendance` dijalankan end-to-end dari browser, hasilnya dicatat ringkas, dan bila ada blocker/bug maka perbaikannya dipecah ke backlog task terpisah | browser smoke attendance record + catatan hasil | `validated` |
+| `UCW-199` | Smoke payment `loan` saja | `src/pages/PaymentPage.jsx`, `src/store/usePaymentStore.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-182`, `UCW-189` | Satu aksi `payment loan` dijalankan end-to-end dari browser, hasilnya dicatat ringkas, dan bila ada blocker/bug maka perbaikannya dipecah ke backlog task terpisah | browser smoke loan payment + catatan hasil | `validated` |
+| `UCW-200` | Smoke restore `bill_payment` saja | `src/pages/TransactionsRecycleBinPage.jsx`, `src/pages/PaymentPage.jsx`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-182`, `UCW-189` | Satu aksi `restore bill_payment` dijalankan end-to-end dari browser, hasilnya dicatat ringkas, dan bila ada blocker/bug maka perbaikannya dipecah ke backlog task terpisah | browser smoke restore bill_payment + catatan hasil | `validated` |
+| `UCW-201` | Smoke permanent delete `loan_payment` saja | `src/pages/TransactionsRecycleBinPage.jsx`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-182`, `UCW-189` | Satu aksi `permanent delete loan_payment` dijalankan end-to-end dari browser, hasilnya dicatat ringkas, dan bila ada blocker/bug maka perbaikannya dipecah ke backlog task terpisah | browser smoke permanent delete loan_payment + catatan hasil | `validated` |
+| `UCW-202` | Perbaiki payload notifikasi create `loan` yang masih membuat `/api/notify` gagal 500 sesudah insert sukses | `src/store/useIncomeStore.js`, `api/notify.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-194` | Create `loan` tetap sukses dan call `/api/notify` ikut 200 dengan `principalAmount`, `repaymentAmount`, dan label kreditur yang valid; warning toast notifikasi tidak lagi muncul pada create loan dev smoke | browser smoke create loan, audit payload `/api/notify`, `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-203` | Samakan guard UI edit `expense` dengan guard backend ketika expense sudah punya payment history | `src/pages/EditRecordPage.jsx`, `src/components/ExpenseForm.jsx`, `src/store/useTransactionStore.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-195` | User tidak bisa melakukan edit semu pada `expense` yang sudah punya payment history tanpa guard yang jelas sebelum submit, atau tersedia fixture edit yang valid sehingga smoke `update expense` bisa selesai end-to-end tanpa PATCH 400 setelah field diubah | browser smoke update expense, audit request `PATCH /api/records?resource=expenses`, `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-204` | Pulihkan soft delete `material invoice` yang kembali gagal rollback stok dengan error `P0001` | `api/records.js`, `supabase/migrations/*`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-196` | Tombol `Hapus` pada material invoice aktif kembali memindahkan record ke recycle bin tanpa 500 `Stok material ... tidak mencukupi`, dan rollback stok tetap konsisten di DB | browser smoke delete material invoice, audit stock rollback SQL/API, `npm.cmd run lint`, `npm run build` | `blocked` |
+| `UCW-205` | Perbaiki permanent delete `loan_payment` yang 200 tetapi row tetap soft-deleted di recycle bin | `api/transactions.js`, `src/pages/TransactionsRecycleBinPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-201` | Aksi `Hapus Permanen` benar-benar menghapus row `loan_payments` dari DB, item hilang dari `Halaman Sampah` tanpa reload ganda, dan detail parent loan tidak kembali memuat payment yang sudah dihapus permanen | browser smoke permanent delete loan payment, audit SQL `loan_payments`, `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-206` | Finalkan contract delete `material invoice` saat stok sumber sudah dipakai mutasi lain | `docs/freeze/03-source-of-truth-contract-map.md`, `api/records.js`, `src/pages/EditRecordPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-204` | Ada keputusan final yang eksplisit apakah delete harus diblok lebih awal di UI, atau rollback stok harus dependency-aware; smoke delete `material invoice` mengikuti rule yang sama tanpa 500 dan tanpa ambiguity stok | audit contract delete dokumen barang, browser smoke delete material invoice, `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-207` | Audit menyeluruh bottleneck loading `Jurnal` / `Riwayat` / `Halaman Sampah` / `Catatan Absensi` / `Stok Barang` vs list `Aktivitas terbaru` di dashboard | `src/pages/Dashboard.jsx`, `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/pages/TransactionsRecycleBinPage.jsx`, `src/components/PayrollAttendanceHistory.jsx`, `src/pages/StockPage.jsx`, `src/store/useDashboardStore.js`, `src/lib/transactions-api.js`, `src/lib/records-api.js`, `src/components/ui/ActionCard.jsx`, `api/transactions.js`, `api/records.js`, `supabase/migrations/20260420090000_create_vw_workspace_transactions.sql`, `supabase/migrations/20260420113000_create_vw_history_transactions.sql`, `supabase/migrations/20260420150000_create_vw_recycle_bin_records.sql`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | - | Ada diagnosis repo + DB terukur yang menjelaskan kenapa dataset yang masih kecil tetap terasa lambat, perbedaan perilaku dashboard vs route khusus tertulis jelas, dan backlog solusi berikutnya terpecah menjadi task sempit yang bisa dieksekusi bertahap tanpa refactor liar | audit code path + `mcp__supabase__.execute_sql` count/explain + pembandingan dashboard/list | `validated` |
+| `UCW-208` | Pangkas fixed overhead auth/profile/team lookup pada endpoint read list inti | `api/transactions.js`, `api/records.js`, helper auth/context terkait, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-207` | Read endpoint `Jurnal`, `Riwayat`, `Halaman Sampah`, `Catatan Absensi`, dan `Stok Barang` tidak lagi membayar round-trip terpisah yang redundant untuk auth user -> profile -> team access pada setiap request; latency tetap turun tanpa mengubah contract akses workspace | audit code path + `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-209` | Seed `Jurnal` dari cache dashboard lalu revalidate page pertama di background | `src/store/useDashboardStore.js`, `src/pages/TransactionsPage.jsx`, `src/lib/transactions-api.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-207` | Navigasi `Dashboard -> Jurnal` langsung menampilkan seed row dari `workspaceTransactions` / snapshot yang sudah hangat, lalu page pertama direkonsiliasi di background; skeleton penuh tidak muncul lagi saat data yang ditampilkan sebenarnya sama | browser compare `Dashboard -> Jurnal`, `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-210` | Ringankan render list `Jurnal` / `Riwayat` / `Halaman Sampah` dengan shared action sheet | `src/components/ui/ActionCard.jsx`, `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/pages/TransactionsRecycleBinPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-207` | Initial render list tidak lagi membuat banyak `AppSheet` tersembunyi per-row sekaligus; aksi tetap tersedia lewat satu sheet shared untuk row aktif dan mount cost route turun jelas di mobile | browser render audit + `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-211` | Ubah `Catatan Absensi` menjadi summary-first dengan detail on-demand | `src/components/PayrollAttendanceHistory.jsx`, `src/lib/records-api.js`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-207` | `Catatan Absensi` tidak lagi hydrate seluruh record bulanan lalu menggandakan grouping `daily` + `worker` pada initial load; summary group ringan dimuat dulu dan detail record per group baru diambil saat sheet/detail dibuka | browser compare payroll load, `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-212` | Tunda fetch `stock-project-options` sampai sheet stock-out benar-benar dibuka | `src/pages/StockPage.jsx`, `src/lib/records-api.js`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-207` | `Stok Barang` first paint hanya menunggu overview stok; request opsi `Unit Kerja` baru jalan saat sheet manual stock-out dibuka sehingga route tidak lagi fan-out dua request pada mount untuk user yang belum tentu memakai action itu | browser compare stock first paint, `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-213` | Normalisasi sisa timestamp non-core agar tidak lagi jatuh ke jam `07.00` dari field date-only | `src/pages/TransactionsRecycleBinPage.jsx`, `src/pages/MasterRecycleBinPage.jsx`, `src/lib/report-pdf.js`, `api/notify.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-207` | Surfaces non-core yang masih memakai field date-only atau formatter datetime generik dipetakan tegas ke date label atau realtime timestamp yang benar, tanpa merusak semantics due date dan recycle bin | audit callsite + browser compare + `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-216` | Pulihkan CTA bayar untuk faktur material unpaid dari parent-child bill | `api/transactions.js`, `api/records.js`, `src/lib/records-api.js`, `src/lib/transaction-presentation.js`, `src/pages/TransactionsPage.jsx`, `src/pages/TransactionDetailPage.jsx` | `UCW-09`, `UCW-04` | `Faktur Material` yang masih `unpaid` menampilkan CTA `Bayar` di list/detail ketika child bill memang ada; status pengganti atau guard tetap jelas kalau parent belum punya bill child yang valid | audit data shape parent-child + `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-217` | Rapikan label filter ledger workspace agar sesuai UX kategori | `src/lib/transaction-presentation.js`, `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/pages/TransactionsRecycleBinPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-09` | Filter `Surat Jalan` tidak lagi tercampur dengan `Faktur Material`, label payroll menjadi `Gaji/Upah`, dan `Dana Masuk / Pinjaman` diringkas menjadi `Pinjaman` tanpa mengubah predicate filter | audit label/filter UX + `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-218` | Render shell `PaymentPage` lebih awal lalu hydrate field bertahap | `src/pages/PaymentPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-214` | Route pembayaran menampilkan shell UI lengkap segera, field dan tombol aksi aktif setelah data selesai ter-hydrate, dan layar blank / skeleton penuh tidak lagi mendominasi first paint | audit route payment + `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-219` | Smoke create berantai untuk loan, expense, faktur, income, dan surat jalan | `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-182`, `UCW-189`, `UCW-218` | Ada bukti smoke create berurutan untuk lima domain inti dengan auth bypass lokal: loan, expense, faktur material, pemasukan proyek, dan surat jalan; hasil create dan child record terkait tercatat jelas | audit result DB/API + catatan smoke | `validated` |
+| `UCW-220` | Perbaiki create `project income` yang gagal saat trigger fee bill `ON CONFLICT` | `supabase/migrations/20260417193000_add_project_income_fee_bills_and_loan_payment_status.sql`, `supabase/migrations/20260421190000_fix_project_income_fee_bill_unique_index.sql`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-219` | Insert `project_income` tidak lagi gagal `42P10` saat trigger fee bill berjalan; fee bill child untuk staff termin/fixed termin tetap tercipta dan smoke create income bisa lolos penuh | audit trigger fee bill + DB smoke create project income | `validated` |
+| `UCW-221` | Samakan urutan default `Jurnal` / `Riwayat` ke timestamp realtime surface terbaru | `api/transactions.js`, `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `supabase/migrations/20260421200000_update_workspace_transaction_sort_order.sql`, `supabase/migrations/20260421200500_realign_workspace_transaction_sort_order_to_surface_time.sql`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-209`, `UCW-210` | `Jurnal` dan `Riwayat` default sort kini mengikuti timestamp realtime saat record terakhir muncul/berubah di surface (`created_at` / `updated_at` / `bill_paid_at`), bukan lagi jatuh ke field date-only; item terbaru konsisten muncul paling atas di semua filter | audit view ordering + `npm.cmd run lint`, `npm.cmd run build`, query `vw_workspace_transactions` | `validated` |
+| `UCW-222` | Perbaiki shell `PaymentPage` agar tidak flash lalu blank saat hydrate detail | `src/pages/PaymentPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-218` | Route pembayaran selalu mempertahankan shell UI saat fetch detail berjalan; seed route state tetap dipakai sebagai fallback display, field/tombol aman di-guard sampai hydrate selesai, dan error refresh tidak lagi menjatuhkan layar ke blank state | audit render shell + `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-223` | Perbaiki restore `surat jalan` yang gagal `current_stock` null dan audit domain restore lain | `api/records.js`, `src/pages/TransactionsRecycleBinPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-181` | Restore dokumen material (`faktur` / `surat jalan`) tidak lagi membentuk delta stok `NaN` yang jatuh ke `current_stock = null`; audit code path juga memastikan domain restore lain tidak melewati helper stok yang sama sehingga tidak terkena akar masalah ini | audit helper restore + `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-224` | Pulihkan tap row `Catatan Absensi` agar membuka bottom sheet aksi, bukan blank screen | `src/components/PayrollAttendanceHistory.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-211`, `UCW-176` | Tap row di tab `Harian` dan `Pekerja` kembali membuka bottom sheet aksi yang stabil; state action tidak lagi bercampur dengan state loading/detail sehingga list `Catatan Absensi` tidak jatuh ke layar blank saat row ditekan | audit row interaction + `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-225` | Buat form edit absensi unbilled agar status bisa diubah dari editor record | `src/pages/EditRecordPage.jsx`, `src/store/useAttendanceStore.js`, `src/lib/records-api.js`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-224`, `UCW-94` | Record `attendance_records` dengan status `unbilled` bisa diedit dari editor record, status `full_day`/`half_day`/`overtime`/`absent` tersimpan aman bersama `total_pay` baru, dan record billed/linked tetap terkunci | `npm.cmd run lint`, `npm.cmd run build`, browser smoke edit attendance unbilled | `audit_required` |
+| `UCW-226` | Hardening shell `PaymentPage` dari row action dan ringkas form absensi harian untuk mobile | `src/pages/PaymentPage.jsx`, `src/components/AttendanceForm.jsx`, `src/pages/AttendancePage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-222`, `UCW-94` | Payment page dari row action workspace tetap mempertahankan shell saat hydrate gagal/null, sementara form absensi harian jadi lebih ringkas: KPI lebih padat, control strip lebih hemat ruang, tombol navigasi tambahan dihapus, dan toggle status worker tidak lagi melebar horizontal | `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-227` | Tambahkan custom fee lembur pada status absensi overtime | `src/components/AttendanceForm.jsx`, `src/pages/EditRecordPage.jsx`, `src/store/useAttendanceStore.js`, `src/lib/attendance-payroll.js`, `api/records.js`, `supabase/migrations/20260421193000_add_overtime_fee_to_attendance_records.sql`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-226`, `UCW-225` | Saat status `overtime` dipilih, form absensi menampilkan input fee lembur custom, total upah dihitung dari base wage + fee lembur, nilai fee tersimpan ke record, dan jalur sheet/edit tetap konsisten | `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-228` | Hapus field catatan opsional di row worker form absensi | `src/components/AttendanceForm.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-226`, `UCW-227` | Row worker di `AttendanceForm` tidak lagi menampilkan input catatan yang berlebihan; form tetap menyimpan status dan fee lembur, tetapi UX tiap worker jadi lebih ringkas dan fokus ke input yang dipakai | `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-229` | Redesign shell row worker absensi agar mengikuti row list global | `src/components/AttendanceForm.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-228` | Row worker memakai komposisi list global: icon di kiri, nama dan role di tengah, nominal dan badge status di kanan atas, lalu row menjadi trigger untuk membuka bottom sheet detail | `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-230` | Pindahkan aksi status absensi ke bottom sheet grid 2x2 dan collapse role switch | `src/components/AttendanceForm.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-229` | Klik row membuka bottom sheet aksi berisi grid 2x2 untuk status kehadiran, lalu section collapse untuk worker dengan lebih dari satu role/wage agar pergantian role tetap hemat ruang | `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-231` | Ringkas KPI absensi harian ke grid horizontal 3:1 | `src/components/AttendanceForm.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-230` | KPI atas berubah jadi grid horizontal 3:1: total upah kalkulasi mengambil 3 bagian ruang dan tombol gear pengaturan massal mengambil 1 bagian ruang; tile total upah membuka bottom sheet KPI berisi komposisi 1-2-2 agar detail tetap tersedia tanpa memakan ruang form utama | `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-232` | Ubah pengaturan massal absensi ke gear icon dan bottom sheet grid 2-2-1 | `src/components/AttendanceForm.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-231` | Tombol pengaturan semua menjadi icon gear pada bar KPI, lalu bottom sheet mass action memakai grid 2-2-1 dengan reset semua sebagai aksi terakhir yang paling jelas | `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-233` | Ringkas card Sheet Harian di atas KPI untuk mobile | `src/components/AttendanceForm.jsx`, `src/components/ui/MasterPickerField.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-228` | Section di atas KPI berubah jadi dua baris grid 1:1: tanggal + proyek satu baris, search + salin kemarin satu baris, supaya row worker lebih banyak terlihat saat form pertama kali dibuka di mobile | `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-234` | Pulihkan save lembur dan baca absensi saat `overtime_fee` belum ada di schema cache | `api/records.js`, `src/components/AttendanceForm.jsx`, `src/pages/EditRecordPage.jsx`, `supabase/migrations/20260421194500_refresh_attendance_records_overtime_fee_schema_cache.sql`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-227`, `UCW-233` | Save absensi status `overtime`, first open form absensi, edit attendance, dan history tetap aman; bila kolom `overtime_fee` tersedia maka dipakai normal, tetapi bila schema cache/live DB belum punya kolom itu query/update retry tanpa field tersebut dan fee tetap bisa diderivasi dari `total_pay` | `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-235` | Kunci satu worker satu record per hari/proyek dan rule lintas role | `src/components/AttendanceForm.jsx`, `src/pages/EditRecordPage.jsx`, `src/store/useAttendanceStore.js`, `src/lib/records-api.js`, `api/records.js`, `supabase/migrations/20260421210000_add_unique_attendance_worker_date_project.sql`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-234`, `UCW-227` | Sheet absensi pada tanggal/proyek yang sama tetap membuka record existing yang sudah terisi, worker tidak bisa dobel input pada kombinasi worker-hari-proyek yang sama, dan jika satu worker sudah `half_day` pada proyek yang sama maka role lain di proyek yang sama hanya boleh melanjutkan dengan `half_day` atau `overtime`, sementara lintas proyek tetap boleh sesuai source of truth | `npm.cmd run lint`, `npm.cmd run build`, smoke attendance same-day/same-project cross-role | `validated` |
+| `UCW-236` | Stabilkan detail worker di `Catatan Absensi` supaya record/billed/unbilled tidak nol | `src/components/PayrollAttendanceHistory.jsx`, `src/lib/records-api.js`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-224` | Detail tab `Pekerja` mengisi `Record`, `Billed`, dan `Unbilled` dari hasil hydrate yang sama dengan summary atau fallback cache saat fetch detail kosong; kartu detail tidak lagi jatuh ke `0/0/0` untuk worker yang punya riwayat | `npm.cmd run lint`, `npm.cmd run build`, smoke detail worker history | `validated` |
+| `UCW-237` | Redesign form edit absensi agar minimalis dan sejajar create sheet | `src/pages/EditRecordPage.jsx`, `src/components/AttendanceForm.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-225`, `UCW-226` | Form edit absensi mengikuti pattern create: shell sectioned yang ringkas, info penting di atas, kontrol status/edit seperlunya, tanpa blok ringkasan berlapis yang tidak dipakai untuk operasi edit harian | `npm.cmd run lint`, `npm.cmd run build`, browser smoke edit attendance | `validated` |
+| `UCW-238` | Bangun baseline Playwright smoke suite untuk core CRUD/payment/report | `playwright.config.*`, `tests/e2e/**`, `src/lib/dev-auth-bypass.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-214`, `UCW-235`, `UCW-237` | Ada suite E2E Playwright yang stabil untuk auth bypass, create/update/delete/payment/restore, rekap/report, dan Telegram WebApp shell; suite bisa jalan di dev server lokal dengan mobile emulation dan menghasilkan smoke gate yang bisa diulang | `npx playwright test`, `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-239` | Pulihkan tree `bill` saat restore dan hitung ulang settlement summary parent | `api/transactions.js`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-200`, `UCW-205` | Restore `bill` dari recycle bin menghidupkan kembali child payment yang sebelumnya ikut di-soft-delete, lalu parent bill dikalkulasi ulang server-side agar `paid_amount`, `status`, dan `paid_at` kembali sinkron dengan histori payment | `npm.cmd run lint`, `npm.cmd run build`, audit code path restore bill/payment | `validated` |
+| `UCW-240` | Smoke restore Playwright untuk tree `bill` dan `bill_payment` | `tests/e2e/restore.spec.js` | `UCW-239` | Smoke Playwright memverifikasi restore tree `bill` dan restore leaf `bill_payment` berjalan konsisten di browser lokal tanpa mengubah runtime code | `npx playwright test tests/e2e/restore.spec.js --project=chromium` | `validated` |
+| `UCW-242` | Standarkan entrypoint `PaymentPage` ke route standalone fullscreen | `src/lib/transaction-presentation.js`, `src/pages/TransactionsPage.jsx`, `src/pages/TransactionDetailPage.jsx`, `src/pages/PaymentsPage.jsx`, `src/pages/PaymentPage.jsx` | `UCW-214`, `UCW-222`, `UCW-226` | Launch point pembayaran dari row Jurnal/detail dan halaman Pembayaran memakai route standalone `/payment/:id` / `/loan-payment/:id` agar shell `PaymentPage` tampil fullscreen konsisten seperti form create, sambil menjaga deep link legacy `/pembayaran/*` tetap kompatibel | `npm.cmd run lint`, `npm run build`, manual browser compare row action vs standalone route | `audit_required` |
+| `UCW-243` | Pusatkan recap salary bill hanya di tab `Pekerja` | `src/components/PayrollAttendanceHistory.jsx`, `src/pages/PayrollPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-94`, `UCW-242` | Aksi `Rekap` hanya muncul di tab `Pekerja`; tab `Harian` tetap untuk inspeksi harian dan detail, sehingga operator tidak lagi masuk jalur recap yang ambigu dan seluruh billing worker terpusat di satu modal aksi yang konsisten | `npm.cmd run lint`, `npm run build`, manual browser smoke recap worker tab vs daily tab | `validated` |
+| `UCW-244` | Tambahkan context line minimal di row list workspace inti | `src/lib/transaction-presentation.js`, `src/components/ui/ActionCard.jsx`, `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/pages/TransactionsRecycleBinPage.jsx` | `UCW-176`, `UCW-242` | List `Jurnal`, `Riwayat`, dan `Halaman Sampah` menampilkan satu baris konteks minimal di bawah tanggal untuk worker/supplier/kreditur/project sesuai jenis transaksi, memakai field snapshot yang sudah ada tanpa fetch tambahan dan tanpa memperlambat first paint | `npm.cmd run lint`, `npm run build`, manual browser compare row density vs baseline | `validated` |
+| `UCW-245` | Kelompokkan salary bill per worker di daftar tagihan | `src/pages/BillsPage.jsx`, `src/pages/PaymentsPage.jsx`, `src/lib/transaction-presentation.js`, `src/lib/records-api.js` | `UCW-94`, `UCW-243` | Tagihan gaji ditampilkan sebagai satu grup per worker agar rekap yang dipisah-pisah tetap mudah dibayar per worker, sementara detail bill per periode tetap tersedia di dalam grup dan tidak menambah fetch per item | `npm.cmd run lint`, `npm run build`, manual browser smoke group worker bill list | `validated` |
+| `UCW-246` | Pisahkan filter jurnal/riwayat untuk dokumen non-finansial dan termin bill-backed | `src/lib/transaction-presentation.js`, `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `api/transactions.js` | `UCW-23`, `UCW-35`, `UCW-217` | `Riwayat` tidak lagi menampilkan filter `Surat Jalan`, sedangkan `Termin Proyek` di jurnal hanya tampil bila benar-benar punya bill/fee bill yang melandasinya; tujuan task ini adalah menyelaraskan filter dengan makna bisnis surface, bukan sekadar label | `npm.cmd run lint`, `npm run build`, manual browser compare journal/history filters | `validated` |
+| `UCW-247` | Sembunyikan bill paid dari Jurnal tapi pertahankan di Riwayat | `src/lib/transaction-presentation.js`, `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `api/transactions.js` | `UCW-246`, `UCW-217` | Row `bill` yang sudah `paid` tetap muncul di `Riwayat` sebagai histori finansial, tetapi tidak lagi tampil di `Jurnal` yang dipakai sebagai surface aktif; ini menjaga jurnal tetap fokus ke item yang masih relevan untuk operasi harian | `npm.cmd run lint`, `npm run build`, manual browser compare paid bill visibility in journal vs history | `validated` |
+| `UCW-248` | Pisahkan detail teknis owner-only ke route terpisah | `src/pages/TransactionDetailPage.jsx`, `src/pages/EditRecordPage.jsx`, `src/pages/PaymentPage.jsx`, `src/components/layouts/FormLayout.jsx`, `src/components/layouts/FormHeader.jsx`, `src/components/ui/AppPrimitives.jsx`, `src/App.jsx` | `UCW-242`, `UCW-247` | Detail teknis seperti ID, status mentah, tanggal audit, dan metadata operasional dipindah ke route owner-only terpisah agar page utama tetap fokus ke konteks bisnis dan tidak memaksa scroll di atas fold | `npm.cmd run lint`, `npm run build`, manual browser smoke owner-only technical routes | `validated` |
+| `UCW-249` | Rapikan owner-only technical route agar tidak duplikatif | `src/pages/TransactionDetailPage.jsx`, `src/pages/EditRecordPage.jsx`, `src/pages/PaymentPage.jsx`, `src/App.jsx`, `src/components/layouts/FormLayout.jsx`, `src/components/ui/AppPrimitives.jsx` | `UCW-248`, `UCW-247` | Route owner-only teknis hanya menampilkan info teknis murni seperti status siap edit atau tidak, tipe, ID, dan sumber/metadata teknis; tombol ke route ini hanya terlihat untuk `Owner`, sementara page utama tetap bebas dari panel teknis yang duplikatif | `npm.cmd run lint`, `npm run build`, manual browser compare main page vs technical route | `validated` |
+| `UCW-250` | Tampilkan form payment dulu dan turunkan histori bill dari viewport awal | `src/pages/PaymentPage.jsx`, `src/pages/TransactionDetailPage.jsx`, `src/pages/EditRecordPage.jsx`, `src/components/layouts/FormLayout.jsx`, `src/components/ui/AppPrimitives.jsx`, `src/App.jsx` | `UCW-214`, `UCW-248`, `UCW-249` | Workspace `PaymentPage` harus membuka field pembayaran sebagai fokus awal, sementara histori pembayaran bill/pinjaman dipindah ke area sekunder atau route detail agar pengguna tidak perlu scroll dulu untuk mencapai field utama | `npm.cmd run lint`, `npm run build`, manual browser compare first-fold payment form vs history placement | `validated` |
+| `UCW-251` | Ringkas detail page biasa dan pindahkan tanggal ke card bawah header | `src/pages/TransactionDetailPage.jsx`, `src/pages/EditRecordPage.jsx`, `src/pages/PaymentPage.jsx`, `src/components/layouts/FormLayout.jsx`, `src/components/ui/AppPrimitives.jsx` | `UCW-249`, `UCW-250` | Page detail non-teknis tidak lagi menampilkan metadata berlebih seperti `ID`, `Sumber`, dan `Jenis` di semua role; field itu dihapus dari detail biasa, sedangkan tanggal dipindah ke card yang berada tepat di bawah header agar first fold tetap fokus ke konteks bisnis, bukan field teknis yang sudah dipindah ke route owner-only | `npm.cmd run lint`, `npm run build`, manual browser compare detail page first fold vs technical route | `validated` |
+| `UCW-252` | Fokuskan histori pembayaran dan lampiran ke tab detail | `src/pages/TransactionDetailPage.jsx`, `src/components/ui/AppPrimitives.jsx`, `src/App.jsx` | `UCW-249`, `UCW-250`, `UCW-251` | Detail page menjadi surface utama untuk tab kondisional `Info / Riwayat / Lampiran`; tab `Riwayat` tampil hanya jika ada payment history dan memuat full list dengan tombol aksi icon-only sesuai role, tab `Lampiran` tampil hanya jika ada attachment dan menampilkan preview plus aksi icon-only `lihat / ganti / hapus` untuk role yang berwenang, sementara `Viewer` dan `Payroll` read-only | `npm.cmd run lint`, `npm run build`, manual browser compare detail tabs vs baseline | `validated` |
+| `UCW-253` | Tambahkan jalur akses tagihan dari card KPI dashboard | `src/pages/Dashboard.jsx`, `src/pages/BillsPage.jsx`, `src/App.jsx`, `src/components/ui/AppPrimitives.jsx` | `UCW-245`, `UCW-252` | Card KPI `Tagihan Pending` di `Dashboard` harus bisa membuka halaman `Tagihan` yang sudah ada, supaya surface tagihan punya jalur akses jelas dari overview tanpa shortcut tersembunyi di tempat lain | `npm.cmd run lint`, `npm run build`, manual browser compare KPI card vs tagihan page | `validated` |
+| `UCW-215` | Pertahankan nominal saldo kas full, tapi ringkas laba bersih dan pinjaman aktif di KPI Dashboard | `src/pages/Dashboard.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-213` | KPI `Saldo Kas` tetap full `Rp`, sementara `Laba Bersih` dan `Pinjaman Aktif` kembali memakai format singkat agar dua kartu di grid horizontal tetap lebih rapat dan mudah dibaca | audit UI + `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-214` | Seed pembayaran dari navigation state dan tunda mount form edit sampai detail hydrated | `src/pages/PaymentPage.jsx`, `src/pages/EditRecordPage.jsx`, `src/pages/BillsPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-92`, `UCW-93`, `UCW-94` | Klik `Bayar` di list data tidak lagi mendarat ke layar kosong karena `PaymentPage` memakai seed route state sementara fetch detail berjalan; form edit juga tidak lagi menampilkan field kosong karena komponen baru mount setelah detail siap | audit route + `npm.cmd run lint`, `npm.cmd run build` | `validated` |
+| `UCW-184` | Rancang contract dan layout `GlobalToast` reusable untuk Telegram mini web mobile | `src/App.jsx`, `src/components/ui/GlobalToast.jsx`, `src/components/ui/AppPrimitives.jsx`, `src/components/layouts/MainLayout.jsx`, `src/store/useToastStore.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-183` | Ada contract toast global yang mobile-first, token-based, safe-area aware, mendukung `success` / `info` / `warning` / `error` / `loading`, dan bisa dipakai semua surface tanpa interpretasi ganda | audit contract + `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-185` | Migrasikan notifikasi in-app dan fallback transient ke `GlobalToast` global | `src/pages/PayrollPage.jsx`, `src/pages/PaymentPage.jsx`, `src/store/useIncomeStore.js`, `src/store/usePaymentStore.js`, `src/store/useTransactionStore.js`, `src/components/MaterialInvoiceForm.jsx`, `src/components/LoanForm.jsx`, `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/components/PayrollAttendanceHistory.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-184` | Notif success/error/partial result dan fallback transient memakai satu pintu toast global, sementara fallback yang persisten tetap stay-on-screen jika memang harus | migrasi callsite + `npm.cmd run lint`, `npm run build` | `validated` |
+| `UCW-186` | Fix bottom nav agar tidak terdorong keyboard saat filter `Jurnal` fokus di mobile | `src/components/ui/BottomNav.jsx`, `src/components/layouts/MainLayout.jsx`, `src/pages/TransactionsPage.jsx`, `src/index.css`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-184`, `UCW-185` | Saat field filter aktif di mobile, bottom nav tetap docked atau disembunyikan sementara tanpa naik ke tengah viewport; input filter tetap nyaman dan tidak membuat layout terasa pengap | audit viewport behavior + `npm.cmd run lint`, `npm run build`, manual mobile keyboard check | `validated` |
+| `UCW-173` | Ringankan first paint list `Jurnal` / `Riwayat` / `Halaman Sampah` / `Catatan Absensi` dengan detail on-demand | `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/pages/TransactionsRecycleBinPage.jsx`, `src/components/PayrollAttendanceHistory.jsx`, `src/pages/TransactionDetailPage.jsx`, `src/pages/DeletedTransactionDetailPage.jsx`, `src/lib/transactions-api.js`, `src/lib/records-api.js`, `api/transactions.js`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-89`, `UCW-90`, `UCW-171` | List surface hanya memuat snapshot/minimal field yang benar-benar dipakai untuk title, tanggal, amount, dan filter; label/badge/detail metadata yang berat dipindah ke detail route atau sheet yang dimuat saat user membuka item, sehingga payload awal lebih ringan dan detail tidak dihydrate sebelum dibutuhkan | `rg`, audit query payload, `npm.cmd run lint`, `npm run build`, manual timing compare | `blocked` |
+| `UCW-174` | Rekonsiliasi `docs/freeze/*` dengan backlog dan release pattern akhir agar tidak stale atau bertabrakan | `docs/freeze/*`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md` | `UCW-90` | Wording freeze, plan, dan progress log selaras dengan runtime terbaru; `Payment Receipt PDF` dan `pdf_settings` dipisah tegas; `Referensi` / `Master`, `Riwayat` / `Recycle Bin`, `Catatan Absensi`, `Tagihan Upah`, `Dokumen Barang`, dan `Stok Barang` dipetakan konsisten; urutan release akhir dan blocker tersisa tertulis eksplisit; dan perbedaan authority freeze vs backlog operasional dipertegas tanpa menyentuh runtime | audit dokumen + `rg` konsistensi + update plan/progress | `validated` |
+
+Catatan split untuk restore bill:
+
+- `UCW-239` tetap menjadi slice tree-restore dan berstatus `validated`.
+- `UCW-240` tetap menjadi slice settlement-recalc dan berstatus `planned`.
+- Urutan review akhir: Agent 1 memegang audit/implementasi tree restore, Agent 2 memegang audit/implementasi settlement recalc, lalu Agent 3 menutup sinkronisasi plan/progress.
+
+**Brief implementasi siap eksekusi**
+
+- Tujuan:
+  - audit seluruh core feature backend dan frontend terhadap `docs/freeze/*`, lalu turunkan hasil audit ke urutan kerja release yang konkret
+- Scope audit backend:
+  - `api/auth.js`
+  - `api/records.js`
+  - `api/transactions.js`
+  - `supabase/migrations/*`
+  - jalur write/read yang masih direct dari store pendukung bila berdampak ke domain inti
+- Scope audit frontend:
+  - `src/App.jsx`
+  - `src/pages/*`
+  - `src/store/*`
+  - `src/components/*`
+  - layout/shell route yang memengaruhi core release
+- Forbidden files:
+  - `README.md`
+  - `package.json`
+  - `package-lock.json`
+  - config build
+  - file runtime di luar area audit yang tidak relevan dengan core release
+- Domain yang wajib dipetakan:
+  - `Dashboard`
+  - `Jurnal` / `TransactionsPage`
+  - `Pembayaran`
+  - `Pemasukan Proyek`
+  - `Pengeluaran`
+  - `Faktur Barang` / `Surat Jalan Barang`
+  - `Dana Masuk / Pinjaman`
+  - `Halaman Absensi` / `Catatan Absensi`
+  - `Tagihan Upah`
+  - `Referensi` / `Master`
+  - `Attachment`
+  - `Reports`
+  - `Stok Barang`
+- Output wajib:
+  - gap matrix per domain: freeze contract, runtime repo reality, blocker, dan follow-up yang dibutuhkan
+  - daftar micro-task berikutnya yang diurutkan dari blocker paling kritis
+  - boundary yang harus tetap dianggap transitional exception
+  - boundary legacy yang tidak boleh dipakai untuk task baru
+- Validasi minimum:
+  - `rg -n "submitTransaction|TransactionForm|vw_transaction_summary|loadOperationalSummary|/stock|StockPage|usePaymentStore|team_members|invite_tokens|fn_generate_salary_bill|file_assets|hrd_documents|React.lazy|lazy\\(" docs/freeze docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md src api`
+  - audit konsistensi antara freeze authority, runtime repo, dan backlog plan/progress
+- Guard wajib:
+  - jangan ubah runtime code saat audit planning ini berjalan
+  - jangan memasukkan polish atau refactor yang tidak langsung membantu gap matrix release
+  - jangan menjadikan transitional boundary sebagai pola baru domain inti
+
+**Audit sweep detail**
+
+- `Dashboard`: cek `src/store/useDashboardStore.js` terhadap `api/transactions.js` untuk memastikan summary aktif benar-benar server-owned.
+- `Jurnal`: cek `src/pages/TransactionsPage.jsx`, `src/pages/TransactionDetailPage.jsx`, dan `src/lib/transactions-api.js` untuk memastikan active ledger, history, dan recycle boundary tidak bercampur.
+- `Pembayaran`: cek `src/store/usePaymentStore.js`, `src/pages/PaymentPage.jsx`, `src/lib/records-api.js`, dan `src/lib/transactions-api.js` untuk memastikan create/update/delete payment tetap API-owned.
+- `Attendance`: cek `src/store/useAttendanceStore.js`, `src/components/AttendanceForm.jsx`, `src/components/PayrollManager.jsx`, dan `api/records.js` untuk memastikan billed/paid rules dan recap flow tidak drift.
+- `Master`: cek `src/store/useMasterStore.js`, `src/pages/MasterPage.jsx`, dan `src/pages/MasterRecycleBinPage.jsx` untuk memastikan direct CRUD master tetap dibatasi sebagai transitional boundary.
+- `Attachment`: cek `src/store/useFileStore.js`, `src/store/useHrStore.js`, dan `src/components/ExpenseAttachmentSection.jsx` untuk memastikan storage/file asset boundary tidak dianggap pola inti.
+- `Reports`: cek `src/store/useReportStore.js`, `src/components/ProjectReport.jsx`, dan `api/records.js` untuk memastikan report summary final dan PDF delivery bergerak ke server truth yang benar.
+- `auth/workspace`: cek `src/store/useTeamStore.js` dan `api/auth.js` untuk memastikan direct write membership tetap exception runtime, bukan baseline core release.
+
+**Audit gap matrix awal**
+
+| Domain | Freeze contract aktif | Repo reality saat ini | Status audit | Next blocker / follow-up |
+| --- | --- | --- | --- | --- |
+| `Dashboard` | summary aktif dari `/api/transactions?view=summary` via `loadOperationalSummary()` | runtime sudah mengikuti helper server; `vw_transaction_summary` hanya legacy compatibility | `aligned` | tidak ada blocker baru di summary boundary |
+| `auth/workspace` | bootstrap dan access changes tetap sensitif, direct write lama bukan pola baru | `api/auth.js` sudah jadi boundary bootstrap; boundary `Tim` sekarang sudah dipusatkan ke contract eksplisit dan direct-write transitional diperlakukan sebagai exception runtime | `transitional` | core release tidak boleh menganggap direct-write `Tim` sebagai pola baru; boundary ini tetap exception runtime yang terisolasi |
+| `Jurnal` / `TransactionsPage` | ledger aktif dibaca server-side, bukan summary dashboard | route dan store ledger aktif sudah selaras dengan surface `Riwayat` / `Recycle Bin` yang dipisah | `aligned` | tidak ada blocker core baru di ledger boundary |
+| `Pembayaran` | API-owned boundary untuk create/update/delete/restore payment | `usePaymentStore` sudah wrapper API; legacy modal/host inert masih ada sebagai surface historis | `aligned` | jangan reintroduce direct Supabase insert di store payment |
+| `Stok Barang` | supporting/non-core dengan manual stock-out terbatas | route `/stock` aktif, manual stock-out sudah hidup, dan boundary ini tetap supporting aktif | `aligned` | jangan menaikkan stock-out menjadi adjustment bebas atau core write path baru |
+| `attendance` | absensi harian, history, recap, dan salary bill tetap terpisah sesuai freeze | `useAttendanceStore` sudah memakai API read/write boundary dan billed/paid guard, sehingga recap flow berada di contract freeze yang dipetakan | `aligned` | tidak ada blocker core baru di attendance boundary |
+| `master` / `referensi` | master data tetap transisional dengan guard usage dan delete/restore | boundary `Master` sudah dipusatkan ke contract eksplisit; direct CRUD master tetap runtime transitional exception, tetapi `Master` tetap core-release fondasional | `transitional` | jangan jadikan direct CRUD master sebagai pola inti release; release berikutnya hanya boleh menutup exception per entitas yang memang masih tersisa |
+| `attachment` | upload physical boleh, relation write lewat `/api/records` | `useFileStore` masih memegang upload storage dan `file_assets` langsung; `useHrStore` ikut bergantung pada boundary ini | `transitional` | pastikan role matrix, cleanup orphan, dan restore/delete semantics ditutup sebelum core release final |
+| `HRD` / `File` / payroll generate | ditandai freeze sebagai runtime exception / transitional boundary | masih ada direct Supabase write/RPC pada store pendukung dan `PayrollManager` | `transitional` | jangan diperlakukan sebagai pola baru domain inti; dokumentasikan sebagai exception, bukan target standardisasi release inti |
+| `Reports` | report final membaca server truth, PDF bisnis user-facing sudah tersedia dari app | summary report proyek dan PDF bisnis keduanya sudah membaca server truth yang sama | `aligned` | tidak ada blocker core baru di report boundary |
+
+Hasil audit ini dipakai sebagai urutan kerja implementasi berikutnya: tidak ada blocker core yang tersisa, dan sisa work hanya boundary transitional exception atau polish non-blocking yang tidak menutup release inti.
+
+**Urutan micro-task release yang direkomendasikan**
+
+1. `UCW-85` — kunci boundary `delete / restore / permanent-delete` lintas domain inti.
+2. `UCW-86` — finalkan attachment platform, cleanup orphan, dan role matrix.
+3. `UCW-87` — tutup laporan server truth final untuk `Unit Kerja`.
+4. `UCW-88` — deliver PDF bisnis user-facing dan `pdf_settings`.
+5. `UCW-89` — hardening mobile-first dan scalable data untuk ledger, report, dan picker master.
+6. `UCW-90` — audit final release readiness end-to-end setelah blocker di atas tertutup; explicit legacy gates tetap dikecualikan dari blocker count kecuali freeze berubah.
 
 ## Audit Gate Per Task
 
@@ -1906,3 +2083,463 @@ Saat ada brief baru yang masih terkait stream ini, update dokumen dengan format:
 **Perubahan dependency**
 
 - Tidak ada dependency baru; hanya sinkronisasi istilah legacy pada dokumen.
+
+### `2026-04-20` - Rekonsiliasi freeze package dengan runtime authority terkini
+
+**Ringkasan brief**
+
+1. Audit `docs/freeze/*` terhadap runtime aktual untuk dashboard summary, payment boundary, `transactions` legacy, dan `Stok Barang`.
+2. Sinkronkan wording freeze hanya pada poin yang punya bukti repo: `submitTransaction`, `usePaymentStore`, `loadOperationalSummary`, route `/stock`, dan boundary direct Supabase exception.
+3. Perubahan harus docs-only; jangan menyentuh runtime code, API, schema, atau config build.
+
+**Dampak ke backlog existing**
+
+- Freeze package kembali aman dipakai sebagai authority utama untuk brief implementasi berikutnya.
+- Drift antara dokumen freeze dan runtime aktif berkurang pada area summary, pembayaran, stok, dan legacy compatibility.
+- Boundary transitional yang masih langsung ke Supabase tercatat jelas sehingga tidak disalahartikan sebagai pola baru domain inti.
+
+**Task baru atau task revisi**
+
+- Task baru: `UCW-167`
+
+**Perubahan dependency**
+
+- Tidak ada dependency baru; task ini hanya merekonsiliasi authority docs dengan runtime repo aktual.
+
+### `2026-04-20` - Optimasi frontend route-level code splitting di `src/App.jsx`
+
+**Ringkasan brief**
+
+1. Ganti static import seluruh page di `src/App.jsx` menjadi route-level code splitting (`React.lazy()` / dynamic import) dalam satu task frontend-only.
+2. Pakai fallback global untuk route di dalam `MainLayout` dan fallback terpisah hanya untuk route standalone, dengan desain yang tetap sinkron terhadap shell/app surface repo.
+3. Task ini tidak boleh bercampur dengan refactor routing besar, perubahan domain contract, atau cleanup runtime lain di luar optimasi loading boundary.
+
+**Dampak ke backlog existing**
+
+- Debt bundling frontend di `src/App.jsx` sekarang ditutup langsung di task ini, bukan lagi hanya dicatat sebagai catatan samping.
+- Seluruh surface route page di `src/App.jsx` dievaluasi dalam satu task frontend-only agar keputusan chunk boundary konsisten.
+- Desain fallback auth, layout route, dan standalone route sekarang mengikuti surface visual yang sama sehingga tidak ada loading state yang terasa asing terhadap UI aktif.
+- Freeze package tetap menjadi authority produk/kontrak, sementara optimasi bundle diperlakukan sebagai task teknis terukur.
+
+**Task baru atau task revisi**
+
+- Task baru: `UCW-168`
+
+**Perubahan dependency**
+
+- Mengacu pada baseline runtime di `docs/freeze/02-prd-master.md` dan `docs/freeze/05-ai-execution-guardrails.md` yang sudah mencatat static import page dan warning chunk Vite.
+- Tidak membuka dependency baru; implementasi mengevaluasi seluruh route page aktif di `src/App.jsx` dalam satu task frontend-only, lalu menjalankan validasi bundling/lint yang relevan.
+
+**Status task**
+
+- `validated`
+
+**Brief implementasi siap eksekusi**
+
+- Tujuan:
+  - kurangi debt bundling di `src/App.jsx` dengan route-level code splitting yang mengevaluasi seluruh page route aktif dalam satu task frontend-only
+- Allowed files:
+  - `src/App.jsx`
+  - page/helper loading yang benar-benar dibutuhkan untuk boundary lazy route, bila tanpa itu fallback loading tidak konsisten
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Forbidden files:
+  - `api/**`
+  - `supabase/**`
+  - store domain, schema, kontrak API, `package.json`, `package-lock.json`, config build
+- Route/page inventory yang harus dievaluasi bersama:
+  - `Dashboard`, `PayrollPage`, `TransactionsPage`, `HistoryPage`, `TransactionsRecycleBinPage`, `DeletedTransactionDetailPage`, `TransactionDetailPage`
+  - `BillsPage`, `PaymentPage`, `PaymentsPage`, `ProjectsPage`, `StockPage`, `MasterPage`, `MasterRecycleBinPage`, `MorePage`
+  - `AttendancePage`, `HrdPage`, `BeneficiariesPage`, `TeamInvitePage`, `MaterialInvoicePage`, `EditRecordPage`, `MasterFormPage`
+- Guard wajib:
+  - jangan ubah path route, alias `Navigate`, bootstrap auth, `MainLayout`, atau capability gate route
+  - jangan campur cleanup logic page, refactor domain, atau perubahan UX di luar fallback loading yang dibutuhkan oleh lazy route
+  - `PaymentPage` yang dipakai lintas beberapa route harus diperlakukan hati-hati agar split boundary tidak menggandakan perilaku route bill/loan
+- Validasi wajib:
+  - `npm run lint`
+  - `npm run build`
+  - audit hasil build apakah warning chunk Vite berubah, mengecil, atau tetap ada
+
+**Hasil implementasi**
+
+- `src/App.jsx` sekarang melazy-load seluruh page route aktif melalui `React.lazy()`
+- `src/components/layouts/MainLayout.jsx` sekarang memegang `Suspense` global untuk route di dalam shell layout
+- fallback auth/loading, fallback route di dalam layout, dan fallback route standalone diselaraskan ke visual `app-page-surface` yang sama
+- build produksi sesudah perubahan tidak lagi mengeluarkan warning chunk Vite `> 500 kB`; chunk utama terpecah menjadi beberapa asset route-level yang lebih kecil
+
+### `2026-04-21` - Brief Chrome smoke audit dengan bypass auth lokal sementara
+
+**Ringkasan brief**
+
+1. Browser test lokal harus bisa membuka app tanpa container Telegram, tetapi tetap memakai session Supabase nyata agar flow CRUD/payment diuji pada boundary runtime sebenarnya.
+2. Bypass auth harus eksplisit, hanya untuk local/dev smoke testing, dan default ke owner Telegram env agar workspace aktif tetap konsisten.
+3. Setelah bypass aktif, lakukan audit Chrome untuk `Dashboard`, `Jurnal`, detail/edit record, `Pembayaran` bill/loan, `Dokumen Barang`, `Halaman Sampah`, dan restore; catat error nyata lalu turunkan follow-up task spesifik.
+
+**Dampak ke backlog existing**
+
+- Menutup blocker verifikasi manual yang sebelumnya membuat beberapa task berstatus `blocked` hanya karena auth Telegram tidak bisa dibootstrap dari browser lokal.
+- Memberi jalur audit runtime yang bisa diulang untuk core CRUD/payment tanpa mengubah source of truth domain.
+- Temuan browser berikutnya harus diperlakukan sebagai backlog release baru yang berbasis bukti, bukan asumsi.
+
+**Task baru atau task revisi**
+
+- Task baru: `UCW-182`
+- Task baru: `UCW-183`
+
+**Perubahan dependency**
+
+- `UCW-183` bergantung pada `UCW-182`.
+
+### `2026-04-21` - Hasil smoke audit Chrome core CRUD/payment pasca bypass lokal
+
+**Ringkasan brief**
+
+1. Bypass lokal `?devAuthBypass=1` berhasil membuka app dari browser biasa dan membuat session Supabase nyata lewat `/api/auth`.
+2. Core payment write path untuk bill dan loan terbukti hidup: load detail, create partial payment, kirim `/api/notify`, dan archive payment berjalan.
+3. Dua blocker release muncul dari audit browser nyata: read model `Jurnal` / `Riwayat` gagal 500 `User not allowed`, dan restore `bill_payment` mengembalikan 200 tetapi row tetap berada di recycle bin.
+
+**Dampak ke backlog existing**
+
+- `UCW-171`, `UCW-172`, `UCW-173`, dan `UCW-175` tidak lagi terblokir oleh auth Telegram lokal; browser smoke sekarang bisa diulang pada localhost.
+- Core write path payment sudah punya bukti runtime pass, jadi backlog berikutnya harus fokus ke read model transaksi dan restore `bill_payment`.
+- Audit menunjukkan `Halaman Sampah`, edit `expense`, edit material invoice, dan archive payment masih hidup, sehingga follow-up tidak perlu membuka refactor luas di area itu.
+
+**Task baru atau task revisi**
+
+- Task baru: `UCW-187`
+- Task baru: `UCW-188`
+
+**Perubahan dependency**
+
+- `UCW-187` dan `UCW-188` bergantung pada hasil audit `UCW-183`.
+
+### `2026-04-21` - Hasil smoke audit Chrome menyeluruh untuk create/edit/delete/restore/payroll/material flow
+
+**Ringkasan brief**
+
+1. Verifikasi database menunjukkan user bypass lokal dari `OWNER_TELEGRAM_ID` sudah punya membership aktif di workspace default, jadi denial UI yang terlihat bukan disebabkan role seed yang hilang.
+2. Smoke browser lanjutan membuktikan create payment `bill` dan `loan` tetap hidup, archive payment `bill` hidup, edit material invoice route hidup, tetapi sejumlah flow inti lain masih terblokir pada route create, attendance sheet, create `surat_jalan`, dan delete material invoice.
+3. Follow-up berikutnya harus mempertahankan task existing `UCW-187` dan `UCW-188`, lalu menutup empat blocker baru dengan task sempit yang langsung menargetkan boundary rusak yang terbukti di browser.
+
+**Dampak ke backlog existing**
+
+- `UCW-187` dan `UCW-188` tetap relevan karena `User not allowed` dan restore `bill_payment` gagal masih terulang pada smoke terbaru.
+- Audit ini menambah blocker baru yang belum tercakup: route create berbasis `EditRecordPage`, hydrate `Absensi Harian`, create `surat_jalan`, dan soft delete material invoice.
+- Flow yang sudah lolos browser terbaru tidak perlu dibuka ulang di backlog: create payment `bill`, create payment `loan`, archive payment `bill`, detail payroll harian, dan edit route material invoice.
+
+**Task baru atau task revisi**
+
+- Task baru: `UCW-189`
+- Task baru: `UCW-190`
+- Task baru: `UCW-191`
+- Task baru: `UCW-192`
+- Task baru: `UCW-193`
+
+**Perubahan dependency**
+
+- `UCW-190`, `UCW-191`, `UCW-192`, dan `UCW-193` bergantung pada hasil audit `UCW-189`.
+- `UCW-192` dan `UCW-193` juga mengandalkan baseline material/stock dari `UCW-177`.
+
+### `2026-04-21` - Hasil smoke test CRUD satu aksi per task dengan bypass lokal
+
+**Ringkasan brief**
+
+1. `UCW-202`, `UCW-203`, `UCW-205`, dan `UCW-206` sudah tervalidasi lewat browser smoke + audit DB/UI: notify create `loan` kembali `200`, guard edit `expense` terkunci sebelum submit, hard delete `loan_payment` benar-benar menghapus row, dan delete `material invoice` yang stoknya sudah terpakai kini diblok lebih awal di UI.
+2. `UCW-204` tetap tercatat sebagai blocker audit historis, tetapi ambiguity lifecycle-nya sudah ditutup oleh `UCW-206`: contract final yang dipakai sekarang adalah delete diblok lebih awal bila rollback stok akan melanggar stok final.
+3. Backlog stream ini kembali bersih dari empat blocker smoke awal; follow-up berikutnya bisa kembali ke brief baru tanpa membuka ulang error mentah `P0001`/`200 tapi tidak terhapus`.
+
+**Dampak ke backlog existing**
+
+- `UCW-202`, `UCW-203`, `UCW-205`, dan `UCW-206` tertutup sebagai implementasi follow-up yang konsisten dengan smoke browser dan source-of-truth contract.
+- `UCW-204` tidak lagi perlu dibuka sebagai bug runtime terpisah, karena perilaku finalnya kini dipindahkan ke rule delete yang eksplisit di freeze, API, dan UI.
+- `UCW-188` tetap sehat untuk restore `bill_payment`, dan `UCW-201` tetap tertutup sesudah path delete leaf memakai service-role client murni untuk bypass RLS delete yang sebelumnya masih mengikuti bearer user.
+
+**Task baru atau task revisi**
+
+- Task revisi: `UCW-204` => status `blocked` sebagai audit historis
+
+**Perubahan dependency**
+
+- `UCW-202` bergantung pada hasil smoke `UCW-194`.
+- `UCW-203` bergantung pada hasil smoke `UCW-195`.
+- `UCW-204` bergantung pada hasil smoke `UCW-196`.
+- `UCW-205` bergantung pada hasil smoke `UCW-201`.
+
+### `2026-04-21` - Audit menyeluruh UX lambat untuk `Jurnal` / `Riwayat` / `Halaman Sampah` / `Catatan Absensi` / `Stok Barang`
+
+**Ringkasan brief**
+
+1. Audit repo + DB menunjukkan dataset aktif saat ini masih sangat kecil (`vw_workspace_transactions = 10`, `vw_history_transactions = 3`, `vw_recycle_bin_records = 1`, `attendance_records aktif = 2`, `materials aktif = 1`, `stock_transactions aktif = 3`), jadi kelambatan yang dirasakan sekarang bukan karena volume list yang memang besar.
+2. `EXPLAIN ANALYZE` untuk query inti menunjukkan execution query DB masih sub-millisecond sampai sekitar `0.6 ms`, sehingga bottleneck utama saat ini berada di fixed overhead request (`auth -> profile -> team access` per endpoint), strategi first paint yang memblok layar sampai fetch selesai, dan mount cost komponen list di client.
+3. Dashboard terasa lebih cepat bukan karena read path `workspace` intrinsik lebih murah, tetapi karena branch `workspaceTransactions` dijadwalkan via `requestAnimationFrame` dan `silent` di background, dashboard sudah punya shell/KPI yang terlihat duluan, lalu hanya merender `5` item terbaru; sebaliknya route khusus melakukan refetch baru, menunggu list page selesai, lalu langsung merender lebih banyak row interaktif.
+
+**Dampak ke backlog existing**
+
+- `UCW-173` tetap relevan sebagai umbrella optimasi first paint list, tetapi terlalu lebar untuk dieksekusi aman dalam satu langkah; brief ini memecahnya menjadi task eksekusi yang lebih sempit dan bisa diaudit.
+- Temuan baru menambahkan satu akar masalah lintas-surface yang sebelumnya belum ditulis eksplisit: setiap hit ke `api/transactions.js` dan `api/records.js` masih membayar fixed overhead auth/profile/team lookup yang besar relatif terhadap dataset saat ini.
+- `Stok Barang` sebelumnya belum tercakup dalam cluster optimasi `UCW-173`; sekarang dicatat sebagai sibling task sendiri karena source of truth dan route fan-out-nya berbeda.
+
+**Task baru atau task revisi**
+
+- Task baru: `UCW-207`
+- Task baru: `UCW-208`
+- Task baru: `UCW-209`
+- Task baru: `UCW-210`
+- Task baru: `UCW-211`
+- Task baru: `UCW-212`
+
+**Perubahan dependency**
+
+- `UCW-208` sampai `UCW-212` bergantung pada diagnosis `UCW-207`.
+- `UCW-209` fokus pada parity `Dashboard -> Jurnal` untuk data yang sama.
+- `UCW-210` menutup mount cost render row/action sheet pada list transaksi.
+- `UCW-211` dan `UCW-212` menangani dua route sibling yang lambat karena pola fetch dan hydrate-nya berbeda dari `Jurnal`.
+- [x] UCW-254 - Konsolidasikan detail agregat payroll worker di tab `Summary / Rekap / History Payment`
+  - Ringkas grup payroll berdasarkan `worker_id` dengan nama worker tampil di `Summary`.
+  - `Summary` menampilkan nama worker, jumlah tagihan, sisa tagihan, dan jumlah rekap.
+  - `Rekap` menampilkan daftar rekap saja dengan expand detail record.
+  - `History Payment` muncul hanya jika ada history aktif; aksi icon-only mengikuti role.
+  - Soft-delete child record tetap ditandai icon warna khusus di list aktif dan detail tab; permanent delete hilang total.
+  - Scope target: `src/pages/BillsPage.jsx`, `src/pages/PaymentsPage.jsx`, `src/lib/transaction-presentation.js`, `src/components/ui/AppPrimitives.jsx`.
+  - Dependensi: `UCW-245`, `UCW-252`, `UCW-253`.
+- [x] UCW-255 - Selaraskan jalur pembukaan payment dari Tagihan dengan Jurnal
+  - Tagihan harus membuka payment workspace via route canonical yang sama seperti Jurnal, bukan jalur legacy/tagihan terpisah.
+  - Payload state yang dikirim ke payment page harus mengikuti pola Jurnal supaya hydration dan back-nav konsisten.
+  - Scope target: `src/pages/BillsPage.jsx`, `src/lib/transaction-presentation.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-253`.
+- [x] UCW-256 - Ringkas search dan tab filter di tiga workspace utama
+  - Ubah search menjadi ikon di `Jurnal`, `Tagihan`, dan `Riwayat` supaya header mobile lebih hemat ruang.
+  - Pertahankan fungsi filter, tetapi ringkas entrypoint tab/filter agar tidak memakan fold atas.
+  - Fokus awal hanya pada tiga workspace utama untuk menjaga scope kecil dan risiko regresi rendah.
+  - Scope target: `src/pages/TransactionsPage.jsx`, `src/pages/BillsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/components/ui/AppPrimitives.jsx`.
+  - Dependensi: `UCW-255`.
+- [x] UCW-257 - Pindahkan filter workspace ke bottom sheet
+  - Pindahkan entrypoint filter di `Jurnal`, `Tagihan`, dan `Riwayat` ke bottom sheet yang dibuka lewat tombol filter di header.
+  - Search tetap ringkas dan filter tidak lagi memakan fold atas.
+  - Scope target: `src/pages/TransactionsPage.jsx`, `src/pages/BillsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/components/ui/AppPrimitives.jsx`.
+  - Dependensi: `UCW-256`.
+- [x] UCW-258 - Gabungkan Riwayat ke page Jurnal sebagai tab
+  - Ubah `Riwayat` dari page terpisah menjadi tab di page `Jurnal`.
+  - Jurnal memiliki dua tab: `Aktif` dan `Riwayat`; entrypoint icon riwayat di header dihapus.
+  - Scope target: `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/App.jsx`, `src/components/ui/AppPrimitives.jsx`.
+  - Dependensi: `UCW-257`.
+- [x] UCW-259 - Ubah entrypoint Sampah menjadi Arsip
+  - Ganti penamaan user-facing `Sampah` menjadi `Arsip` dan pindahkan entrypoint ke list di bawah tab yang selalu tampil teratas di area recovery.
+  - Surface recovery tetap terpisah dari workspace aktif, tapi label dan entrypoint harus lebih netral dan mudah dipahami.
+  - Scope target: `src/pages/TransactionsRecycleBinPage.jsx`, `src/pages/MasterRecycleBinPage.jsx`, `src/App.jsx`, `src/components/ui/AppPrimitives.jsx`.
+  - Dependensi: `UCW-257`.
+- [x] UCW-260 - Selaraskan tiga workspace mobile Jurnal, Riwayat, dan Arsip
+  - Koreksi pemetaan workspace mobile menjadi `Jurnal`, `Riwayat`, dan `Arsip` sebagai trio utama, bukan memasukkan `Tagihan` ke alur entrypoint ini.
+  - Bottom sheet filter harus berbentuk list vertikal yang mudah dipilih di mobile, bukan tombol horizontal yang butuh banyak tap effort.
+  - `Arsip` harus punya search dan filter di header yang konsisten dengan workspace lain, dan tab `Riwayat` di Jurnal tidak boleh memunculkan header tambahan kedua.
+  - Scope target: `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/pages/TransactionsRecycleBinPage.jsx`, `src/pages/MasterRecycleBinPage.jsx`, `src/components/ui/AppPrimitives.jsx`, `src/App.jsx`.
+  - Dependensi: `UCW-256`, `UCW-257`, `UCW-258`, `UCW-259`.
+- [x] UCW-261 - Koreksi shell mobile Jurnal, Riwayat, dan Arsip
+  - Pemetaan mobile final untuk task ini hanya `Jurnal`, `Riwayat`, dan `Arsip`; `Tagihan` berada di luar scope.
+  - Di `Jurnal`, tab `Riwayat` harus tetap tampil sebagai tab biasa di shell yang sama, tanpa header kedua atau layout baru di bawah tab.
+  - Bottom sheet filter harus berisi opsi vertikal/list-based agar cepat dipilih di mobile, bukan deretan tombol horizontal.
+  - Di `Arsip`, search dan filter harus muncul di header sehingga entrypoint recovery konsisten dengan workspace lain.
+  - Scope target: `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/pages/TransactionsRecycleBinPage.jsx`, `src/pages/MasterRecycleBinPage.jsx`, `src/components/ui/AppPrimitives.jsx`, `src/App.jsx`.
+  - Dependensi: `UCW-260`.
+- [x] UCW-262 - Selaraskan shell Jurnal dengan tab Tagihan
+  - `Jurnal` menjadi shell utama dengan tab `Aktif`, `Tagihan`, dan `Riwayat` dalam satu halaman; route legacy tetap dipertahankan hanya sebagai fallback.
+  - Tab `Tagihan` dirender embedded di shell `Jurnal` tanpa header halaman terpisah, sehingga user tidak merasa pindah workspace yang berbeda.
+  - Header shell tetap hemat ruang; `Tagihan` memakai action target sendiri bila perlu, tanpa mengubah data model atau logika pembayaran.
+  - Scope target: `src/pages/TransactionsPage.jsx`, `src/pages/BillsPage.jsx`, `src/App.jsx`, `src/components/ui/AppPrimitives.jsx`.
+  - Dependensi: `UCW-261`.
+- [x] UCW-263 - Ratakan shell embedded Tagihan di Jurnal
+  - Saat `Tagihan` dirender embedded di shell `Jurnal`, komponen harus memakai shell ringan tanpa header/section layer tambahan yang membuatnya terasa seperti page kedua.
+  - Tujuannya menjaga transisi tab tetap terasa satu workspace yang sama, terutama di mobile, tanpa mengubah route legacy atau logika pembayaran.
+  - Scope target: `src/pages/BillsPage.jsx`, `src/pages/TransactionsPage.jsx`.
+  - Dependensi: `UCW-262`.
+- [x] UCW-264 - Petakan search/filter per tab Jurnal
+  - Header shell `Jurnal` perlu menjadi mapping tunggal untuk entrypoint search/filter per tab, supaya `Aktif`, `Tagihan`, dan `Riwayat` tetap konsisten secara visual.
+  - Pemetaan ini hanya menata entrypoint dan target aksi, bukan mengubah query/data model atau menambah route baru.
+  - Scope target: `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/pages/BillsPage.jsx`.
+  - Dependensi: `UCW-262`, `UCW-263`.
+- [x] UCW-265 - Konsolidasikan surface Arsip ke shell Jurnal
+  - Surface `Arsip` perlu navigasi balik yang deterministik ke shell `Jurnal`, bukan bergantung pada history browser.
+  - Konsolidasi ini menjaga `Arsip` tetap terasa sebagai recovery surface yang jelas di trio mobile `Jurnal / Riwayat / Arsip`.
+  - Scope target: `src/pages/TransactionsRecycleBinPage.jsx`.
+  - Dependensi: `UCW-264`.
+- [x] UCW-266 - Alihkan route Tagihan ke shell Jurnal
+  - Route `/tagihan` harus mengarah ke tab `Tagihan` di shell `Jurnal`, bukan lagi menjadi entrypoint page terpisah.
+  - Route payment `Tagihan` tetap dipertahankan untuk deep link settlement, tetapi surface list aktifnya harus terpusat di shell `Jurnal`.
+  - Scope target: `src/App.jsx`.
+  - Dependensi: `UCW-262`, `UCW-263`, `UCW-264`, `UCW-265`.
+- [x] UCW-267 - Satukan jalur settlement Tagihan ke route payment canonical
+  - Semua entrypoint settlement Tagihan harus memakai route canonical `/payment/:id` agar tidak ada percabangan antara `/tagihan/:id` dan `/pembayaran/tagihan/:id`.
+  - Route legacy settlement boleh tetap hidup sebagai fallback redirect, tetapi callsite aktif harus diarahkan ke helper/route canonical yang sama.
+  - Scope target: `src/App.jsx`, `src/components/PayrollManager.jsx`, `src/components/ProjectReport.jsx`, `src/pages/EditRecordPage.jsx`, `src/pages/BillsPage.jsx`, `src/lib/transaction-presentation.js`.
+  - Dependensi: `UCW-255`, `UCW-266`.
+- [x] UCW-268 - Pindahkan aggregate worker ke detail page bertab
+  - Row worker di Tagihan harus menjadi entrypoint detail, bukan accordion inline yang menumpuk konten di bawah row.
+  - Detail worker dipusatkan ke page bertab `Summary / Rekap / History Payment`, dan tab `Rekap` menampilkan row per bill yang bisa dibuka detailnya tanpa memilih rekap dari list utama.
+  - Scope target: `src/pages/BillsPage.jsx`, `src/pages/PaymentsPage.jsx`.
+  - Dependensi: `UCW-245`, `UCW-267`.
+- [x] UCW-269 - Pangkas Edit dan Payment jadi action surface murni
+  - `EditRecordPage` dan `PaymentPage` harus menghapus ringkasan, histori, lampiran, dan teknis dari surface utama agar hanya workspace inti yang tersisa.
+  - Semua konteks inspeksi harus dipusatkan di `TransactionDetailPage`, sedangkan `Edit` fokus ke form edit dan `Payment` fokus ke form bayar.
+  - Scope target: `src/pages/EditRecordPage.jsx`, `src/pages/PaymentPage.jsx`.
+  - Dependensi: `UCW-251`, `UCW-252`, `UCW-267`, `UCW-268`.
+- [x] UCW-270 - Kunci kontrak target bayar worker aggregate
+  - `Bayar` untuk salary bill harus memilih satu bill aggregate outstanding per worker dengan rule deterministik `partial -> unpaid -> due_date -> created_at -> id`.
+  - Summary KPI worker dipusatkan di helper data bersama supaya nominal total, billed, unbilled, sisa, dan terbayar punya source of truth yang sama di surface detail.
+  - Scope target: `src/lib/transaction-presentation.js`, `src/pages/PaymentsPage.jsx`, `src/pages/PaymentPage.jsx`.
+  - Dependensi: `UCW-268`, `UCW-269`.
+- [x] UCW-271 - Tambahkan CTA Bayar pada sheet worker absensi
+  - `Tab Pekerja` di `Catatan Absensi` harus punya CTA `Bayar` sejajar dengan `Detail` dan `Rekap` di sheet worker.
+  - CTA ini membuka payment form untuk bill aggregate worker yang dipilih oleh helper kontrak data, lalu kembali ke tab pekerja setelah selesai.
+  - Scope target: `src/components/PayrollAttendanceHistory.jsx`, `src/pages/PayrollPage.jsx`, `src/pages/PaymentPage.jsx`.
+  - Dependensi: `UCW-270`.
+- [x] UCW-273 - Restyle GlobalToast jadi solid surface dan pindah ke atas
+  - `GlobalToast` harus memakai surface solid yang netral: putih solid saat mode terang dan padanan solid gelap saat mode gelap, tanpa card berwarna/translucent.
+  - Toast harus diposisikan di atas agar tidak bertabrakan dengan tombol navigasi bawah di mobile.
+  - Scope target: `src/components/ui/GlobalToast.jsx`, `src/index.css`.
+  - Dependensi: `UCW-184`, `UCW-185`.
+- [x] UCW-274 - Netalkan ikon tone pada GlobalToast
+  - Ikon pada `GlobalToast` harus tetap informatif, tetapi tampil netral dan tidak terlalu berwarna agar card toast terasa lebih solid dan minim distraksi.
+  - Perbedaan tone cukup terlihat dari ikon dan konteks pesan; warna ikon tidak perlu mencolok per status.
+  - Scope target: `src/components/ui/GlobalToast.jsx`.
+  - Dependensi: `UCW-273`.
+- [x] UCW-275 - Pisahkan rumah PDF settings dan laporan profesional Unit Kerja
+  - PDF settings harus punya rumah UI mandiri di `/projects/pdf-settings`, bukan menumpuk di report hub utama.
+  - `/projects` menjadi report hub `Unit Kerja` yang report-kind first untuk `Executive Finance`, `Project P&L`, dan `Cash Flow`, dengan data laporan bisnis yang diolah dari source data repo yang sudah ada.
+  - Scope target: `src/components/ProjectReport.jsx`, `src/pages/ProjectPdfSettingsPage.jsx`, `src/lib/business-report.js`, `src/lib/report-pdf.js`, `src/lib/reports-api.js`, `src/store/useReportStore.js`, `api/records.js`, `src/App.jsx`, `src/components/ui/AppPrimitives.jsx`.
+- [x] UCW-276 - Backfill snapshot payroll legacy dan read fallback worker aggregate
+  - Payroll bill legacy yang masih kosong snapshot harus dibackfill dari `workers.name` dengan fallback deskripsi bila join worker gagal.
+  - Read fallback detail payroll harus tetap aman walau ada row legacy yang belum sempat dibackfill, tanpa mengubah amount/status/relasi.
+  - Scope target: `supabase/migrations/20260422143000_backfill_payroll_snapshot_consistency.sql`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-271`, `UCW-275`.
+- [x] UCW-272 - Bersihkan salary bill entrypoint dari Jurnal, Riwayat, dan Arsip
+  - Surface `Jurnal`, `Riwayat`, dan `Arsip` harus berhenti menampilkan filter atau CTA salary bill sebagai entrypoint utama.
+  - Tujuannya menegaskan `Catatan Absensi` sebagai primary entrypoint salary bill agar navigasi finansial tidak bercampur dengan surface transaksi umum.
+  - Scope target: `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/pages/TransactionsRecycleBinPage.jsx`, `src/pages/MasterRecycleBinPage.jsx`.
+  - Dependensi: `UCW-271`.
+- [x] UCW-277 - Redesign PDF laporan bisnis dengan konteks visual per kind
+  - PDF laporan bisnis harus memakai label sumber yang business-facing, bukan nama schema/database mentah; fallback tetap human-readable bila label spesifik belum ada.
+  - `Project P&L` perlu dipecah menjadi section kartu/band yang jelas agar tidak ada tabel campuran dengan kolom kosong dan agar konteks pemasukan, biaya material, biaya operasional, dan gaji terbaca terpisah.
+  - `Executive Finance` dan `Cash Flow` tetap satu branding profesional, tetapi masing-masing perlu aksen visual yang berbeda dan report summary berbasis card agar PDF terasa lebih hidup dan konteksnya cepat terbaca.
+  - Scope target: `src/lib/report-pdf.js`, `src/lib/business-report.js`, `src/components/ProjectReport.jsx`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-275`, `UCW-276`.
+- [x] UCW-279 - Ringkas report hub PDF dan rapikan header visual
+  - Tab report kind di report hub dipendekkan menjadi `Umum`, `Proyek`, dan `Kas`, lalu tombol `Pengaturan PDF` dipindah ke header agar fold atas lebih lega.
+  - Tombol `Filter` sejajar dengan `Sinkronkan` dan `Unduh PDF`, sementara badge periode dan Unit Kerja diganti menjadi info bar label/value yang lebih proper.
+  - `header_color` dari settings dipakai sebagai accent utama lintas elemen report yang berwarna, sementara `Project P&L` harus memakai lebar kolom yang lebih fit per section agar tidak ada ruang kosong yang memicu wrap berlebihan.
+  - Upload/hapus logo di settings dipadatkan menjadi tile klik-upload dengan overlay delete saat logo sudah ada.
+  - Scope target: `src/components/ProjectReport.jsx`, `src/pages/ProjectPdfSettingsPage.jsx`, `src/lib/business-report.js`, `src/lib/report-pdf.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-275`, `UCW-277`.
+- [x] UCW-280 - Padatkan header report hub dan iconize sinkronisasi
+  - Header `Unit Kerja` masih terasa dobel di mobile, jadi top shell harus diringkas tanpa menambah layer visual baru.
+  - Tombol `Sinkronkan` harus menjadi icon-only agar tiga aksi utama `Filter`, `Sinkronkan`, dan `Unduh PDF` bisa tetap satu baris di viewport mobile.
+  - `Pengaturan PDF` tetap tersedia dari header, tetapi struktur atas report hub harus terasa satu blok identitas + aksi, bukan dua header berturut-turut.
+  - Scope target: `src/components/ProjectReport.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-279`.
+- [x] UCW-281 - Satukan header ProjectsPage dan report hub
+  - Header `Pelaporan / Unit Kerja` di `ProjectsPage` menjadi satu-satunya header identitas report hub, sementara header duplikat di `ProjectReport` dihapus agar struktur visual sama dengan shell `Jurnal`.
+  - Tombol `Pengaturan PDF` dipindah ke header luar `ProjectsPage` supaya berada satu grup dengan identitas halaman, bukan di dalam report card.
+  - Scope target: `src/pages/ProjectsPage.jsx`, `src/components/ProjectReport.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-280`.
+- [x] UCW-283 - Padatkan aksi report hub dan info strip
+  - Tombol `Refresh`/`Sinkronkan` dipindah ke satu grup dengan info `Rentang tanggal` di kanan agar bar metadata tetap ringkas dan aksi tidak bertumpuk di bawahnya.
+  - Tombol `Filter` diberi label dan ditempatkan satu baris dengan `Unduh PDF` dalam grid 1:1 agar action row lebih stabil di mobile.
+  - Scope target: `src/components/ProjectReport.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-281`.
+- [x] UCW-282 - Redesign info payroll detail dan ringkas tab Riwayat
+  - `Info` di detail worker payroll harus memprioritaskan `Tercatat` sebagai KPI kuat, lalu kartu nominal `Billed`/`Unbilled`, lalu baris `Tagihan`/`Sisa` dengan label satu kata agar aman di mobile.
+  - Sisa metadata detail payroll tetap dipertahankan, tetapi harus diringkas ke grid 1:1 dan label `History Payment` diganti menjadi `Riwayat` pada detail page yang relevan.
+  - Scope target: `src/pages/PayrollWorkerDetailPage.jsx`, `src/pages/PaymentsPage.jsx`, `tests/e2e/payroll.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-278`.
+- [x] UCW-278 - Buka detail worker payroll sebagai page bertab
+  - Klik `Detail` di tab pekerja payroll harus membuka route detail baru, bukan bottom sheet, dengan tab `Info`, `Rekap`, dan `History Payment` bila history memang ada.
+  - `Info` menampilkan KPI ringkas worker, `Rekap` menampilkan baris absensi read-only dengan status project dan wage role, lalu `History Payment` meniru pola detail bill untuk payment aktif dan terhapus.
+  - Scope target: `src/App.jsx`, `src/components/PayrollAttendanceHistory.jsx`, `src/pages/PayrollWorkerDetailPage.jsx`, `tests/e2e/payroll.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-271`, `UCW-276`.
+- [x] UCW-284 - Solidkan seluruh surface dan row list app
+  - Semua surface utama harus berhenti terasa glass morphic: background page, card, sheet, nav, dan row list perlu solid agar teks tetap terbaca jelas di dark mode.
+  - Row list dan action row yang masih memakai transparansi atau blur harus dinormalisasi ke surface solid tanpa mengubah kontrak data atau alur navigasi.
+  - Scope target: `src/index.css`, `src/components/ui/AppPrimitives.jsx`, `src/components/ui/ActionCard.jsx`, `src/components/ui/BottomNav.jsx`, `src/components/AttendanceForm.jsx`, `src/components/MasterMaterialForm.jsx`, `src/components/HrdPipeline.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-282`, `UCW-283`.
+- [x] UCW-285 - Redesign loader jadi motion-only centered
+  - Loader bootstrap, lazy route, dan dashboard initial load harus hanya menampilkan animasi di tengah layar, tanpa card, border, shadow, atau wrapper visual lain.
+  - Teks harus ringkas: satu judul tebal dan satu subtitle singkat yang menyesuaikan konteks loading, sementara dashboard refresh kecil tetap tidak diubah.
+  - Scope target: `src/App.jsx`, `src/components/ui/BrandLoader.jsx`, `src/pages/Dashboard.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+- [x] UCW-286 - Pecah loader per konteks
+  - Loader global, form/page, dan server/connect harus memakai animasi berbeda sesuai konteks, sementara placement tetap motion-only dan centered.
+  - Dashboard initial load harus benar-benar center di viewport, sedangkan bootstrap dan lazy route tetap memakai loader global.
+  - Scope target: `src/App.jsx`, `src/components/ui/BrandLoader.jsx`, `src/pages/Dashboard.jsx`, `src/pages/EditRecordPage.jsx`, `src/pages/PaymentPage.jsx`, `src/pages/ProjectPdfSettingsPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-285`.
+- [x] UCW-287 - Normalkan loader detail yang tersisa
+  - Surface detail yang masih memakai card placeholder untuk loading satu record harus dipindahkan ke loader centered agar konsisten dengan policy loader baru.
+  - Target utama adalah detail transaksi terhapus, detail pekerja payroll, dan worker detail mode di pembayaran tagihan; list surface dan skeleton list tetap tidak diubah.
+  - Scope target: `src/pages/DeletedTransactionDetailPage.jsx`, `src/pages/PayrollWorkerDetailPage.jsx`, `src/pages/PaymentsPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-286`.
+- [x] UCW-288 - Shared form shell + centered modal toast
+  - Toast global harus menjadi popup modal tengah yang solid dengan animasi/icon di atas, lalu title, subtitle/message, dan tombol `Tutup` full-width di bawah; success/info auto-dismiss sementara warning/error/loading menunggu tutup manual.
+  - Form lintas domain harus memakai return route eksplisit dan registry shell, tanpa `navigate(-1)` fallback atau data substitusi saat record/param gagal resolve di UI.
+  - Scope target: `src/components/ui/GlobalToast.jsx`, `src/store/useToastStore.js`, `src/lib/form-shell.js`, `src/pages/AttendancePage.jsx`, `src/pages/MaterialInvoicePage.jsx`, `src/pages/EditRecordPage.jsx`, `src/pages/PaymentPage.jsx`, `src/pages/TransactionDetailPage.jsx`, `src/components/MasterDataManager.jsx`, `src/components/PayrollAttendanceHistory.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-287`.
+- [x] UCW-289 - Placeholder frozen untuk HRD dan penerima
+  - Route `/more/hrd` dan `/more/beneficiaries` harus menampilkan placeholder frozen-state, bukan surface operasional aktif.
+  - Placeholder mengikuti pola loader global: animasi server di tengah, title `Fitur sedang dikembangkan`, subtitle konteks spesifik, dan tombol `Kembali` di bawah subtitle.
+  - Scope target: `src/pages/HrdPage.jsx`, `src/pages/BeneficiariesPage.jsx`, `src/components/ui/FrozenRoutePlaceholder.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-59`, `UCW-60`, `UCW-286`.
+- [x] UCW-290 - Tandai entry frozen di MorePage
+  - Kartu `HRD & Rekrutmen` dan `Penerima Manfaat` di `MorePage` harus menampilkan status frozen yang ringkas dan jelas agar user tahu fitur masih dikembangkan sebelum masuk route placeholder.
+  - Label status harus singkat, tidak menambah panel penjelasan, dan tetap menjaga kartu lain di `MorePage` tampil normal.
+  - Scope target: `src/pages/MorePage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-289`.
+- [x] UCW-291 - Standarkan loading, empty, dan error surface operasional
+  - Surface operasional `HRD`, `Penerima Manfaat`, `PayrollManager`, dan `Stok Barang` harus memakai bahasa visual yang seragam untuk loading, empty, dan error state tanpa mengubah flow data atau struktur halaman.
+  - Targetnya adalah menormalisasi state yang masih terasa campur antara card placeholder, teks loading, dan error block supaya fallback user jelas dan konsisten.
+  - Scope target: `src/components/HrdPipeline.jsx`, `src/components/BeneficiaryList.jsx`, `src/components/PayrollManager.jsx`, `src/pages/StockPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-284`, `UCW-290`.
+- [x] UCW-292 - Standarkan feedback modal sheet HRD dan Penerima
+  - Modal sheet create/edit di `HRD` dan `Penerima Manfaat` harus memakai pola feedback yang seragam untuk error validasi, error simpan, dan state kosong form tanpa menambah copy baru yang panjang.
+  - Targetnya adalah merapikan feedback di dalam sheet agar user tidak melihat campuran block error yang berbeda-beda di dua modal editor ini.
+  - Scope target: `src/components/HrdPipeline.jsx`, `src/components/BeneficiaryList.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-291`.
+- [x] UCW-293 - Solidkan sisa surface form dan invite
+  - Residual translucent surface pada `IncomeForm`, `MaterialInvoiceForm`, `LoanForm`, `TeamInviteManager`, dan `PayrollManager` perlu disolidkan agar pattern solid surface konsisten dengan cleanup sebelumnya.
+  - Hapus juga dekorasi shell CSS yang sudah dead seperti glow pseudo-element dan toast surface legacy agar tidak ada residu glass morphic yang tersisa di source.
+  - Scope target: `src/components/IncomeForm.jsx`, `src/components/MaterialInvoiceForm.jsx`, `src/components/LoanForm.jsx`, `src/components/TeamInviteManager.jsx`, `src/components/PayrollManager.jsx`, `src/index.css`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-284`, `UCW-292`.
+- [x] UCW-294 - Solidkan residu dashboard dan form umum
+  - Residual translucent surface yang masih tersisa di `Dashboard`, `ExpenseForm`, `ExpenseAttachmentSection`, `MasterMaterialForm`, dan `MasterPickerField` perlu disolidkan agar cleanup glass morphic benar-benar menutup surface yang paling sering dipakai.
+  - Fokus task ini hanya ke surface dan tombol/background yang masih translucent, bukan refactor layout atau behavior picker/form.
+  - Scope target: `src/pages/Dashboard.jsx`, `src/components/ExpenseForm.jsx`, `src/components/ExpenseAttachmentSection.jsx`, `src/components/MasterMaterialForm.jsx`, `src/components/ui/MasterPickerField.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-293`.
+- [x] UCW-295 - Hapus selector opacity legacy CSS
+  - Selector kompatibilitas opacity di `src/index.css` yang sudah tidak punya pemakai aktif perlu dihapus agar tidak ada residu glass morphic dead-code tersisa di stylesheet.
+  - Scope task ini hanya ke cleanup selector CSS yang kosong, bukan mengubah surface atau layout runtime baru; `ProtectedRoute` ikut disolidkan agar tidak menyisakan surface opacity yang tertinggal setelah selector compat dihapus.
+  - Scope target: `src/index.css`, `src/components/ProtectedRoute.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-294`.
+- [x] UCW-296 - Telegram finance assistant v1 read-only
+  - Telegram assistant harus membaca finance core secara read-only, menerima intent `status/search/navigate`, menolak mutasi dan scope payroll di luar v1, lalu membalas ringkas dengan deep link ke route resmi Mini Web App.
+  - Scope target: `api/telegram-assistant.js`, `src/lib/telegram-assistant-links.js`, `src/App.jsx`, `tests/e2e/telegram-shell.spec.js`, `supabase/migrations/20260423101000_create_telegram_assistant_sessions.sql`, `.env.example`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-90`, `UCW-182`, `UCW-238`.
+- [x] UCW-297 - Deploy webhook Telegram assistant ke runtime Vercel
+  - Deployment runtime assistant harus benar-benar hidup di Vercel untuk `production` dan `preview`, lalu webhook Telegram aktif diarahkan ke alias production yang stabil dan bisa diaudit.
+  - Audit deploy harus mencatat batasan nyata environment: satu bot hanya bisa punya satu webhook aktif, preview masih berada di belakang Vercel Deployment Protection, dan custom domain `banplex.app` / `staging.banplex.app` belum valid di DNS sehingga alias live masih memakai `*.vercel.app`.
+  - Scope target: `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-296`.
+- [x] UCW-298 - Persist env Vercel production dan audit blocker preview
+  - Runtime assistant production tidak boleh lagi bergantung pada inline env saat deploy; seluruh key dari `.env` yang relevan harus tersimpan di Vercel `production`, lalu deployment production terbaru harus lolos tanpa `-e/-b` inline env.
+  - Untuk `preview/staging`, audit harus mencatat hasil nyata bila env persisten belum bisa dipasang: project belum punya connected Git repository di Vercel sehingga branch-scoped preview env gagal, maka staging sementara tetap dideploy memakai inline env sampai integrasi Git dibereskan.
+  - Scope target: `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-297`.
+- [x] UCW-300 - Redesign form non-absensi lintas domain agar mobile-first dan minimalis
+  - Form input selain absensi harus memakai hierarki section yang lebih ringkas, footer aksi sticky/shared, summary yang compact, dan surface solid agar tetap ramah untuk operator mobile tanpa mengubah logika data atau route canonical.
+  - Scope target: `src/components/ExpenseForm.jsx`, `src/components/MaterialInvoiceForm.jsx`, `src/pages/PaymentPage.jsx`, `src/pages/MasterFormPage.jsx`, `src/components/master/GenericMasterForm.jsx`, `src/pages/ProjectPdfSettingsPage.jsx`, `src/components/MasterMaterialForm.jsx`, `src/components/PaymentModal.jsx`, `src/components/HrdPipeline.jsx`, `src/components/BeneficiaryList.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-288`, `UCW-293`, `UCW-294`.
+- [x] UCW-301 - Siapkan bundle env lokal untuk migrasi Vercel Hobby
+  - Migrasi ke akun Vercel Hobby baru butuh bundle env lokal yang sudah berisi tepat 14 key runtime aktif agar bisa langsung dipindahkan, di-rename, lalu di-import ke project target tanpa copy-paste manual satu per satu.
+  - Bundle harus dibuat sebagai file local yang ter-ignore Git, memakai nilai dari `.env` aktif saat ini, dan tetap dibatasi hanya ke key runtime yang memang sudah diaudit pada `UCW-298` dan `UCW-299`.
+  - Scope target: `.env.vercel-import-akhir-diedit.local`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-299`.
+- [x] UCW-299 - Persist env Vercel preview via project API dan audit mismatch Git namespace
+  - Runtime assistant `preview/staging` harus bisa dideploy ulang tanpa inline env; shared env level project untuk target `preview` perlu dipersist penuh untuk semua key runtime yang relevan, lalu deployment preview terbaru harus lolos tanpa `-e/-b`.
+  - Audit harus membedakan jelas antara blocker yang masih tersisa dan workaround yang sudah valid: `vercel git connect` tetap gagal karena namespace GitHub yang terlihat oleh Vercel team tidak punya akses ke repo `dragontrail133-cpu/Banplex-Telegram`, tetapi shared preview env tetap bisa dipasang lewat Project Env API Vercel.
+  - Scope target: `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-298`.
+

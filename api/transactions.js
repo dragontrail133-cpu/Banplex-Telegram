@@ -21,6 +21,19 @@ function createHttpError(status, message) {
   return error
 }
 
+function getBearerToken(req) {
+  const authorizationHeader = String(req.headers?.authorization ?? '').trim()
+  const bearerToken = authorizationHeader.toLowerCase().startsWith('bearer ')
+    ? authorizationHeader.slice(7).trim()
+    : null
+
+  if (!bearerToken) {
+    throw createHttpError(401, 'Authorization token tidak ditemukan.')
+  }
+
+  return bearerToken
+}
+
 async function parseRequestBody(req) {
   if (typeof req.body === 'string' && req.body.trim().length > 0) {
     return JSON.parse(req.body)
@@ -110,7 +123,7 @@ function createDatabaseClient(url, apiKey, bearerToken) {
 }
 
 function buildSummary(cashMutations = []) {
-  return cashMutations.reduce(
+  const summary = cashMutations.reduce(
     (summary, mutation) => {
       const amount = Number(mutation.amount) || 0
 
@@ -130,6 +143,12 @@ function buildSummary(cashMutations = []) {
       endingBalance: 0,
     }
   )
+
+  return {
+    total_income: summary.totalIncome,
+    total_expense: summary.totalExpense,
+    ending_balance: summary.endingBalance,
+  }
 }
 
 function sortCashMutations(rows = []) {
@@ -468,6 +487,7 @@ async function loadRecycleBinViewRows(
     search = '',
     filter = 'all',
     fetchAll = false,
+    includeCreatorMetadata = true,
     debugTiming = false,
   } = {}
 ) {
@@ -491,13 +511,36 @@ async function loadRecycleBinViewRows(
     throw error
   }
 
+  let creatorMetadata = new Map()
+  let creatorMetadataMs = 0
+
+  if (includeCreatorMetadata) {
+    const creatorMetadataStartedAt = nowMs()
+    creatorMetadata = await loadRecycleBinCreatorMetadata(adminClient, teamId, data ?? [])
+    creatorMetadataMs = nowMs() - creatorMetadataStartedAt
+  }
+
   const mapStartedAt = nowMs()
-  const mappedRows = (data ?? []).map(mapRecycleBinViewRow).filter(Boolean)
+  const mappedRows = (data ?? [])
+    .map((row) => {
+      const mappedRow = mapRecycleBinViewRow(row)
+
+      if (!mappedRow) {
+        return null
+      }
+
+      const creatorKey = buildWorkspaceTransactionCreatorKey(row?.source_type, row?.id)
+      const creatorInfo = creatorMetadata.get(creatorKey) ?? null
+
+      return creatorInfo ? { ...mappedRow, ...creatorInfo } : mappedRow
+    })
+    .filter(Boolean)
   const mapMs = nowMs() - mapStartedAt
   const totalMs = nowMs() - startedAt
   const timing = debugTiming
     ? {
         queryMs,
+        creatorMetadataMs,
         mapMs,
         totalMs,
       }
@@ -613,6 +656,8 @@ function mapCashMutationRow(mutation) {
   return {
     ...mutation,
     amount: Number(mutation?.amount) || 0,
+    canRestore: Boolean(mutation?.deleted_at),
+    canPermanentDelete: Boolean(mutation?.deleted_at),
   }
 }
 
@@ -696,6 +741,7 @@ function mapLoanPaymentRow(row) {
     project_name: null,
     party_label: row.creditor_name_snapshot,
     related_id: row.loan_id ?? null,
+    deleted_at: row.deleted_at ?? null,
   })
 }
 
@@ -758,29 +804,16 @@ function normalizeBillSummaryRow(row) {
   }
 }
 
-function buildLedgerSummary(label, details = {}) {
-  return {
-    label,
-    ...details,
-  }
-}
-
-function mapWorkspaceProjectIncomeRow(row, bill = null) {
+function mapWorkspaceProjectIncomeRow(row) {
+  const billPaidAmount = toNumber(row?.bill_paid_amount)
   return {
     ...mapProjectIncomeRow(row),
+    sort_at: row?.sort_at ?? row?.updated_at ?? row?.created_at ?? null,
+    bill_paid_at: row?.bill_paid_at ?? null,
     sourceType: 'project-income',
     canView: true,
-    canEdit: !bill || toNumber(bill.paidAmount) <= 0,
-    canDelete: !bill || toNumber(bill.paidAmount) <= 0,
-    bill,
-    ledger_summary: bill
-      ? buildLedgerSummary('Fee bill', {
-          status: bill.status,
-          amount: bill.amount,
-          paidAmount: bill.paidAmount,
-          remainingAmount: bill.remainingAmount,
-        })
-      : null,
+    canEdit: billPaidAmount <= 0,
+    canDelete: billPaidAmount <= 0,
     detailRoute: `/transactions/${row.id}`,
     editRoute: `/edit/project-income/${row.id}`,
   }
@@ -796,56 +829,34 @@ function mapWorkspaceLoanRow(row) {
       row?.amount
   )
   const remainingAmount = Math.max(loanAmount - paymentAmount, 0)
-  const lateChargeSummary = buildLoanLateChargeSummary(row)
 
   return {
     ...mapLoanRow(row),
+    sort_at: row?.sort_at ?? row?.updated_at ?? row?.created_at ?? null,
     sourceType: 'loan-disbursement',
     canView: true,
     canEdit: paymentAmount <= 0,
     canDelete: paymentAmount <= 0,
     paid_amount: paymentAmount,
     remainingAmount,
-    ledger_summary: buildLedgerSummary('Sisa pengembalian', {
-      status: row?.status ?? null,
-      amount: loanAmount,
-      paidAmount: paymentAmount,
-      remainingAmount,
-      lateChargeAmount: lateChargeSummary.totalLateChargeAmount,
-    }),
     detailRoute: `/transactions/${row.id}`,
     editRoute: `/edit/loan/${row.id}`,
   }
 }
 
-function mapWorkspaceExpenseRow(row, bill = null) {
-  const hasPaidBill = toNumber(bill?.paidAmount) > 0
+function mapWorkspaceExpenseRow(row) {
+  const hasPaidBill = toNumber(row?.bill_paid_amount) > 0
 
   return {
     ...normalizeExpenseRow(row),
+    sort_at: row?.sort_at ?? row?.bill_paid_at ?? row?.updated_at ?? row?.created_at ?? null,
     amount: toNumber(row?.amount ?? row?.total_amount),
     transaction_date: row?.expense_date ?? row?.created_at ?? null,
     type: 'expense',
     sourceType: 'expense',
     canView: true,
     canEdit: true,
-    canDelete: bill ? !hasPaidBill : true,
-    bill,
-    ledger_summary: bill
-      ? buildLedgerSummary(
-          row?.document_type === 'surat_jalan'
-            ? 'Bill surat jalan'
-            : row?.expense_type === 'material' || row?.expense_type === 'material_invoice'
-              ? 'Bill material'
-              : 'Bill pengeluaran',
-          {
-            status: bill.status,
-            amount: bill.amount,
-            paidAmount: bill.paidAmount,
-            remainingAmount: bill.remainingAmount,
-          }
-        )
-      : null,
+    canDelete: !hasPaidBill,
     detailRoute: `/transactions/${row.id}`,
     editRoute: `/edit/expense/${row.id}`,
   }
@@ -860,6 +871,8 @@ function mapWorkspaceSalaryBillRow(row) {
 
   return {
     ...bill,
+    sort_at: row?.sort_at ?? bill?.paidAt ?? bill?.updatedAt ?? bill?.createdAt ?? null,
+    bill_paid_at: row?.bill_paid_at ?? bill?.paidAt ?? null,
     amount: toNumber(bill.amount),
     transaction_date: bill.dueDate ?? bill.createdAt ?? bill.paidAt ?? null,
     type: 'expense',
@@ -868,46 +881,14 @@ function mapWorkspaceSalaryBillRow(row) {
     canEdit: false,
     canDelete: false,
     canPay: bill.status !== 'paid',
-    bill,
     billType: bill.billType,
     description: 'Tagihan Upah',
     billDescription: bill.description ?? null,
     project_name: bill.projectName ?? null,
     party_label: bill.supplierName ?? null,
-    ledger_summary: buildLedgerSummary('Tagihan Upah', {
-      status: bill.status,
-      amount: bill.amount,
-      paidAmount: bill.paidAmount,
-      remainingAmount: bill.remainingAmount,
-    }),
     detailRoute: `/transactions/${bill.id}`,
     editRoute: null,
   }
-}
-
-function buildWorkspaceBillFromViewRow(row) {
-  if (!row?.bill_id) {
-    return null
-  }
-
-  return normalizeBillSummaryRow({
-    id: row.bill_id,
-    expense_id: row.source_type === 'expense' ? row.id : null,
-    project_income_id: row.source_type === 'project-income' ? row.id : null,
-    bill_type: row.bill_type,
-    description: row.bill_description ?? row.description,
-    amount: row.bill_amount,
-    paid_amount: row.bill_paid_amount,
-    due_date: row.bill_due_date,
-    status: row.bill_status,
-    paid_at: row.bill_paid_at,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-    supplier_name_snapshot: row.bill_supplier_name_snapshot ?? row.supplier_name_snapshot,
-    project_name_snapshot: row.bill_project_name_snapshot ?? row.project_name_snapshot,
-    worker_name_snapshot: row.bill_worker_name_snapshot ?? row.worker_name_snapshot,
-    deleted_at: null,
-  })
 }
 
 function mapWorkspaceTransactionViewRow(row) {
@@ -918,13 +899,12 @@ function mapWorkspaceTransactionViewRow(row) {
   }
 
   if (sourceType === 'project-income') {
-    const workspaceBill = buildWorkspaceBillFromViewRow(row)
-
     return mapWorkspaceProjectIncomeRow(
       {
         id: row.id,
         team_id: row.team_id,
         project_id: null,
+        sort_at: row.sort_at ?? null,
         transaction_date: row.transaction_date ?? row.sort_at ?? null,
         income_date: row.income_date ?? null,
         amount: row.amount,
@@ -932,19 +912,19 @@ function mapWorkspaceTransactionViewRow(row) {
         created_at: row.created_at,
         updated_at: row.updated_at,
         project_name_snapshot: row.project_name_snapshot,
+        bill_paid_amount: row.bill_paid_amount,
+        bill_paid_at: row.bill_paid_at,
         deleted_at: null,
       },
-      workspaceBill
     )
   }
 
   if (sourceType === 'expense') {
-    const workspaceBill = buildWorkspaceBillFromViewRow(row)
-
     return mapWorkspaceExpenseRow(
       {
         id: row.id,
         team_id: row.team_id,
+        sort_at: row.sort_at ?? null,
         expense_date: row.expense_date ?? row.sort_at ?? null,
         amount: row.amount,
         total_amount: row.amount,
@@ -955,9 +935,20 @@ function mapWorkspaceTransactionViewRow(row) {
         supplier_name_snapshot: row.supplier_name_snapshot,
         expense_type: row.expense_type,
         document_type: row.document_type,
+        bill_id: row.bill_id,
+        bill_type: row.bill_type,
+        bill_status: row.bill_status,
+        bill_amount: row.bill_amount,
+        bill_paid_amount: row.bill_paid_amount,
+        bill_remaining_amount: row.bill_remaining_amount,
+        bill_due_date: row.bill_due_date,
+        bill_paid_at: row.bill_paid_at,
+        bill_description: row.bill_description,
+        bill_project_name_snapshot: row.bill_project_name_snapshot,
+        bill_supplier_name_snapshot: row.bill_supplier_name_snapshot,
+        bill_worker_name_snapshot: row.bill_worker_name_snapshot,
         deleted_at: null,
       },
-      workspaceBill
     )
   }
 
@@ -965,6 +956,7 @@ function mapWorkspaceTransactionViewRow(row) {
     return mapWorkspaceLoanRow({
       id: row.id,
       team_id: row.team_id,
+      sort_at: row.sort_at ?? null,
       transaction_date: row.transaction_date ?? row.sort_at ?? null,
       disbursed_date: row.transaction_date ?? row.sort_at ?? null,
       amount: row.amount,
@@ -986,6 +978,7 @@ function mapWorkspaceTransactionViewRow(row) {
       id: row.bill_id ?? row.id,
       expense_id: null,
       project_income_id: null,
+      sort_at: row.sort_at ?? null,
       bill_type: row.bill_type ?? 'gaji',
       description: row.bill_description ?? row.description,
       amount: row.bill_amount ?? row.amount,
@@ -1007,6 +1000,187 @@ function mapWorkspaceTransactionViewRow(row) {
 
 function buildWorkspaceTransactionCreatorKey(sourceType, id) {
   return `${normalizeText(sourceType, '')}:${String(id ?? '')}`
+}
+
+function getAuthUserMetadata(authUser) {
+  return authUser?.user_metadata ?? authUser?.raw_user_meta_data ?? authUser?.metadata ?? null
+}
+
+function formatCompactIdentifier(value) {
+  const normalizedValue = normalizeText(value, '')
+
+  if (!normalizedValue) {
+    return ''
+  }
+
+  if (normalizedValue.length <= 12) {
+    return normalizedValue
+  }
+
+  return `${normalizedValue.slice(0, 8)}…${normalizedValue.slice(-4)}`
+}
+
+function buildCreatorDisplayName(metadata = null, fallbackTelegramUserId = null) {
+  const firstName = normalizeText(metadata?.first_name ?? metadata?.firstName, '')
+  const lastName = normalizeText(metadata?.last_name ?? metadata?.lastName, '')
+  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim()
+
+  if (fullName) {
+    return fullName
+  }
+
+  const explicitName = normalizeText(
+    metadata?.full_name ??
+      metadata?.fullName ??
+      metadata?.display_name ??
+      metadata?.displayName ??
+      metadata?.name ??
+      '',
+    ''
+  )
+
+  if (explicitName) {
+    return explicitName
+  }
+
+  const username = normalizeText(metadata?.username ?? metadata?.user_name ?? '', '')
+
+  if (username) {
+    return username.startsWith('@') ? username : `@${username}`
+  }
+
+  const normalizedFallbackTelegramUserId = normalizeText(fallbackTelegramUserId, '')
+
+  if (normalizedFallbackTelegramUserId) {
+    return `User ${formatCompactIdentifier(normalizedFallbackTelegramUserId)}`
+  }
+
+  return 'Sistem'
+}
+
+async function loadAuthUsersByIds(adminClient, authUserIds = []) {
+  const uniqueAuthUserIds = [
+    ...new Set(authUserIds.map((value) => normalizeText(value, null)).filter(Boolean)),
+  ]
+
+  if (uniqueAuthUserIds.length === 0 || !adminClient?.auth?.admin?.getUserById) {
+    return new Map()
+  }
+
+  const results = await Promise.all(
+    uniqueAuthUserIds.map(async (authUserId) => {
+      const { data, error } = await adminClient.auth.admin.getUserById(authUserId)
+
+      if (error) {
+        const normalizedMessage = String(error.message ?? '').toLowerCase()
+
+        if (!normalizedMessage.includes('not found')) {
+          throw error
+        }
+      }
+
+      return [authUserId, data?.user ?? null]
+    })
+  )
+
+  return new Map(results)
+}
+
+async function loadProfileIdsByTelegramUserIds(adminClient, telegramUserIds = []) {
+  const uniqueTelegramUserIds = [
+    ...new Set(telegramUserIds.map((value) => normalizeText(value, null)).filter(Boolean)),
+  ]
+
+  if (uniqueTelegramUserIds.length === 0) {
+    return new Map()
+  }
+
+  const { data, error } = await adminClient
+    .from('profiles')
+    .select('id, telegram_user_id')
+    .in('telegram_user_id', uniqueTelegramUserIds)
+
+  if (error) {
+    throw error
+  }
+
+  return new Map(
+    (data ?? []).map((row) => [
+      normalizeText(row?.telegram_user_id, null),
+      normalizeText(row?.id, null),
+    ])
+  )
+}
+
+async function loadCreatorMetadataFromRows(adminClient, sourceRows = []) {
+  const uniqueAuthUserIds = new Set()
+  const uniqueTelegramUserIds = new Set()
+  const rowIndex = new Map()
+
+  for (const row of sourceRows) {
+    const sourceType = normalizeText(row?.sourceType, '')
+    const id = String(row?.id ?? '')
+
+    if (!sourceType || !id) {
+      continue
+    }
+
+    const creatorKey = buildWorkspaceTransactionCreatorKey(sourceType, id)
+    const createdByUserId = normalizeText(
+      row?.created_by_user_id ?? row?.createdByUserId ?? row?.uploaded_by_user_id ?? null,
+      null
+    )
+    const telegramUserId = normalizeText(
+      row?.telegram_user_id ?? row?.telegramUserId ?? row?.uploaded_by ?? null,
+      null
+    )
+
+    if (createdByUserId) {
+      uniqueAuthUserIds.add(createdByUserId)
+    }
+
+    if (telegramUserId) {
+      uniqueTelegramUserIds.add(telegramUserId)
+    }
+
+    rowIndex.set(creatorKey, {
+      sourceType,
+      id,
+      createdByUserId,
+      telegramUserId,
+    })
+  }
+
+  const profileIdByTelegramUserId = await loadProfileIdsByTelegramUserIds(
+    adminClient,
+    [...uniqueTelegramUserIds]
+  )
+
+  for (const profileId of profileIdByTelegramUserId.values()) {
+    if (profileId) {
+      uniqueAuthUserIds.add(profileId)
+    }
+  }
+
+  const authUserById = await loadAuthUsersByIds(adminClient, [...uniqueAuthUserIds])
+  const creatorMetadata = new Map()
+
+  for (const [creatorKey, creatorReference] of rowIndex.entries()) {
+    const resolvedAuthUserId =
+      creatorReference.createdByUserId ??
+      profileIdByTelegramUserId.get(creatorReference.telegramUserId ?? '') ??
+      null
+    const authUser = resolvedAuthUserId ? authUserById.get(resolvedAuthUserId) ?? null : null
+    const metadata = getAuthUserMetadata(authUser)
+
+    creatorMetadata.set(creatorKey, {
+      telegram_user_id: creatorReference.telegramUserId ?? null,
+      created_by_user_id: creatorReference.createdByUserId ?? null,
+      creator_display_name: buildCreatorDisplayName(metadata, creatorReference.telegramUserId),
+    })
+  }
+
+  return creatorMetadata
 }
 
 async function loadWorkspaceTransactionCreatorMetadata(adminClient, teamId, rows = []) {
@@ -1094,13 +1268,14 @@ async function loadWorkspaceTransactionCreatorMetadata(adminClient, teamId, rows
   }
 
   const results = await Promise.all(queryTasks.map((task) => task.promise))
-  const creatorMetadata = new Map()
 
   for (const result of results) {
     if (result.error) {
       throw result.error
     }
   }
+
+  const sourceRows = []
 
   results.forEach((result, index) => {
     const sourceType = queryTasks[index]?.sourceType ?? null
@@ -1110,7 +1285,9 @@ async function loadWorkspaceTransactionCreatorMetadata(adminClient, teamId, rows
     }
 
     for (const row of result?.data ?? []) {
-      creatorMetadata.set(buildWorkspaceTransactionCreatorKey(sourceType, row.id), {
+      sourceRows.push({
+        sourceType,
+        id: row.id,
         telegram_user_id: row.telegram_user_id ?? null,
         created_by_user_id:
           sourceType === 'bill' ? null : row.created_by_user_id ?? null,
@@ -1118,7 +1295,176 @@ async function loadWorkspaceTransactionCreatorMetadata(adminClient, teamId, rows
     }
   })
 
-  return creatorMetadata
+  return loadCreatorMetadataFromRows(adminClient, sourceRows)
+}
+
+async function loadRecycleBinCreatorMetadata(adminClient, teamId, rows = []) {
+  const projectIncomeIds = []
+  const expenseIds = []
+  const loanIds = []
+  const billIds = []
+  const billPaymentIds = []
+  const loanPaymentIds = []
+  const attachmentIds = []
+
+  for (const row of rows) {
+    const sourceType = normalizeText(row?.sourceType, '')
+    const id = String(row?.id ?? '')
+
+    if (!sourceType || !id) {
+      continue
+    }
+
+    if (sourceType === 'project-income') {
+      projectIncomeIds.push(id)
+      continue
+    }
+
+    if (sourceType === 'expense') {
+      expenseIds.push(id)
+      continue
+    }
+
+    if (sourceType === 'loan-disbursement') {
+      loanIds.push(id)
+      continue
+    }
+
+    if (sourceType === 'bill') {
+      billIds.push(id)
+      continue
+    }
+
+    if (sourceType === 'bill-payment') {
+      billPaymentIds.push(id)
+      continue
+    }
+
+    if (sourceType === 'loan-payment') {
+      loanPaymentIds.push(id)
+      continue
+    }
+
+    if (sourceType === 'expense-attachment') {
+      attachmentIds.push(id)
+    }
+  }
+
+  const queryTasks = []
+
+  if (projectIncomeIds.length > 0) {
+    queryTasks.push({
+      sourceType: 'project-income',
+      promise: adminClient
+        .from('project_incomes')
+        .select('id, telegram_user_id, created_by_user_id, team_id')
+        .eq('team_id', teamId)
+        .in('id', projectIncomeIds),
+    })
+  }
+
+  if (expenseIds.length > 0) {
+    queryTasks.push({
+      sourceType: 'expense',
+      promise: adminClient
+        .from('expenses')
+        .select('id, telegram_user_id, created_by_user_id, team_id')
+        .eq('team_id', teamId)
+        .in('id', expenseIds),
+    })
+  }
+
+  if (loanIds.length > 0) {
+    queryTasks.push({
+      sourceType: 'loan-disbursement',
+      promise: adminClient
+        .from('loans')
+        .select('id, telegram_user_id, created_by_user_id, team_id')
+        .eq('team_id', teamId)
+        .in('id', loanIds),
+    })
+  }
+
+  if (billIds.length > 0) {
+    queryTasks.push({
+      sourceType: 'bill',
+      promise: adminClient
+        .from('bills')
+        .select('id, telegram_user_id, team_id')
+        .eq('team_id', teamId)
+        .in('id', billIds),
+    })
+  }
+
+  if (billPaymentIds.length > 0) {
+    queryTasks.push({
+      sourceType: 'bill-payment',
+      promise: adminClient
+        .from('bill_payments')
+        .select('id, telegram_user_id, team_id')
+        .eq('team_id', teamId)
+        .in('id', billPaymentIds),
+    })
+  }
+
+  if (loanPaymentIds.length > 0) {
+    queryTasks.push({
+      sourceType: 'loan-payment',
+      promise: adminClient
+        .from('loan_payments')
+        .select('id, telegram_user_id, team_id')
+        .eq('team_id', teamId)
+        .in('id', loanPaymentIds),
+    })
+  }
+
+  if (attachmentIds.length > 0) {
+    queryTasks.push({
+      sourceType: 'expense-attachment',
+      promise: adminClient
+        .from('expense_attachments')
+        .select(
+          'id, team_id, file_asset_id, file_assets:file_asset_id ( uploaded_by_user_id, uploaded_by )'
+        )
+        .eq('team_id', teamId)
+        .in('id', attachmentIds),
+    })
+  }
+
+  if (queryTasks.length === 0) {
+    return new Map()
+  }
+
+  const results = await Promise.all(queryTasks.map((task) => task.promise))
+
+  for (const result of results) {
+    if (result.error) {
+      throw result.error
+    }
+  }
+
+  const sourceRows = []
+
+  results.forEach((result, index) => {
+    const sourceType = queryTasks[index]?.sourceType ?? null
+
+    if (!sourceType) {
+      return
+    }
+
+    for (const row of result?.data ?? []) {
+      const fileAsset = sourceType === 'expense-attachment' ? row?.file_assets ?? null : null
+
+      sourceRows.push({
+        sourceType,
+        id: row.id,
+        telegram_user_id: row.telegram_user_id ?? fileAsset?.uploaded_by ?? null,
+        created_by_user_id: row.created_by_user_id ?? fileAsset?.uploaded_by_user_id ?? null,
+      })
+    }
+  })
+
+  return loadCreatorMetadataFromRows(adminClient, sourceRows)
 }
 
 function mapAttendanceRecycleRow(row) {
@@ -1141,14 +1487,7 @@ function mapAttendanceRecycleRow(row) {
 }
 
 async function getAuthorizedContext(req, supabaseUrl, publishableKey) {
-  const authorizationHeader = String(req.headers?.authorization ?? '').trim()
-  const bearerToken = authorizationHeader.toLowerCase().startsWith('bearer ')
-    ? authorizationHeader.slice(7).trim()
-    : null
-
-  if (!bearerToken) {
-    throw createHttpError(401, 'Authorization token tidak ditemukan.')
-  }
+  const bearerToken = getBearerToken(req)
 
   const authResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
     headers: {
@@ -1171,6 +1510,30 @@ async function getAuthorizedContext(req, supabaseUrl, publishableKey) {
     authUser,
     bearerToken,
   }
+}
+
+async function assertSessionTeamAccess(sessionClient, teamId) {
+  const normalizedTeamId = normalizeText(teamId)
+
+  if (!normalizedTeamId) {
+    throw createHttpError(400, 'Team ID wajib diisi.')
+  }
+
+  const { data: team, error } = await sessionClient
+    .from('teams')
+    .select('id')
+    .eq('id', normalizedTeamId)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  if (!team?.id) {
+    throw createHttpError(403, 'Akses workspace tidak ditemukan.')
+  }
+
+  return normalizedTeamId
 }
 
 async function assertTeamAccess(adminClient, telegramUserId, teamId) {
@@ -1270,29 +1633,58 @@ function encodeWorkspaceViewCursor(row) {
   return Buffer.from(JSON.stringify(payload)).toString('base64url')
 }
 
-function applyWorkspaceTransactionViewFilter(query, filterValue) {
+function applyPaidBillVisibilityFilter(query, { includePaidBills = false } = {}) {
+  if (includePaidBills) {
+    return query
+  }
+
+  return query.or('source_type.neq.bill,and(source_type.eq.bill,bill_status.neq.paid)')
+}
+
+function applyWorkspaceTransactionViewFilter(
+  query,
+  filterValue,
+  { includePaidBills = false } = {}
+) {
   const normalizedFilter = normalizeText(filterValue, 'all')
 
   if (normalizedFilter === 'all') {
-    return query
+    return applyPaidBillVisibilityFilter(query, { includePaidBills })
   }
 
   if (normalizedFilter === 'expense') {
-    return query
-      .eq('source_type', 'expense')
-      .not('expense_type', 'in', '(material,material_invoice)')
-      .or('document_type.is.null,document_type.neq.surat_jalan')
+    return applyPaidBillVisibilityFilter(
+      query
+        .eq('source_type', 'expense')
+        .not('expense_type', 'in', '(material,material_invoice)')
+        .or('document_type.is.null,document_type.neq.surat_jalan'),
+      { includePaidBills }
+    )
   }
 
   if (normalizedFilter === 'material-invoice') {
-    return query.eq('source_type', 'expense').in('expense_type', ['material', 'material_invoice'])
+    return applyPaidBillVisibilityFilter(
+      query.eq('source_type', 'expense').in('expense_type', ['material', 'material_invoice']),
+      { includePaidBills }
+    )
   }
 
   if (normalizedFilter === 'surat-jalan') {
-    return query.eq('source_type', 'expense').eq('document_type', 'surat_jalan')
+    return applyPaidBillVisibilityFilter(
+      query.eq('source_type', 'expense').eq('document_type', 'surat_jalan'),
+      { includePaidBills }
+    )
   }
 
-  return query.eq('source_type', normalizedFilter)
+  return applyPaidBillVisibilityFilter(query.eq('source_type', normalizedFilter), {
+    includePaidBills,
+  })
+}
+
+function applyHistoryTransactionViewFilter(query, filterValue) {
+  return applyWorkspaceTransactionViewFilter(query, filterValue, {
+    includePaidBills: true,
+  }).or('document_type.is.null,document_type.neq.surat_jalan')
 }
 
 function applyWorkspaceTransactionViewCursor(query, cursor) {
@@ -1313,7 +1705,14 @@ function buildTransactionViewQuery(
   adminClient,
   viewName,
   teamId,
-  { cursor = null, limit = 20, search = '', filter = 'all', fetchAll = false } = {}
+  {
+    cursor = null,
+    limit = 20,
+    search = '',
+    filter = 'all',
+    fetchAll = false,
+    transactionId = null,
+  } = {}
 ) {
   const normalizedLimit = Number.isFinite(Number(limit))
     ? Math.min(Math.max(Number(limit), 1), 100)
@@ -1327,7 +1726,14 @@ function buildTransactionViewQuery(
 
   let query = adminClient.from(viewName).select(selectColumns).eq('team_id', teamId)
 
-  query = applyWorkspaceTransactionViewFilter(query, filter)
+  query =
+    viewName === 'vw_history_transactions'
+      ? applyHistoryTransactionViewFilter(query, filter)
+      : applyWorkspaceTransactionViewFilter(query, filter)
+
+  if (transactionId) {
+    query = query.eq('id', normalizeText(transactionId))
+  }
 
   if (normalizedSearch) {
     query = query.ilike('search_text', `%${normalizedSearch}%`)
@@ -1361,6 +1767,7 @@ async function loadTransactionViewRows(
     fetchAll = false,
     includeCreatorMetadata = false,
     debugTiming = false,
+    transactionId = null,
   } = {}
 ) {
   const startedAt = nowMs()
@@ -1374,6 +1781,7 @@ async function loadTransactionViewRows(
       search,
       filter,
       fetchAll,
+      transactionId,
     }
   )
   const queryStartedAt = nowMs()
@@ -1468,6 +1876,44 @@ async function loadWorkspaceTransactionViewRows(
     includeCreatorMetadata,
     debugTiming,
   })
+}
+
+async function loadWorkspaceTransactionViewRecord(
+  adminClient,
+  teamId,
+  transactionId,
+  { includeCreatorMetadata = true, debugTiming = false } = {}
+) {
+  const { rows, timing } = await loadWorkspaceTransactionViewRows(adminClient, teamId, {
+    fetchAll: true,
+    transactionId,
+    includeCreatorMetadata,
+    debugTiming,
+  })
+
+  return {
+    record: rows[0] ?? null,
+    timing,
+  }
+}
+
+async function loadHistoryTransactionViewRecord(
+  adminClient,
+  teamId,
+  transactionId,
+  { includeCreatorMetadata = true, debugTiming = false } = {}
+) {
+  const { rows, timing } = await loadTransactionViewRows(adminClient, 'vw_history_transactions', teamId, {
+    fetchAll: true,
+    transactionId,
+    includeCreatorMetadata,
+    debugTiming,
+  })
+
+  return {
+    record: rows[0] ?? null,
+    timing,
+  }
 }
 
 async function loadWorkspaceTransactions(adminClient, teamId, { debugTiming = false } = {}) {
@@ -1610,7 +2056,7 @@ async function syncLoanStatusFromPayments(adminClient, loanId) {
     adminClient
       .from('loans')
       .select(
-        'id, amount, principal_amount, repayment_amount, status, paid_amount, team_id, deleted_at, loan_terms_snapshot, late_interest_rate, late_interest_basis, late_penalty_type, late_penalty_amount, transaction_date, disbursed_date, interest_type, interest_rate, tenor_months'
+        'id, amount, principal_amount, repayment_amount, status, paid_amount, team_id, deleted_at, loan_terms_snapshot, late_interest_rate, late_interest_basis, late_penalty_type, late_penalty_amount, transaction_date, disbursed_date, interest_type, interest_rate, tenor_months, creditor_name_snapshot'
       )
       .eq('id', normalizedLoanId)
       .maybeSingle(),
@@ -1660,7 +2106,7 @@ async function syncLoanStatusFromPayments(adminClient, loanId) {
     })
     .eq('id', normalizedLoanId)
     .select(
-      'id, amount, principal_amount, repayment_amount, status, paid_amount, team_id, deleted_at, loan_terms_snapshot, late_interest_rate, late_interest_basis, late_penalty_type, late_penalty_amount, transaction_date, disbursed_date, interest_type, interest_rate, tenor_months'
+      'id, amount, principal_amount, repayment_amount, status, paid_amount, team_id, deleted_at, loan_terms_snapshot, late_interest_rate, late_interest_basis, late_penalty_type, late_penalty_amount, transaction_date, disbursed_date, interest_type, interest_rate, tenor_months, creditor_name_snapshot'
     )
     .single()
 
@@ -1669,6 +2115,23 @@ async function syncLoanStatusFromPayments(adminClient, loanId) {
   }
 
   return updatedLoan
+}
+
+function getLoanPaymentTargetAmount(loan) {
+  return Number(
+    loan?.loan_terms_snapshot?.base_repayment_amount ??
+      loan?.loan_terms_snapshot?.repayment_amount ??
+      loan?.repayment_amount ??
+      loan?.principal_amount ??
+      loan?.amount ??
+      0
+  )
+}
+
+function assertPaymentDoesNotOverpayParent(nextPaidAmount, targetAmount, message) {
+  if (targetAmount > 0 && nextPaidAmount > targetAmount) {
+    throw createHttpError(400, message)
+  }
 }
 
 async function createLoanPayment(adminClient, body, telegramUserId) {
@@ -1793,7 +2256,7 @@ async function restoreLoanPayment(adminClient, body, telegramUserId) {
 
   const { data: parentLoan, error: loanError } = await adminClient
     .from('loans')
-    .select('id, deleted_at')
+    .select('id, amount, principal_amount, repayment_amount, loan_terms_snapshot, deleted_at')
     .eq('id', existingPayment.loan_id)
     .maybeSingle()
 
@@ -1815,6 +2278,26 @@ async function restoreLoanPayment(adminClient, body, telegramUserId) {
       loan: await syncLoanStatusFromPayments(adminClient, existingPayment.loan_id),
     }
   }
+
+  const { data: siblingPayments, error: siblingError } = await adminClient
+    .from('loan_payments')
+    .select('id, amount')
+    .eq('loan_id', existingPayment.loan_id)
+    .is('deleted_at', null)
+
+  if (siblingError) {
+    throw siblingError
+  }
+
+  const nextPaidAmount =
+    (siblingPayments ?? []).reduce((sum, row) => sum + Number(row?.amount ?? 0), 0) +
+    Number(existingPayment.amount ?? 0)
+
+  assertPaymentDoesNotOverpayParent(
+    nextPaidAmount,
+    getLoanPaymentTargetAmount(parentLoan),
+    'Nominal pembayaran melebihi sisa pinjaman.'
+  )
 
   const timestamp = new Date().toISOString()
   const { data: restoredPayment, error } = await adminClient
@@ -1880,6 +2363,44 @@ async function updateLoanPayment(adminClient, body, telegramUserId) {
   if (existingPayment.deleted_at) {
     throw createHttpError(400, 'Pembayaran pinjaman yang dihapus tidak bisa diedit.')
   }
+
+  const { data: siblingPayments, error: siblingError } = await adminClient
+    .from('loan_payments')
+    .select('id, amount')
+    .eq('loan_id', existingPayment.loan_id)
+    .is('deleted_at', null)
+
+  if (siblingError) {
+    throw siblingError
+  }
+
+  const { data: parentLoan, error: loanError } = await adminClient
+    .from('loans')
+    .select('id, amount, principal_amount, repayment_amount, loan_terms_snapshot')
+    .eq('id', existingPayment.loan_id)
+    .maybeSingle()
+
+  if (loanError) {
+    throw loanError
+  }
+
+  if (!parentLoan?.id) {
+    throw createHttpError(404, 'Pinjaman parent tidak ditemukan.')
+  }
+
+  const nextPaidAmount = (siblingPayments ?? []).reduce((sum, row) => {
+    if (String(row.id ?? '') === String(existingPayment.id ?? '')) {
+      return sum
+    }
+
+    return sum + Number(row?.amount ?? 0)
+  }, 0) + amount
+
+  assertPaymentDoesNotOverpayParent(
+    nextPaidAmount,
+    getLoanPaymentTargetAmount(parentLoan),
+    'Nominal pembayaran melebihi sisa pinjaman.'
+  )
 
   const timestamp = new Date().toISOString()
   const { data: updatedPayment, error } = await adminClient
@@ -1966,7 +2487,7 @@ async function deleteLoanPayment(adminClient, body, telegramUserId) {
   }
 }
 
-async function hardDeleteLoanPayment(adminClient, body, telegramUserId) {
+async function hardDeleteLoanPayment(adminClient, serviceClient, body, telegramUserId) {
   const normalizedPaymentId = normalizeText(body.paymentId ?? body.payment_id ?? body.id, null)
   const teamId = normalizeText(body.teamId ?? body.team_id, null)
   const expectedUpdatedAt = normalizeText(
@@ -1997,13 +2518,18 @@ async function hardDeleteLoanPayment(adminClient, body, telegramUserId) {
     )
   }
 
-  const { error: deleteError } = await adminClient
+  const { data: deletedRows, error: deleteError } = await serviceClient
     .from('loan_payments')
     .delete()
     .eq('id', normalizedPaymentId)
+    .select('id')
 
   if (deleteError) {
     throw deleteError
+  }
+
+  if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+    throw createHttpError(409, 'Pembayaran pinjaman tidak terhapus permanen. Muat ulang data lalu coba lagi.')
   }
 
   const loan = existingPayment.loan_id
@@ -2325,19 +2851,46 @@ async function restoreLoan(adminClient, id, expectedUpdatedAt = null) {
   return mapLoanRow(restoredLoan)
 }
 
-async function restoreBill(adminClient, id) {
+function getBillPaymentStatus(totalAmount, paidAmount, existingPaidAt = null) {
+  if (totalAmount > 0 && paidAmount >= totalAmount) {
+    return {
+      status: 'paid',
+      paidAt: existingPaidAt ?? new Date().toISOString(),
+    }
+  }
+
+  if (paidAmount > 0) {
+    return {
+      status: 'partial',
+      paidAt: null,
+    }
+  }
+
+  return {
+    status: 'unpaid',
+    paidAt: null,
+  }
+}
+
+async function restoreBill(adminClient, id, telegramUserId = null, teamId = null) {
   const normalizedId = normalizeText(id)
+  const normalizedTeamId = normalizeText(teamId, null)
 
   if (!normalizedId) {
     throw createHttpError(400, 'Bill ID tidak valid.')
   }
 
-  const { data: bill, error: billLookupError } = await adminClient
+  let billLookupQuery = adminClient
     .from('bills')
-    .select('id, expense_id, project_income_id')
+    .select('id, expense_id, project_income_id, team_id, amount, paid_at, status, paid_amount')
     .eq('id', normalizedId)
     .not('deleted_at', 'is', null)
-    .maybeSingle()
+
+  if (normalizedTeamId) {
+    billLookupQuery = billLookupQuery.eq('team_id', normalizedTeamId)
+  }
+
+  const { data: bill, error: billLookupError } = await billLookupQuery.maybeSingle()
 
   if (billLookupError) {
     throw billLookupError
@@ -2347,11 +2900,29 @@ async function restoreBill(adminClient, id) {
     throw createHttpError(404, 'Tagihan terhapus tidak ditemukan.')
   }
 
+  const billTeamId = normalizeText(bill.team_id, normalizedTeamId)
+
+  if (!billTeamId) {
+    throw createHttpError(400, 'Tagihan tanpa team tidak bisa dipulihkan.')
+  }
+
+  if (telegramUserId) {
+    await assertTeamAccess(adminClient, telegramUserId, billTeamId)
+  }
+
+  if (!bill.expense_id && !bill.project_income_id) {
+    throw createHttpError(
+      400,
+      'Tagihan ini tidak memiliki parent expense atau pemasukan proyek untuk dipulihkan dari path ini.'
+    )
+  }
+
   if (bill.project_income_id) {
     const { data: projectIncome, error: incomeError } = await adminClient
       .from('project_incomes')
-      .select('id, deleted_at')
+      .select('id, team_id, deleted_at')
       .eq('id', bill.project_income_id)
+      .eq('team_id', billTeamId)
       .maybeSingle()
 
     if (incomeError) {
@@ -2373,8 +2944,9 @@ async function restoreBill(adminClient, id) {
   if (bill.expense_id) {
     const { data: expense, error: expenseError } = await adminClient
       .from('expenses')
-      .select('id, deleted_at')
+      .select('id, team_id, deleted_at')
       .eq('id', bill.expense_id)
+      .eq('team_id', billTeamId)
       .maybeSingle()
 
     if (expenseError) {
@@ -2393,13 +2965,16 @@ async function restoreBill(adminClient, id) {
     }
   }
 
+  const timestamp = new Date().toISOString()
+
   const { data: restoredBill, error } = await adminClient
     .from('bills')
     .update({
       deleted_at: null,
-      updated_at: new Date().toISOString(),
+      updated_at: timestamp,
     })
     .eq('id', normalizedId)
+    .eq('team_id', billTeamId)
     .not('deleted_at', 'is', null)
     .select(
       'id, expense_id, project_income_id, team_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, worker_name_snapshot, supplier_name_snapshot, project_name_snapshot, created_at, updated_at, deleted_at'
@@ -2410,7 +2985,84 @@ async function restoreBill(adminClient, id) {
     throw error
   }
 
-  return mapBillRecycleRow(restoredBill)
+  const { data: billPayments, error: billPaymentsError } = await adminClient
+    .from('bill_payments')
+    .select('id, amount, payment_date, deleted_at')
+    .eq('bill_id', normalizedId)
+
+  if (billPaymentsError) {
+    throw billPaymentsError
+  }
+
+  const restoredPaymentIds = (billPayments ?? [])
+    .filter((payment) => payment?.deleted_at)
+    .map((payment) => payment.id)
+    .filter(Boolean)
+  const paidAmount = (billPayments ?? []).reduce(
+    (sum, payment) => sum + Number(payment?.amount ?? 0),
+    0
+  )
+  const latestPaymentDate = (billPayments ?? []).reduce((latest, payment) => {
+    const paymentDate = normalizeText(payment?.payment_date, null)
+
+    if (!paymentDate) {
+      return latest
+    }
+
+    if (!latest) {
+      return paymentDate
+    }
+
+    return new Date(paymentDate).getTime() > new Date(latest).getTime() ? paymentDate : latest
+  }, null)
+  const totalAmount = Number(restoredBill?.amount ?? 0)
+
+  assertPaymentDoesNotOverpayParent(
+    paidAmount,
+    totalAmount,
+    'Nominal pembayaran tagihan melebihi total tagihan.'
+  )
+
+  const nextBillState = getBillPaymentStatus(
+    totalAmount,
+    paidAmount,
+    restoredBill.paid_at ?? latestPaymentDate
+  )
+
+  if (restoredPaymentIds.length > 0) {
+    const { error: restorePaymentsError } = await adminClient
+      .from('bill_payments')
+      .update({
+        deleted_at: null,
+        updated_at: timestamp,
+      })
+      .in('id', restoredPaymentIds)
+      .not('deleted_at', 'is', null)
+
+    if (restorePaymentsError) {
+      throw restorePaymentsError
+    }
+  }
+
+  const { data: syncedBill, error: syncError } = await adminClient
+    .from('bills')
+    .update({
+      paid_amount: paidAmount,
+      status: nextBillState.status,
+      paid_at: nextBillState.paidAt,
+      updated_at: timestamp,
+    })
+    .eq('id', normalizedId)
+    .select(
+      'id, expense_id, project_income_id, team_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, worker_name_snapshot, supplier_name_snapshot, project_name_snapshot, created_at, updated_at, deleted_at'
+    )
+    .single()
+
+  if (syncError) {
+    throw syncError
+  }
+
+  return mapBillRecycleRow(syncedBill)
 }
 
 async function restoreAttendanceRecord(adminClient, id) {
@@ -2985,42 +3637,20 @@ export default async function handler(req, res) {
       const teamId = normalizeText(req.query?.teamId, null)
       const view = normalizeText(req.query?.view, 'active')
       const transactionId = normalizeText(req.query?.transactionId, null)
-      const context = await getAuthorizedContext(req, supabaseUrl, publishableKey)
-      const adminClient = createDatabaseClient(
+      const bearerToken = getBearerToken(req)
+      const accessClient = createDatabaseClient(
         supabaseUrl,
-        databaseKey,
-        context.bearerToken
+        publishableKey,
+        bearerToken
       )
-      const { data: profile, error: profileError } = await adminClient
-        .from('profiles')
-        .select('id, telegram_user_id')
-        .eq('id', context.authUser.id)
-        .maybeSingle()
-
-      if (profileError) {
-        throw profileError
-      }
-
-      const telegramUserId = normalizeText(
-        profile?.telegram_user_id ?? context.authUser?.user_metadata?.telegram_user_id,
-        null
-      )
-
-      if (!telegramUserId) {
-        throw createHttpError(403, 'Profile Telegram tidak ditemukan.')
-      }
-
-      const effectiveTeamId = await assertTeamAccess(
-        adminClient,
-        telegramUserId,
-        teamId
-      )
+      const readClient = createDatabaseClient(supabaseUrl, databaseKey)
+      const effectiveTeamId = await assertSessionTeamAccess(accessClient, teamId)
       const debugTimingEnabled = normalizeText(req.query?.debugTiming, '') === '1'
 
       if (view === 'recycle-bin') {
         if (transactionId) {
           const record = await loadDeletedTransactionById(
-            adminClient,
+            readClient,
             effectiveTeamId,
             transactionId
           )
@@ -3034,7 +3664,7 @@ export default async function handler(req, res) {
         const query = req.query ?? {}
 
         if (!shouldPaginateRecycleBinTransactions(query)) {
-          const { rows, timing } = await loadRecycleBinViewRows(adminClient, effectiveTeamId, {
+          const { rows, timing } = await loadRecycleBinViewRows(readClient, effectiveTeamId, {
             fetchAll: true,
             debugTiming: debugTimingEnabled,
           })
@@ -3054,7 +3684,7 @@ export default async function handler(req, res) {
         }
 
         const { rows, pageInfo, timing } = await loadRecycleBinRecords(
-          adminClient,
+          readClient,
           effectiveTeamId,
           {
             cursor: query.cursor ?? null,
@@ -3076,9 +3706,27 @@ export default async function handler(req, res) {
       if (view === 'history') {
         const query = req.query ?? {}
 
+        if (transactionId) {
+          const { record, timing } = await loadHistoryTransactionViewRecord(
+            readClient,
+            effectiveTeamId,
+            transactionId,
+            {
+              includeCreatorMetadata: true,
+              debugTiming: debugTimingEnabled,
+            }
+          )
+
+          return res.status(200).json({
+            success: true,
+            record,
+            ...(debugTimingEnabled ? { timing } : {}),
+          })
+        }
+
         if (!shouldPaginateWorkspaceTransactions(query)) {
           const { rows: historyTransactions, timing } = await loadHistoryTransactions(
-            adminClient,
+            readClient,
             effectiveTeamId,
             {
               debugTiming: debugTimingEnabled,
@@ -3092,7 +3740,7 @@ export default async function handler(req, res) {
           })
         }
         const { rows, pageInfo, timing } = await loadTransactionViewRows(
-          adminClient,
+          readClient,
           'vw_history_transactions',
           effectiveTeamId,
           {
@@ -3100,7 +3748,7 @@ export default async function handler(req, res) {
             limit: query.limit ?? 20,
             search: query.search ?? '',
             filter: query.filter ?? 'all',
-            includeCreatorMetadata: false,
+            includeCreatorMetadata: true,
             debugTiming: debugTimingEnabled,
           }
         )
@@ -3116,9 +3764,27 @@ export default async function handler(req, res) {
       if (view === 'workspace') {
         const query = req.query ?? {}
 
+        if (transactionId) {
+          const { record, timing } = await loadWorkspaceTransactionViewRecord(
+            readClient,
+            effectiveTeamId,
+            transactionId,
+            {
+              includeCreatorMetadata: true,
+              debugTiming: debugTimingEnabled,
+            }
+          )
+
+          return res.status(200).json({
+            success: true,
+            record,
+            ...(debugTimingEnabled ? { timing } : {}),
+          })
+        }
+
         if (!shouldPaginateWorkspaceTransactions(query)) {
           const { rows: workspaceTransactions, timing } = await loadWorkspaceTransactions(
-            adminClient,
+            readClient,
             effectiveTeamId,
             {
               debugTiming: debugTimingEnabled,
@@ -3132,14 +3798,14 @@ export default async function handler(req, res) {
           })
         }
         const { rows, pageInfo, timing } = await loadWorkspaceTransactionViewRows(
-          adminClient,
+          readClient,
           effectiveTeamId,
           {
             cursor: query.cursor ?? null,
             limit: query.limit ?? 20,
             search: query.search ?? '',
             filter: query.filter ?? 'all',
-            includeCreatorMetadata: false,
+            includeCreatorMetadata: true,
             debugTiming: debugTimingEnabled,
           }
         )
@@ -3154,7 +3820,7 @@ export default async function handler(req, res) {
 
       if (view === 'summary') {
         const { summary, timing } = await loadOperationalSummary(
-          adminClient,
+          readClient,
           effectiveTeamId,
           {
             debugTiming: debugTimingEnabled,
@@ -3168,7 +3834,7 @@ export default async function handler(req, res) {
         })
       }
 
-      const cashMutations = await loadCashMutations(adminClient, effectiveTeamId)
+      const cashMutations = await loadCashMutations(readClient, effectiveTeamId)
 
       return res.status(200).json({
         success: true,
@@ -3187,6 +3853,7 @@ export default async function handler(req, res) {
       databaseKey,
       context.bearerToken
     )
+    const serviceClient = createDatabaseClient(supabaseUrl, databaseKey)
     const { data: profile, error: profileError } = await adminClient
       .from('profiles')
       .select('id, telegram_user_id')
@@ -3215,7 +3882,12 @@ export default async function handler(req, res) {
     if (method === 'DELETE') {
       if (resource === 'loan-payments') {
         if (normalizeText(body.action, '') === 'permanent-delete') {
-          const result = await hardDeleteLoanPayment(adminClient, body, telegramUserId)
+          const result = await hardDeleteLoanPayment(
+            adminClient,
+            serviceClient,
+            body,
+            telegramUserId
+          )
 
           return res.status(200).json({
             success: true,
@@ -3423,7 +4095,7 @@ export default async function handler(req, res) {
         }
 
         if (recordType === 'bill') {
-          const record = await restoreBill(adminClient, body.id)
+          const record = await restoreBill(adminClient, body.id, telegramUserId, effectiveTeamId)
 
           return res.status(200).json({
             success: true,

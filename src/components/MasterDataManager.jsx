@@ -4,6 +4,7 @@ import { FolderKanban, Loader2, Plus, Users2 } from 'lucide-react'
 import ProtectedRoute from './ProtectedRoute'
 import ActionCard from './ui/ActionCard'
 import { masterTabs } from './master/masterTabs'
+import { capabilityContracts } from '../lib/capabilities'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
 import {
@@ -38,6 +39,7 @@ function MasterDataManager() {
   const workerWageRates = useMasterStore((state) => state.workerWageRates)
   const materials = useMasterStore((state) => state.materials)
   const staffMembers = useMasterStore((state) => state.staffMembers)
+  const hasFetched = useMasterStore((state) => state.hasFetched)
   const fetchProjects = useMasterStore((state) => state.fetchProjects)
   const fetchExpenseCategories = useMasterStore(
     (state) => state.fetchExpenseCategories
@@ -222,6 +224,7 @@ function MasterDataManager() {
 
   const currentConfig = masterTabs.find((tab) => tab.key === activeTab) ?? masterTabs[0]
   const currentRecords = collections[currentConfig.stateKey] ?? []
+  const showInitialLoading = isLoading && !hasFetched && currentRecords.length === 0
 
   const openCreateForm = () => {
     setFeedbackMessage(null)
@@ -230,7 +233,11 @@ function MasterDataManager() {
 
   const openEditForm = (record) => {
     setFeedbackMessage(null)
-    navigate(`/master/${currentConfig.routeKey}/edit/${record.id}`)
+    navigate(`/master/${currentConfig.routeKey}/edit/${record.id}`, {
+      state: {
+        returnTo: '/master',
+      },
+    })
   }
 
   const handleDelete = async (record) => {
@@ -272,7 +279,7 @@ function MasterDataManager() {
   if (!currentTeamId) {
     return (
       <ProtectedRoute
-        requiredCapability="master_data_admin"
+        requiredCapability={capabilityContracts.master_data_admin.key}
         description="Master data hanya tersedia untuk Owner dan Admin."
       >
         <AppCard className="app-tone-warning space-y-3">
@@ -291,7 +298,7 @@ function MasterDataManager() {
 
   return (
     <ProtectedRoute
-      requiredCapability="master_data_admin"
+      requiredCapability={capabilityContracts.master_data_admin.key}
       description="Master data universal hanya tersedia untuk Owner dan Admin."
     >
       <section className="space-y-4">
@@ -363,6 +370,13 @@ function MasterDataManager() {
             </AppCard>
           ) : null}
 
+          {showInitialLoading ? (
+            <AppCard className="flex items-center gap-3 px-4 py-4 text-sm text-[var(--app-hint-color)]">
+              <Loader2 className="h-4 w-4 animate-spin text-[var(--app-accent-color)]" />
+              Menyinkronkan master data...
+            </AppCard>
+          ) : null}
+
           {error ? (
             <AppErrorState
               title="Master data gagal dimuat"
@@ -371,7 +385,7 @@ function MasterDataManager() {
           ) : null}
 
           <div className="space-y-3">
-            {currentRecords.length > 0 ? (
+            {!showInitialLoading && currentRecords.length > 0 ? (
               currentRecords.map((record) => {
                 const workerRates = workerRatesByWorkerId[record.id] ?? []
                 const primaryTitle =
@@ -447,13 +461,13 @@ function MasterDataManager() {
                   />
                 )
               })
-            ) : (
+            ) : !showInitialLoading ? (
               <AppEmptyState
                 icon={<FolderKanban className="h-5 w-5" />}
                 title={currentConfig.emptyTitle}
                 description="Gunakan tombol tambah untuk membuat data pertama."
               />
-            )}
+            ) : null}
           </div>
         </AppCardStrong>
       </section>

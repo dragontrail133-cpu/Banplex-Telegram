@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCcw } from 'lucide-react'
+import { Loader2, Plus, RefreshCcw, Users } from 'lucide-react'
 import ActionCard from './ui/ActionCard'
 import {
   AppButton,
   AppCardDashed,
   AppCardStrong,
+  AppEmptyState,
+  AppErrorState,
   AppInput,
   AppSelect,
   AppSheet,
@@ -35,11 +37,36 @@ function createInitialFormData() {
   }
 }
 
+function renderSheetFeedback(feedbackError, helperText) {
+  if (feedbackError) {
+    const title =
+      feedbackError.kind === 'submit'
+        ? feedbackError.mode === 'update'
+          ? 'Gagal memperbarui penerima manfaat'
+          : 'Gagal menyimpan penerima manfaat'
+        : 'Form penerima manfaat belum lengkap'
+
+    return (
+      <AppErrorState
+        description={feedbackError.message}
+        title={title}
+      />
+    )
+  }
+
+  return (
+    <AppCardDashed className="px-4 py-3 text-sm leading-6 text-[var(--app-hint-color)]">
+      {helperText}
+    </AppCardDashed>
+  )
+}
+
 function BeneficiaryList() {
   const [formData, setFormData] = useState(createInitialFormData)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [localError, setLocalError] = useState(null)
+  const formId = 'beneficiary-form'
   const beneficiaries = useHrStore((state) => state.beneficiaries)
   const isLoading = useHrStore((state) => state.isLoading)
   const isSubmitting = useHrStore((state) => state.isSubmitting)
@@ -49,7 +76,6 @@ function BeneficiaryList() {
   const addBeneficiary = useHrStore((state) => state.addBeneficiary)
   const updateBeneficiary = useHrStore((state) => state.updateBeneficiary)
   const deleteBeneficiary = useHrStore((state) => state.deleteBeneficiary)
-
   useEffect(() => {
     fetchBeneficiaries({ force: true }).catch((fetchError) => {
       console.error('Gagal memuat penerima manfaat:', fetchError)
@@ -83,6 +109,7 @@ function BeneficiaryList() {
       notes: beneficiary.notes ?? '',
     })
     setLocalError(null)
+    clearError()
     setIsModalOpen(true)
   }
 
@@ -113,7 +140,7 @@ function BeneficiaryList() {
     const notes = normalizeText(formData.notes, '')
 
     if (!name) {
-      setLocalError('Nama penerima manfaat wajib diisi.')
+      setLocalError({ kind: 'validation', message: 'Nama penerima manfaat wajib diisi.' })
       return
     }
 
@@ -139,13 +166,17 @@ function BeneficiaryList() {
       await fetchBeneficiaries({ force: true })
 
       handleCloseModal()
-    } catch (submitError) {
+      } catch (submitError) {
       const message =
         submitError instanceof Error
           ? submitError.message
           : 'Gagal menyimpan data penerima manfaat.'
 
-      setLocalError(message)
+      setLocalError({
+        kind: 'submit',
+        mode: editingId ? 'update' : 'create',
+        message,
+      })
     }
   }
 
@@ -182,15 +213,18 @@ function BeneficiaryList() {
     >
 
       {error ? (
-        <AppCardDashed className="app-tone-danger text-sm leading-6 text-rose-700">
-          {error}
-        </AppCardDashed>
+        <AppErrorState
+          description={error}
+          title="Penerima manfaat gagal dimuat"
+        />
       ) : null}
 
       {isLoading && beneficiaries.length === 0 ? (
-        <AppCardDashed className="px-4 py-5 text-sm text-[var(--app-hint-color)]">
-          Memuat data penerima manfaat...
-        </AppCardDashed>
+        <AppEmptyState
+          description="Menarik data terbaru dari server."
+          icon={<Loader2 className="h-10 w-10 animate-spin" />}
+          title="Memuat data penerima manfaat"
+        />
       ) : beneficiaries.length > 0 ? (
         <AppCardStrong padded={false} className="overflow-hidden">
           {beneficiaries.map((beneficiary) => (
@@ -225,19 +259,40 @@ function BeneficiaryList() {
           ))}
         </AppCardStrong>
       ) : (
-        <AppCardDashed className="px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
-          Belum ada data penerima manfaat. Tambahkan data pertama untuk memulai.
-        </AppCardDashed>
+        <AppEmptyState
+          description="Tambahkan data pertama untuk memulai."
+          icon={<Users className="h-10 w-10" />}
+          title="Belum ada data penerima manfaat"
+        />
       )}
 
       {isModalOpen ? (
         <AppSheet
+          footer={
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <AppButton onClick={handleCloseModal} type="button" variant="secondary">
+                Batal
+              </AppButton>
+              <AppButton
+                disabled={isSubmitting}
+                form={formId}
+                type="submit"
+              >
+                {isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
+              </AppButton>
+            </div>
+          }
           open={isModalOpen}
           onClose={handleCloseModal}
           title={editingId ? 'Edit Data' : 'Tambah Data Baru'}
           description="Masukkan biodata dasar penerima manfaat agar data lebih rapi."
         >
-          <form className="space-y-5" onSubmit={handleSubmit}>
+          <form id={formId} className="space-y-5" onSubmit={handleSubmit}>
+            {renderSheetFeedback(
+              localError,
+              editingId ? 'Perbarui data penerima manfaat di bawah.' : 'Isi data penerima manfaat di bawah.'
+            )}
+
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-[var(--app-text-color)]">
                 Nama
@@ -307,28 +362,6 @@ function BeneficiaryList() {
                 value={formData.notes}
               />
             </label>
-
-            {localError ? (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
-                {localError}
-              </div>
-            ) : null}
-
-            {error ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-                {error}
-              </div>
-            ) : null}
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <AppButton onClick={handleCloseModal} type="button" variant="secondary">
-                Batal
-              </AppButton>
-
-              <AppButton disabled={isSubmitting} type="submit">
-                {isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
-              </AppButton>
-            </div>
           </form>
         </AppSheet>
       ) : null}

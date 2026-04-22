@@ -580,6 +580,56 @@ using (
   )
 );
 
+drop policy if exists stock_transactions_insert_team on public.stock_transactions;
+create policy stock_transactions_insert_team
+on public.stock_transactions
+for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.materials m
+    where m.id = stock_transactions.material_id
+      and app_private.can_access_team(m.team_id)
+  )
+);
+
+drop policy if exists stock_transactions_update_team on public.stock_transactions;
+create policy stock_transactions_update_team
+on public.stock_transactions
+for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.materials m
+    where m.id = stock_transactions.material_id
+      and app_private.can_access_team(m.team_id)
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.materials m
+    where m.id = stock_transactions.material_id
+      and app_private.can_access_team(m.team_id)
+  )
+);
+
+drop policy if exists stock_transactions_delete_team on public.stock_transactions;
+create policy stock_transactions_delete_team
+on public.stock_transactions
+for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.materials m
+    where m.id = stock_transactions.material_id
+      and app_private.can_access_team(m.team_id)
+  )
+);
+
 create or replace view public.vw_cash_mutation
 with (security_invoker = true)
 as

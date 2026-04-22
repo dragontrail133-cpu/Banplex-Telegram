@@ -1,16 +1,10 @@
 import crypto from 'node:crypto'
 import { Buffer } from 'node:buffer'
 import { createClient } from '@supabase/supabase-js'
+import { allRoles } from '../src/lib/rbac.js'
 
 const MAX_INIT_DATA_AGE_SECONDS = 60 * 60 * 24
-const validRoles = new Set([
-  'Owner',
-  'Admin',
-  'Logistik',
-  'Payroll',
-  'Administrasi',
-  'Viewer',
-])
+const validRoles = new Set(allRoles)
 let profilesRoleColumnState = 'unknown'
 
 function getEnv(name, fallback = '') {
@@ -67,6 +61,69 @@ function getOwnerTelegramIdentifiers() {
     ...normalizeTelegramIdentifierList(getEnv('TELEGRAM_OWNER_ID')),
     ...normalizeTelegramIdentifierList(getEnv('VITE_OWNER_TELEGRAM_ID')),
   ]
+}
+
+function normalizeOptionalText(value, fallback = null) {
+  const normalizedValue = String(value ?? '').trim()
+
+  return normalizedValue.length > 0 ? normalizedValue : fallback
+}
+
+function isTruthyBoolean(value) {
+  return ['1', 'true', 'yes', 'on'].includes(
+    String(value ?? '').trim().toLowerCase()
+  )
+}
+
+function isLocalDevelopmentRequest(req) {
+  const hostHeader = normalizeOptionalText(
+    req?.headers?.['x-forwarded-host'] ?? req?.headers?.host,
+    ''
+  )
+  const normalizedHost = hostHeader
+    .split(',')[0]
+    .trim()
+    .split(':')[0]
+    .toLowerCase()
+  const normalizedEnv = normalizeOptionalText(
+    getEnv('VERCEL_ENV', getEnv('NODE_ENV')),
+    'development'
+  ).toLowerCase()
+
+  return (
+    normalizedEnv !== 'production' &&
+    ['localhost', '127.0.0.1', '0.0.0.0', '::1'].includes(normalizedHost)
+  )
+}
+
+function buildDevBypassTelegramUser(ownerTelegramIds = []) {
+  const fallbackTelegramUserId = normalizeTelegramIdentifier(
+    getEnv('DEV_BYPASS_TELEGRAM_ID')
+  )
+  const telegramUserId = ownerTelegramIds[0] ?? fallbackTelegramUserId
+
+  if (!telegramUserId) {
+    throw createHttpError(
+      500,
+      'Dev auth bypass membutuhkan OWNER_TELEGRAM_ID atau DEV_BYPASS_TELEGRAM_ID.'
+    )
+  }
+
+  return {
+    id: telegramUserId,
+    first_name: normalizeOptionalText(
+      getEnv('DEV_BYPASS_TELEGRAM_FIRST_NAME'),
+      'Local'
+    ),
+    last_name: normalizeOptionalText(
+      getEnv('DEV_BYPASS_TELEGRAM_LAST_NAME'),
+      'Smoke'
+    ),
+    username: normalizeOptionalText(
+      getEnv('DEV_BYPASS_TELEGRAM_USERNAME'),
+      `dev-${telegramUserId}`
+    ),
+  }
 }
 
 function verifyInitData(initData, botToken) {
@@ -602,14 +659,41 @@ export default async function handler(req, res) {
 
   try {
     const body = await parseRequestBody(req)
-    const { initData } = body
-    authStage = 'verify_telegram_init_data'
-    const { telegramUserId, telegramUser } = verifyInitData(initData, telegramBotToken)
-    const normalizedTelegramUserId = normalizeTelegramIdentifier(telegramUserId)
     const ownerTelegramIds = getOwnerTelegramIdentifiers()
-    const isOwnerBypass = ownerTelegramIds.some(
-      (candidateTelegramId) => candidateTelegramId === normalizedTelegramUserId
-    )
+    const useDevBypass = isTruthyBoolean(body?.devBypass)
+    let telegramUserId
+    let telegramUser
+    let normalizedTelegramUserId
+    let isOwnerBypass = false
+
+    if (useDevBypass) {
+      authStage = 'verify_dev_bypass'
+
+      if (!isLocalDevelopmentRequest(req)) {
+        throw createHttpError(
+          403,
+          'Dev auth bypass hanya diizinkan untuk localhost saat development.'
+        )
+      }
+
+      telegramUser = buildDevBypassTelegramUser(ownerTelegramIds)
+      telegramUserId = normalizeTelegramIdentifier(telegramUser.id)
+      normalizedTelegramUserId = telegramUserId
+      isOwnerBypass = true
+    } else {
+      const { initData } = body
+
+      authStage = 'verify_telegram_init_data'
+      const verifiedPayload = verifyInitData(initData, telegramBotToken)
+
+      telegramUserId = verifiedPayload.telegramUserId
+      telegramUser = verifiedPayload.telegramUser
+      normalizedTelegramUserId = normalizeTelegramIdentifier(telegramUserId)
+      isOwnerBypass = ownerTelegramIds.some(
+        (candidateTelegramId) => candidateTelegramId === normalizedTelegramUserId
+      )
+    }
+
     const email = getTelegramLoginEmail(telegramUserId)
     const password = buildTelegramPassword(telegramUserId, appAuthSecret)
     const adminClient = createAdminClient(supabaseUrl, serviceRoleKey)

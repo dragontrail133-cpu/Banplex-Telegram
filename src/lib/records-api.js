@@ -444,6 +444,8 @@ export async function fetchAttendanceHistoryFromApi({
   teamId,
   month = '',
   workerId = '',
+  workerName = '',
+  date = '',
 } = {}) {
   const result = await requestRecordsApi('GET', {
     resource: 'attendance-history',
@@ -451,10 +453,33 @@ export async function fetchAttendanceHistoryFromApi({
       teamId,
       month,
       workerId: workerId === 'all' ? '' : workerId,
+      workerName,
+      date,
     },
   })
 
   return result.attendances ?? []
+}
+
+export async function fetchAttendanceHistorySummaryFromApi({
+  teamId,
+  month = '',
+} = {}) {
+  const result = await requestRecordsApi('GET', {
+    resource: 'attendance-history',
+    query: {
+      teamId,
+      month,
+      view: 'summary',
+    },
+  })
+
+  return result.summary ?? {
+    month: month || null,
+    attendanceCount: 0,
+    dailyGroups: [],
+    workerGroups: [],
+  }
 }
 
 export async function fetchAttendanceRecordFromApi(attendanceId, { includeDeleted = true } = {}) {
@@ -463,6 +488,18 @@ export async function fetchAttendanceRecordFromApi(attendanceId, { includeDelete
     query: {
       attendanceId,
       includeDeleted: includeDeleted ? 'true' : 'false',
+    },
+  })
+
+  return result.attendance ?? null
+}
+
+export async function updateAttendanceRecordFromApi(attendanceId, payload) {
+  const result = await requestRecordsApi('PATCH', {
+    resource: 'attendance',
+    body: {
+      attendanceId,
+      ...payload,
     },
   })
 

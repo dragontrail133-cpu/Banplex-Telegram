@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { EyeOff, Plus, RefreshCcw, Trash2, Users } from 'lucide-react'
+import { EyeOff, Loader2, Plus, RefreshCcw, Trash2, Users } from 'lucide-react'
 import {
   AppButton,
   AppCardDashed,
+  AppEmptyState,
+  AppErrorState,
   AppSheet,
   AppWrapToggleGroup,
   PageSection,
@@ -49,10 +51,33 @@ function createInitialFormData() {
   }
 }
 
+function renderSheetFeedback(feedbackError) {
+  if (feedbackError) {
+    const title =
+      feedbackError.kind === 'submit'
+        ? 'Gagal menyimpan pelamar'
+        : 'Form pelamar belum lengkap'
+
+    return (
+      <AppErrorState
+        description={feedbackError.message}
+        title={title}
+      />
+    )
+  }
+
+  return (
+    <AppCardDashed className="px-4 py-3 text-sm leading-6 text-[var(--app-hint-color)]">
+      Isi data pelamar di bawah.
+    </AppCardDashed>
+  )
+}
+
 function HrdPipeline() {
   const [formData, setFormData] = useState(createInitialFormData)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [localError, setLocalError] = useState(null)
+  const formId = 'hrd-applicant-form'
   const applicants = useHrStore((state) => state.applicants)
   const isLoading = useHrStore((state) => state.isLoading)
   const isSubmitting = useHrStore((state) => state.isSubmitting)
@@ -95,7 +120,6 @@ function HrdPipeline() {
       })),
     [applicants]
   )
-
   const handleChange = (event) => {
     const { name, value } = event.target
 
@@ -138,12 +162,12 @@ function HrdPipeline() {
     ].filter(Boolean)
 
     if (!name) {
-      setLocalError('Nama pelamar wajib diisi.')
+      setLocalError({ kind: 'validation', message: 'Nama pelamar wajib diisi.' })
       return
     }
 
     if (!position) {
-      setLocalError('Posisi pelamar wajib diisi.')
+      setLocalError({ kind: 'validation', message: 'Posisi pelamar wajib diisi.' })
       return
     }
 
@@ -165,7 +189,7 @@ function HrdPipeline() {
           ? submitError.message
           : 'Gagal menyimpan pelamar.'
 
-      setLocalError(message)
+      setLocalError({ kind: 'submit', message })
     }
   }
 
@@ -202,21 +226,24 @@ function HrdPipeline() {
     >
 
       {error ? (
-        <AppCardDashed className="app-tone-danger text-sm leading-6 text-rose-700">
-          {error}
-        </AppCardDashed>
+        <AppErrorState
+          description={error}
+          title="Pelamar gagal dimuat"
+        />
       ) : null}
 
       {isLoading && applicants.length === 0 ? (
-        <AppCardDashed className="px-4 py-5 text-sm text-[var(--app-hint-color)]">
-          Memuat data pelamar...
-        </AppCardDashed>
+        <AppEmptyState
+          description="Menarik data terbaru dari server."
+          icon={<Loader2 className="h-10 w-10 animate-spin" />}
+          title="Memuat data pelamar"
+        />
       ) : applicants.length > 0 ? (
-        <div className="grid gap-4 xl:grid-cols-5">
+      <div className="grid gap-4 xl:grid-cols-5">
           {groupedApplicants.map((group) => (
             <div
               key={group.value}
-              className="space-y-3 rounded-[24px] border border-slate-200 bg-white/80 p-4 shadow-sm"
+              className="space-y-3 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm"
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -341,33 +368,59 @@ function HrdPipeline() {
                     </article>
                   ))
                 ) : (
-                  <AppCardDashed className="px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
-                    Belum ada pelamar pada status ini.
-                  </AppCardDashed>
+                  <AppEmptyState
+                    className="px-2 py-0"
+                    icon={<EyeOff className="h-8 w-8" />}
+                    title="Belum ada pelamar pada status ini"
+                  />
                 )}
               </div>
             </div>
           ))}
         </div>
       ) : (
-        <AppCardDashed className="px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
-          Belum ada data pelamar. Tambahkan pelamar pertama untuk memulai pipeline.
-        </AppCardDashed>
+        <AppEmptyState
+          description="Tambahkan pelamar pertama untuk memulai pipeline."
+          icon={<Users className="h-10 w-10" />}
+          title="Belum ada data pelamar"
+        />
       )}
 
       {isModalOpen ? (
         <AppSheet
+          description="Isi data utama pelamar dan unggah dokumen dasar dari satu form yang sama."
+          footer={
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <AppButton onClick={handleCloseModal} type="button" variant="secondary">
+                Batal
+              </AppButton>
+              <AppButton
+                disabled={isSubmitting}
+                form={formId}
+                type="submit"
+              >
+                {isSubmitting ? 'Menyimpan...' : 'Simpan Pelamar'}
+              </AppButton>
+            </div>
+          }
           open={isModalOpen}
           onClose={handleCloseModal}
           title="Tambah Pelamar Baru"
         >
-          <form className="space-y-5" encType="multipart/form-data" onSubmit={handleSubmit}>
+          <form
+            id={formId}
+            className="space-y-5"
+            encType="multipart/form-data"
+            onSubmit={handleSubmit}
+          >
+              {renderSheetFeedback(localError)}
+
               <label className="block space-y-2">
                 <span className="text-sm font-semibold text-[var(--app-text-color)]">
                   Nama
                 </span>
                 <input
-                  className="w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                   name="name"
                   onChange={handleChange}
                   placeholder="Contoh: Andi Pratama"
@@ -382,7 +435,7 @@ function HrdPipeline() {
                   Posisi
                 </span>
                 <input
-                  className="w-full rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                   name="position"
                   onChange={handleChange}
                   placeholder="Contoh: Staff Administrasi"
@@ -414,7 +467,7 @@ function HrdPipeline() {
                     Upload CV
                   </span>
                   <input
-                    className="w-full rounded-2xl border border-dashed border-slate-300 bg-white/85 px-4 py-3 text-sm text-[var(--app-text-color)] outline-none transition file:mr-4 file:rounded-full file:border-0 file:bg-slate-950 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                    className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-[var(--app-text-color)] outline-none transition file:mr-4 file:rounded-full file:border-0 file:bg-slate-950 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                     accept=".pdf,.doc,.docx,image/*"
                     name="cvFile"
                     type="file"
@@ -426,7 +479,7 @@ function HrdPipeline() {
                     Upload KTP
                   </span>
                   <input
-                    className="w-full rounded-2xl border border-dashed border-slate-300 bg-white/85 px-4 py-3 text-sm text-[var(--app-text-color)] outline-none transition file:mr-4 file:rounded-full file:border-0 file:bg-slate-950 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                    className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-[var(--app-text-color)] outline-none transition file:mr-4 file:rounded-full file:border-0 file:bg-slate-950 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                     accept=".pdf,.jpg,.jpeg,.png,image/*"
                     name="ktpFile"
                     type="file"
@@ -439,43 +492,13 @@ function HrdPipeline() {
                   Catatan
                 </span>
                 <textarea
-                  className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                   name="notes"
                   onChange={handleChange}
                   placeholder="Opsional, misal: referensi internal."
                   value={formData.notes}
                 />
               </label>
-
-              {localError ? (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
-                  {localError}
-                </div>
-              ) : null}
-
-              {error ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-                  {error}
-                </div>
-              ) : null}
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <button
-                  className="inline-flex items-center justify-center rounded-[22px] border border-slate-200 bg-white/85 px-5 py-4 text-base font-semibold text-[var(--app-text-color)] transition hover:bg-white"
-                  onClick={handleCloseModal}
-                  type="button"
-                >
-                  Batal
-                </button>
-
-                <button
-                  className="inline-flex items-center justify-center rounded-[22px] bg-slate-950 px-5 py-4 text-base font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={isSubmitting}
-                  type="submit"
-                >
-                  {isSubmitting ? 'Menyimpan...' : 'Simpan Pelamar'}
-                </button>
-              </div>
           </form>
         </AppSheet>
       ) : null}

@@ -9,6 +9,8 @@ import {
   PageShell,
   PageHeader,
 } from '../components/ui/AppPrimitives'
+import BrandLoader from '../components/ui/BrandLoader'
+import { formatAppDateLabel } from '../lib/date-time'
 import {
   formatCurrency,
   formatTransactionDateTime,
@@ -39,6 +41,10 @@ function getTransactionPresentation(transaction) {
     amountClassName: 'text-[var(--app-success-color)]',
     amountPrefix: '+',
   }
+}
+
+function canPermanentlyDeleteTransaction(transaction) {
+  return transaction?.canPermanentDelete === true
 }
 
 function DeletedTransactionDetailPage() {
@@ -135,7 +141,7 @@ function DeletedTransactionDetailPage() {
   }
 
   const handlePermanentDelete = async () => {
-    if (!currentTeamId || !transaction?.id || !transaction?.sourceType) {
+    if (!currentTeamId || !transaction?.id || !transaction?.sourceType || !canPermanentDelete) {
       return
     }
 
@@ -170,7 +176,7 @@ function DeletedTransactionDetailPage() {
 
   if (!transaction && isLoadingRecord) {
     return (
-      <PageShell>
+      <PageShell className="space-y-4">
         <PageHeader
           eyebrow="Halaman Sampah"
           title="Detail Halaman Sampah"
@@ -186,9 +192,19 @@ function DeletedTransactionDetailPage() {
             </AppButton>
           }
         />
-        <AppCardDashed className="px-4 py-5 text-sm text-[var(--app-hint-color)]">
-          Memuat detail transaksi terhapus...
-        </AppCardDashed>
+        <section className="grid min-h-[calc(100dvh-16rem)] place-items-center px-4 text-center">
+          <div className="flex flex-col items-center gap-5">
+            <BrandLoader context="server" size="hero" />
+            <div className="space-y-2">
+              <h2 className="text-xl font-bold tracking-[-0.03em] text-[var(--app-text-color)]">
+                Memuat detail transaksi terhapus
+              </h2>
+              <p className="max-w-[20rem] text-sm leading-6 text-[var(--app-hint-color)]">
+                Menyiapkan data arsip yang dipilih.
+              </p>
+            </div>
+          </div>
+        </section>
       </PageShell>
     )
   }
@@ -225,6 +241,7 @@ function DeletedTransactionDetailPage() {
 
   const presentation = getTransactionPresentation(transaction)
   const { Icon } = presentation
+  const canPermanentDelete = canPermanentlyDeleteTransaction(transaction)
 
   return (
     <PageShell>
@@ -291,7 +308,7 @@ function DeletedTransactionDetailPage() {
         <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
           <p className="app-meta">Tanggal Transaksi</p>
           <p className="text-sm font-semibold text-[var(--app-text-color)]">
-            {formatTransactionDateTime(transaction.transaction_date || transaction.created_at)}
+            {formatAppDateLabel(transaction.transaction_date ?? transaction.created_at)}
           </p>
         </AppCard>
         <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
@@ -330,9 +347,11 @@ function DeletedTransactionDetailPage() {
         Restore
       </AppButton>
 
-      <AppButton onClick={handlePermanentDelete} type="button" variant="danger">
-        Hapus Permanen
-      </AppButton>
+      {canPermanentDelete ? (
+        <AppButton onClick={handlePermanentDelete} type="button" variant="danger">
+          Hapus Permanen
+        </AppButton>
+      ) : null}
     </PageShell>
   )
 }

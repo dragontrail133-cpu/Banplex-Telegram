@@ -1,6 +1,7 @@
 # Planning Decision Freeze
 
-Freeze date: `2026-04-19`  
+Freeze date: `2026-04-19`
+Runtime reconciliation: `2026-04-23`
 Product baseline: `Banplex Greenfield`
 
 ## 1. Product posture final
@@ -18,9 +19,10 @@ Postur final produk:
 - `Riwayat` adalah completed/history surface,
 - `Recycle Bin` adalah deleted/recovery surface terpisah,
 - `Tim` adalah capability support/admin yang tetap masuk release core,
+- `Referensi` / `Master` adalah jantung logika bisnis yang dipakai semua domain; secara product scope ia core release, walau beberapa boundary runtime masih transitional,
 - `HRD` dan `Penerima Manfaat` tetap ada di repo tetapi bukan gate release inti,
 - `Payment Receipt PDF` adalah supporting capability resmi fase awal untuk flow `Pembayaran`, bisa diregenerate, dan bukan source of truth,
-- `Stok Barang` masuk arsitektur sebagai modul planned/supporting dan bukan blocker release inti.
+- `Stok Barang` sudah hidup sebagai route supporting dengan monitoring stok dan manual stock-out terbatas, tetapi tetap bukan blocker release inti.
 
 ## 2. User, role, dan responsibility
 
@@ -60,7 +62,8 @@ Direction final arsitektur informasi:
 - `Riwayat` = completed/history surface.
 - `Recycle Bin` = deleted/recovery surface terpisah.
 - `Tim` = invite, membership, dan role management.
-- `Stok Barang` = top-level route planned tersendiri setelah core release gate lolos.
+- `Stok Barang` = top-level route supporting aktif untuk monitoring stok dan manual stock-out terbatas; bukan blocker release inti.
+- `Referensi` / `Master` = fondasi logika bisnis core release yang dipakai semua domain form inti; implementasi boundary yang masih transitional tidak menurunkan status domain ini.
 
 ### Superseded from older docs
 
@@ -74,7 +77,7 @@ Direction final arsitektur informasi:
 
 Aturan final:
 
-- hanya menampilkan ringkasan yang dibaca dari read model server,
+- hanya menampilkan ringkasan yang dibaca dari read model server `/api/transactions?view=summary`,
 - recent activity harus menjadi subset yang konsisten dari truth `Jurnal`,
 - tidak menjadi write surface utama,
 - tidak memegang menu aksi CRUD record,
@@ -258,7 +261,7 @@ Di luar gate inti:
 
 - `HRD`
 - `Penerima Manfaat`
-- `Stok Barang` sebagai planned/supporting route
+- `Stok Barang` sebagai supporting route aktif di luar gate release inti
 - browser-first mode resmi
 
 ### Superseded from older docs
@@ -286,13 +289,13 @@ Di luar gate inti:
 | attendance correction | lewat pembatalan rekap atau payment, bukan edit diam-diam |
 | klasifikasi `HRD` dan `Penerima Manfaat` | supporting, bukan gate release inti |
 | klasifikasi `Tim` | core support/admin capability |
-| peran `Stok Barang` | planned/supporting, read/monitoring first |
+| peran `Stok Barang` | supporting route aktif, read/monitoring first + manual stock-out terbatas |
 
 ## 12. Remaining assumptions kecil yang tidak mengubah arah produk
 
 - Nama route internal repo boleh tetap berbahasa Inggris selama bahasa produk dan UI mengikuti naming freeze.
 - Suite business PDF penuh belum ditetapkan; capability PDF resmi fase awal hanya `Payment Receipt PDF`.
-- `Stok Barang` boleh hadir sesudah gate core release selama contract-nya tetap mengikuti freeze ini.
+- `Stok Barang` boleh tetap hidup sebagai route supporting selama contract-nya tetap mengikuti freeze ini.
 - Surface `HRD` dan `Penerima Manfaat` boleh tetap tampil di repo tanpa mengubah acceptance criteria core release.
 
 ## 13. Universal naming freeze
@@ -322,13 +325,13 @@ Di luar gate inti:
 
 ### Stok Barang
 
-`Stok Barang` resmi masuk blueprint, tetapi bukan blocker core release.
+`Stok Barang` resmi masuk blueprint dan route runtime aktif, tetapi tetap bukan blocker core release.
 
 Kontrak finalnya:
 
-- modul ini planned/supporting,
-- modul ini nantinya punya top-level route sendiri,
-- fase awal adalah `read/monitoring first`,
+- modul ini supporting/non-core,
+- modul ini sudah punya top-level route `/stock`,
+- fase aktif sekarang adalah `read/monitoring first` dengan manual stock-out terbatas,
 - stok masuk dipengaruhi `Surat Jalan Barang` dan `Faktur Barang`,
 - `Faktur Barang` standalone boleh mencatat stok masuk,
 - `Faktur Barang` hasil konversi dari `Surat Jalan Barang` tidak boleh double count stok masuk,

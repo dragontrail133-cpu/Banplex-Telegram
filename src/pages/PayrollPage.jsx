@@ -1,10 +1,18 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import PayrollAttendanceHistory from '../components/PayrollAttendanceHistory'
 import ProtectedRoute from '../components/ProtectedRoute'
-import { AppCardDashed, PageHeader, PageShell } from '../components/ui/AppPrimitives'
+import { PageHeader, PageShell } from '../components/ui/AppPrimitives'
+import { capabilityContracts } from '../lib/capabilities'
 import { getAppTodayKey } from '../lib/date-time'
 import { createAttendanceRecapFromApi } from '../lib/records-api'
+import {
+  getPayrollBillGroupPaymentTarget,
+  isPayrollBillSummary,
+} from '../lib/transaction-presentation'
 import useAuthStore from '../store/useAuthStore'
+import useBillStore from '../store/useBillStore'
+import useToastStore from '../store/useToastStore'
 import useTelegram from '../hooks/useTelegram'
 
 function getWorkerName(record) {
@@ -16,6 +24,18 @@ function getWorkerName(record) {
 
 function getTodayDateString() {
   return getAppTodayKey()
+}
+
+const currencyFormatter = new Intl.NumberFormat('id-ID', {
+  style: 'currency',
+  currency: 'IDR',
+  maximumFractionDigits: 0,
+})
+
+function formatCurrency(value) {
+  const amount = Number(value)
+
+  return currencyFormatter.format(Number.isFinite(amount) ? amount : 0)
 }
 
 function getUserDisplayName(user, authUser) {
@@ -54,7 +74,11 @@ function notifyTelegram(payload) {
 }
 
 function isRecapableAttendance(record) {
-  return String(record?.billing_status ?? '').trim().toLowerCase() === 'unbilled'
+  return (
+    String(record?.billing_status ?? '').trim().toLowerCase() === 'unbilled' &&
+    Number(record?.total_pay ?? 0) > 0 &&
+    !record?.salary_bill_id
+  )
 }
 
 function getGroupTeamId(records = []) {
@@ -99,35 +123,43 @@ function groupRecordsByWorker(records = []) {
 }
 
 async function generateSalaryBillForGroup(group, userDisplayName) {
-  if (!group?.teamId || !group?.workerId || group.records.length === 0) {
+  if (
+    !group?.teamId ||
+    !group?.workerId ||
+    group.records.length === 0 ||
+    Number(group?.totalAmount ?? 0) <= 0
+  ) {
     throw new Error('Data rekap tidak valid.')
   }
 
   const recordIds = group.records.map((record) => record.id)
   const dueDate = getTodayDateString()
-  const description = `Tagihan gaji untuk ${group.workerName} (${group.records.length} absensi)`
 
   const result = await createAttendanceRecapFromApi({
     teamId: group.teamId,
     workerId: group.workerId,
     recordIds,
     dueDate,
-    description,
   })
+  const attendanceCount = Number(result.attendanceCount ?? group.records.length)
+  const totalAmount = Number(result.totalAmount ?? group.totalAmount)
+  const description = `Tagihan gaji untuk ${group.workerName} (${attendanceCount} absensi)`
 
   notifyTelegram({
     notificationType: 'salary_bill',
     workerName: group.workerName,
-    amount: group.totalAmount,
+    amount: totalAmount,
     dueDate,
     billId: result.billId ?? null,
-    recordCount: group.records.length,
+    recordCount: attendanceCount,
     userName: userDisplayName,
     description,
   })
 
   return {
     billId: result.billId ?? null,
+    attendanceCount,
+    totalAmount,
   }
 }
 
@@ -164,24 +196,94 @@ function buildRecapGroups(context) {
 }
 
 function PayrollPage() {
+  const navigate = useNavigate()
   const { user } = useTelegram()
   const authUser = useAuthStore((state) => state.user)
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
+  const bills = useBillStore((state) => state.bills)
+  const fetchUnpaidBills = useBillStore((state) => state.fetchUnpaidBills)
   const userDisplayName = useMemo(() => getUserDisplayName(user, authUser), [authUser, user])
   const [refreshToken, setRefreshToken] = useState(0)
-  const [toastState, setToastState] = useState(null)
+  const showToast = useToastStore((state) => state.showToast)
 
   useEffect(() => {
-    if (!toastState) {
-      return undefined
+    if (!currentTeamId) {
+      return
     }
 
-    const timeoutId = window.setTimeout(() => {
-      setToastState(null)
-    }, 2400)
+    void fetchUnpaidBills({ teamId: currentTeamId, silent: true })
+  }, [currentTeamId, fetchUnpaidBills, refreshToken])
 
-    return () => window.clearTimeout(timeoutId)
-  }, [toastState])
+  const resolveWorkerPaymentTarget = useCallback(
+    (group) => {
+      const workerId = String(group?.workerId ?? '').trim()
+      const workerName = String(group?.workerName ?? '')
+        .trim()
+        .toLowerCase()
+
+      if (!workerId && !workerName) {
+        return null
+      }
+
+      const matchedBills = bills.filter((bill) => {
+        if (!isPayrollBillSummary(bill)) {
+          return false
+        }
+
+        const billWorkerId = String(bill?.workerId ?? bill?.worker_id ?? '').trim()
+        const billWorkerName = String(
+          bill?.workerName ?? bill?.worker_name ?? bill?.worker_name_snapshot ?? ''
+        )
+          .trim()
+          .toLowerCase()
+
+        const billWorkerFallbackName = String(
+          bill?.supplierName ?? bill?.supplier_name_snapshot ?? ''
+        )
+          .trim()
+          .toLowerCase()
+
+        if (workerId && billWorkerId) {
+          return billWorkerId === workerId
+        }
+
+        return (
+          Boolean(workerName) &&
+          (billWorkerName === workerName || billWorkerFallbackName === workerName)
+        )
+      })
+
+      if (matchedBills.length === 0) {
+        return null
+      }
+
+      return getPayrollBillGroupPaymentTarget({
+        workerName: group?.workerName ?? null,
+        bills: matchedBills,
+      })
+    },
+    [bills]
+  )
+
+  const handleRequestPay = useCallback(
+    (group) => {
+      const paymentTarget = resolveWorkerPaymentTarget(group)
+
+      if (!paymentTarget?.id) {
+        throw new Error('Tagihan aktif pekerja tidak ditemukan.')
+      }
+
+      navigate(`/payment/${paymentTarget.id}`, {
+        state: {
+          bill: paymentTarget,
+          record: paymentTarget,
+          returnTo: '/payroll?tab=worker',
+          returnToOnSuccess: true,
+        },
+      })
+    },
+    [navigate, resolveWorkerPaymentTarget]
+  )
 
   const handleConfirmRecap = async (context) => {
     const recapGroups = buildRecapGroups(context)
@@ -205,12 +307,19 @@ function PayrollPage() {
       )
       const fulfilledResults = results.filter((result) => result.status === 'fulfilled')
       const rejectedResults = results.filter((result) => result.status === 'rejected')
-      const processedRecordCount = results.reduce((sum, result, index) => {
+      const processedRecordCount = results.reduce((sum, result) => {
         if (result.status !== 'fulfilled') {
           return sum
         }
 
-        return sum + (recapGroups[index]?.records.length ?? 0)
+        return sum + Number(result.value?.attendanceCount ?? 0)
+      }, 0)
+      const processedTotalAmount = results.reduce((sum, result) => {
+        if (result.status !== 'fulfilled') {
+          return sum
+        }
+
+        return sum + Number(result.value?.totalAmount ?? 0)
       }, 0)
 
       if (fulfilledResults.length === 0) {
@@ -223,9 +332,10 @@ function PayrollPage() {
       const skippedRecordCount = Math.max(totalRecordCount - processedRecordCount, 0)
       const isPartialResult = rejectedResults.length > 0 || skippedRecordCount > 0
 
-      setToastState({
+      showToast({
         tone: isPartialResult ? 'info' : 'success',
-        message: isPartialResult ? 'Rekap sebagian.' : 'Rekap berhasil.',
+        title: isPartialResult ? 'Rekap sebagian' : 'Rekap berhasil',
+        message: `${processedRecordCount} absensi · ${formatCurrency(processedTotalAmount)}`,
       })
       return true
     } finally {
@@ -233,34 +343,17 @@ function PayrollPage() {
     }
   }
 
-  const toastClassName =
-    toastState?.tone === 'success'
-      ? 'app-tone-success'
-      : toastState?.tone === 'info'
-        ? 'app-tone-info'
-      : 'app-tone-danger'
-
   return (
     <PageShell>
       <PageHeader title="Catatan Absensi" />
-      <ProtectedRoute requiredCapability="payroll_access">
+      <ProtectedRoute requiredCapability={capabilityContracts.payroll_access.key}>
         <PayrollAttendanceHistory
+          onRequestPay={handleRequestPay}
           onRequestRecap={handleConfirmRecap}
           refreshToken={refreshToken}
+          resolveWorkerPaymentTarget={resolveWorkerPaymentTarget}
         />
       </ProtectedRoute>
-
-      {toastState ? (
-        <div className="fixed inset-x-0 bottom-[calc(6rem+env(safe-area-inset-bottom))] z-[160] flex justify-center px-3">
-          <AppCardDashed
-            className={`${toastClassName} w-full max-w-sm px-4 py-3 text-sm font-semibold shadow-lg`}
-            role="status"
-            aria-live="polite"
-          >
-            {toastState.message}
-          </AppCardDashed>
-        </div>
-      ) : null}
     </PageShell>
   )
 }

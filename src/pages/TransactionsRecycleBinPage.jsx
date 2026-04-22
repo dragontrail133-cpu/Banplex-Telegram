@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDownLeft,
-  ArrowLeft,
   ArrowUpRight,
   FileText,
-  MoreVertical,
   Paperclip,
+  Search,
+  SlidersHorizontal,
   RotateCcw,
   Trash2,
   Wallet,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import ActionCard, { ActionCardSheet } from '../components/ui/ActionCard'
 import {
   AppButton,
   AppCardDashed,
@@ -18,6 +19,7 @@ import {
   AppEmptyState,
   AppInput,
   AppSheet,
+  AppToggleGroup,
   PageShell,
   PageHeader,
 } from '../components/ui/AppPrimitives'
@@ -25,7 +27,8 @@ import {
   formatCurrency,
   formatSyncLabel,
   formatTransactionDateTime,
-  getTransactionSourceLabel,
+  getTransactionContextLabel,
+  getTransactionCreatorLabel,
   getTransactionTitle,
 } from '../lib/transaction-presentation'
 import { logPerf, nowMs, roundMs } from '../lib/timing'
@@ -110,18 +113,6 @@ function getTransactionPresentation(transaction) {
   }
 }
 
-function getRecordSourceLabel(record) {
-  if (record?.sourceType === 'expense-attachment') {
-    return String(record?.party_label ?? 'Lampiran').trim()
-  }
-
-  if (record?.sourceType === 'bill-payment') {
-    return String(record?.party_label ?? 'Tagihan').trim()
-  }
-
-  return getTransactionSourceLabel(record)
-}
-
 function getRecordTitle(record) {
   return getTransactionTitle(record)
 }
@@ -152,13 +143,17 @@ function TransactionsRecycleBinPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
   const [actionError, setActionError] = useState(null)
-  const [selectedRecord, setSelectedRecord] = useState(null)
+  const [activeActionCard, setActiveActionCard] = useState(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState(
     restoredRecycleBinState?.lastUpdatedAt ?? null
   )
   const [filter, setFilter] = useState(restoredRecycleBinState?.filter ?? 'all')
   const [searchTerm, setSearchTerm] = useState(restoredRecycleBinState?.searchTerm ?? '')
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm)
+  const [isSearchExpanded, setIsSearchExpanded] = useState(
+    Boolean((restoredRecycleBinState?.searchTerm ?? '').trim())
+  )
+  const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false)
   const [pageCursor, setPageCursor] = useState(restoredRecycleBinState?.pageCursor ?? null)
   const [cursorHistory, setCursorHistory] = useState(
     restoredRecycleBinState?.cursorHistory ?? []
@@ -205,7 +200,7 @@ function TransactionsRecycleBinPage() {
 
         if (recycleBinPerfEnabled && !query.cursor) {
           logPerf(
-            'Halaman Sampah first-page fetch',
+            'Arsip first-page fetch',
             {
               fetchMs: roundMs(nowMs() - requestStartedAt),
               serverTiming: timing ?? null,
@@ -228,7 +223,7 @@ function TransactionsRecycleBinPage() {
         setError(
           loadError instanceof Error
             ? loadError.message
-            : 'Gagal memuat Halaman Sampah.'
+            : 'Gagal memuat Arsip.'
         )
 
         throw loadError
@@ -263,7 +258,7 @@ function TransactionsRecycleBinPage() {
 
     recycleBinFirstUsableLoggedRef.current = true
     logPerf(
-      'Halaman Sampah first usable list',
+      'Arsip first usable list',
       {
         mountMs: roundMs(nowMs() - recycleBinMountedAtRef.current),
         itemCount: deletedRecords.length,
@@ -286,7 +281,7 @@ function TransactionsRecycleBinPage() {
         cursor: pageCursor,
         limit: pageLimit,
       }).catch((loadError) => {
-        console.error('Gagal memuat Halaman Sampah:', loadError)
+        console.error('Gagal memuat Arsip:', loadError)
       })
     }, 0)
 
@@ -432,7 +427,6 @@ function TransactionsRecycleBinPage() {
           )
         }
 
-        setSelectedRecord(null)
         await Promise.all([
           loadDeletedRecords(currentTeamId, {
             filter,
@@ -463,7 +457,7 @@ function TransactionsRecycleBinPage() {
 
   const handlePermanentDelete = useCallback(
     async (record) => {
-      if (!currentTeamId || !record?.id || !record?.sourceType) {
+      if (!currentTeamId || !record?.id || !record?.sourceType || record.canPermanentDelete !== true) {
         return
       }
 
@@ -492,7 +486,6 @@ function TransactionsRecycleBinPage() {
           )
         }
 
-        setSelectedRecord(null)
         await Promise.all([
           loadDeletedRecords(currentTeamId, {
             filter,
@@ -545,17 +538,16 @@ function TransactionsRecycleBinPage() {
         scrollY: savedScrollPositionRef.current,
       })
 
-      if (record.detailRoute) {
-        navigate(record.detailRoute, {
-          state: {
-            record,
-            detailSurface: 'recycle-bin',
-          },
-        })
+      if (!record.detailRoute) {
         return
       }
 
-      setSelectedRecord(record)
+      navigate(record.detailRoute, {
+        state: {
+          record,
+          detailSurface: 'recycle-bin',
+        },
+      })
     },
     [
       currentTeamId,
@@ -570,20 +562,40 @@ function TransactionsRecycleBinPage() {
     ]
   )
 
+  const handleOpenActionMenu = useCallback((menuState) => {
+    setActiveActionCard(menuState)
+  }, [])
+
+  const handleCloseActionMenu = useCallback(() => {
+    setActiveActionCard(null)
+  }, [])
+
   return (
     <PageShell>
       <PageHeader
-        title="Halaman Sampah"
+        title="Arsip"
+        backAction={() => navigate('/transactions')}
         action={
-          <AppButton
-            onClick={() => navigate(-1)}
-            size="sm"
-            type="button"
-            variant="secondary"
-            leadingIcon={<ArrowLeft className="h-4 w-4" />}
-          >
-            Kembali
-          </AppButton>
+          <div className="flex items-center gap-2">
+            <AppButton
+              aria-label="Buka pencarian Arsip"
+              iconOnly
+              leadingIcon={<Search className="h-4 w-4" />}
+              onClick={() => setIsSearchExpanded((currentValue) => !currentValue)}
+              size="sm"
+              type="button"
+              variant={isSearchExpanded || searchTerm.trim() ? 'primary' : 'secondary'}
+            />
+            <AppButton
+              aria-label="Buka filter Arsip"
+              iconOnly
+              leadingIcon={<SlidersHorizontal className="h-4 w-4" />}
+              onClick={() => setIsFilterSheetOpen(true)}
+              size="sm"
+              type="button"
+              variant={filter === 'all' ? 'secondary' : 'primary'}
+            />
+          </div>
         }
       />
 
@@ -593,27 +605,14 @@ function TransactionsRecycleBinPage() {
         </p>
       ) : null}
 
-      <AppInput
-        aria-label="Cari"
-        onChange={handleSearchChange}
-        placeholder="Cari"
-        value={searchTerm}
-      />
-
-      <div className="flex flex-wrap gap-2">
-        {filters.map((item) => (
-          <AppButton
-            key={item.value}
-            className="rounded-full"
-            onClick={() => handleFilterChange(item.value)}
-            size="sm"
-            type="button"
-            variant={filter === item.value ? 'primary' : 'secondary'}
-          >
-            {item.label}
-          </AppButton>
-        ))}
-      </div>
+      {isSearchExpanded ? (
+        <AppInput
+          aria-label="Cari"
+          onChange={handleSearchChange}
+          placeholder="Cari"
+          value={searchTerm}
+        />
+      ) : null}
 
       {!currentTeamId ? (
         <AppCardDashed className="px-4 py-5">
@@ -621,7 +620,7 @@ function TransactionsRecycleBinPage() {
             Team aktif belum tersedia.
           </p>
           <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">
-            Login ulang atau pilih workspace yang benar agar Halaman Sampah bisa dimuat.
+            Login ulang atau pilih workspace yang benar agar Arsip bisa dimuat.
           </p>
         </AppCardDashed>
       ) : null}
@@ -629,7 +628,7 @@ function TransactionsRecycleBinPage() {
       {error ? (
         <AppCardDashed>
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--app-destructive-color)]">
-            Gagal Memuat Halaman Sampah
+            Gagal Memuat Arsip
           </p>
           <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">{error}</p>
         </AppCardDashed>
@@ -699,109 +698,95 @@ function TransactionsRecycleBinPage() {
             const presentation = getTransactionPresentation(record)
             const Icon = presentation.Icon
             const amount = Math.abs(Number(record.amount ?? 0))
+            const actions = [
+              ...(record.detailRoute
+                ? [
+                    {
+                      id: 'detail',
+                      label: 'Detail',
+                      icon: <FileText className="h-4 w-4" />,
+                      onClick: () => handleOpenRecord(record),
+                    },
+                  ]
+                : []),
+              {
+                id: 'restore',
+                label: 'Restore',
+                icon: <RotateCcw className="h-4 w-4" />,
+                onClick: () => {
+                  void handleRestore(record)
+                },
+              },
+              ...(record.canPermanentDelete === true
+                ? [
+                    {
+                      id: 'permanent-delete',
+                      label: 'Hapus Permanen',
+                      destructive: true,
+                      icon: <Trash2 className="h-4 w-4" />,
+                      onClick: () => {
+                        void handlePermanentDelete(record)
+                      },
+                    },
+                  ]
+                : []),
+            ]
 
             return (
-              <AppCardStrong
+              <ActionCard
                 key={`${record.sourceType ?? 'record'}:${record.id}`}
-                className="px-4 py-4"
-              >
-                <div className="flex items-center gap-3">
-                  <button
-                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                    onClick={() => handleOpenRecord(record)}
-                    type="button"
+                title={getRecordTitle(record)}
+                subtitle={formatTransactionDateTime(
+                  record.deleted_at ||
+                    record.transaction_date ||
+                    record.created_at ||
+                    record.updated_at
+                )}
+                details={[getTransactionContextLabel(record)].filter(Boolean)}
+                amount={
+                  presentation.showAmount
+                    ? `${presentation.amountPrefix ?? (record.type === 'expense' ? '-' : '+')}${formatCurrency(amount)}`
+                    : null
+                }
+                amountClassName={presentation.amountClassName}
+                badge={getTransactionCreatorLabel(record)}
+                actions={actions}
+                menuMode="shared"
+                onOpenMenu={handleOpenActionMenu}
+                leadingIcon={
+                  <div
+                    className={`flex h-11 w-11 items-center justify-center rounded-[18px] ${presentation.iconClassName}`}
                   >
-                    <div
-                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${presentation.iconClassName}`}
-                    >
-                      <Icon className="h-[18px] w-[18px]" />
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
-                        {getRecordTitle(record)}
-                      </p>
-                      <p className="mt-0.5 text-xs text-[var(--app-hint-color)]">
-                        {formatTransactionDateTime(
-                          record.deleted_at ||
-                            record.transaction_date ||
-                            record.created_at ||
-                            record.updated_at
-                        )}
-                      </p>
-                      <p className="mt-1 text-xs text-[var(--app-hint-color)]">
-                        {getRecordSourceLabel(record)}
-                      </p>
-                    </div>
-                  </button>
-
-                  <div className="flex shrink-0 items-center gap-2">
-                    {presentation.showAmount ? (
-                      <span className={`text-sm font-semibold ${presentation.amountClassName}`}>
-                        {presentation.amountPrefix ?? (record.type === 'expense' ? '-' : '+')}
-                        {formatCurrency(amount)}
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-[var(--app-surface-low-color)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                        Lampiran
-                      </span>
-                    )}
-                    <button
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] text-[var(--app-text-color)]"
-                      onClick={() => {
-                        setActionError(null)
-                        setSelectedRecord(record)
-                      }}
-                      type="button"
-                      aria-label={`Buka menu aksi untuk ${getRecordTitle(record)}`}
-                    >
-                      <MoreVertical className="h-4 w-4" />
-                    </button>
+                    <Icon className="h-[18px] w-[18px]" />
                   </div>
-                </div>
-              </AppCardStrong>
+                }
+                className="app-card px-4 py-4"
+              />
             )
           })}
         </div>
       ) : null}
 
-      <AppSheet
-        open={Boolean(selectedRecord)}
-        onClose={() => setSelectedRecord(null)}
-        title="Aksi Halaman Sampah"
-        description={selectedRecord ? getRecordTitle(selectedRecord) : null}
-      >
-        {selectedRecord ? (
-          <div className="space-y-3">
-            <AppButton
-              onClick={() => handleRestore(selectedRecord)}
-              type="button"
-              variant="secondary"
-              leadingIcon={<RotateCcw className="h-4 w-4" />}
-            >
-              Restore
-            </AppButton>
-            {selectedRecord.detailRoute ? (
-              <AppButton
-                onClick={() => handleOpenRecord(selectedRecord)}
-                type="button"
-                variant="primary"
-              >
-                Buka Detail
-              </AppButton>
-            ) : null}
-            {selectedRecord.canPermanentDelete ? (
-              <AppButton
-                onClick={() => handlePermanentDelete(selectedRecord)}
-                type="button"
-                variant="danger"
-              >
-                Hapus Permanen
-              </AppButton>
-            ) : null}
-          </div>
-        ) : null}
+      <AppSheet onClose={() => setIsFilterSheetOpen(false)} open={isFilterSheetOpen} title="Filter">
+        <AppToggleGroup
+          buttonSize="sm"
+          onChange={(nextFilter) => {
+            handleFilterChange(nextFilter)
+            setIsFilterSheetOpen(false)
+          }}
+          options={filters}
+          stacked
+          value={filter}
+        />
       </AppSheet>
+
+      <ActionCardSheet
+        open={Boolean(activeActionCard)}
+        title="Detail dan Aksi"
+        description={activeActionCard?.description ?? null}
+        actions={activeActionCard?.actions ?? []}
+        onClose={handleCloseActionMenu}
+      />
     </PageShell>
   )
 }

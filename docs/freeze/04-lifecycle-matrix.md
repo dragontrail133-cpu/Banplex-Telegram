@@ -1,6 +1,7 @@
 # Lifecycle Matrix
 
 Freeze date: `2026-04-19`
+Runtime reconciliation: `2026-04-23`
 
 ## Global lifecycle rules
 
@@ -12,7 +13,7 @@ Freeze date: `2026-04-19`
 - Dalam konteks payroll operasional, worker adalah parent utama grouping; payroll payable yang boleh muncul di `Jurnal` dan `Riwayat` adalah `Tagihan Upah` per worker.
 - `Riwayat` adalah completed/history surface; restore dan deleted recovery memakai `Recycle Bin` yang terpisah.
 - `Tagihan` pada `Pengeluaran` hanya muncul saat kewajiban pembayaran masih hidup; pengeluaran direct-paid tidak dipaksa punya child bill universal.
-- `Dokumen Barang` tidak melakukan stock-out otomatis; stock-out manual berada di `Stok Barang` planned surface.
+- `Dokumen Barang` tidak melakukan stock-out otomatis; stock-out manual berjalan terbatas di route pendukung `Stok Barang` melalui boundary API resmi.
 - `Payment Receipt PDF` boleh diregenerate dari data settlement resmi dan tidak pernah menggantikan record pembayaran.
 - Record completed tetap muncul di `Riwayat` atau completed surface; completed tidak dihapus dari histori.
 

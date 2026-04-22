@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownLeft, ArrowUpRight, Clock3, MoreVertical, Pencil, Trash2 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  Clock3,
+  Pencil,
+  Search,
+  SlidersHorizontal,
+  Trash2,
+} from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import ActionCard, { ActionCardSheet } from '../components/ui/ActionCard'
 import {
   AppButton,
   AppCardDashed,
@@ -8,6 +17,7 @@ import {
   AppEmptyState,
   AppInput,
   AppSheet,
+  AppToggleGroup,
   PageShell,
   PageHeader,
 } from '../components/ui/AppPrimitives'
@@ -16,27 +26,48 @@ import {
   canEditTransaction,
   canOpenTransactionPayment,
   formatCurrency,
-  formatTransactionDateTime,
+  formatTransactionTimestamp,
+  isPaidBillTransaction,
+  isPayrollBillTransaction,
+  getTransactionContextLabel,
   getTransactionEditRoute,
-  getTransactionCreatorLabel,
   getTransactionLedgerFilterOptions,
-  getTransactionLedgerSummary,
   getTransactionPaymentLabel,
   getTransactionPaymentRoute,
   getTransactionTitle,
+  getTransactionCreatorLabel,
 } from '../lib/transaction-presentation'
 import { logPerf, nowMs, roundMs } from '../lib/timing'
 import { fetchWorkspaceTransactionPageFromApi } from '../lib/transactions-api'
+import BillsPage from './BillsPage'
+import { HistoryWorkspace } from './HistoryPage'
 import useAuthStore from '../store/useAuthStore'
 import useDashboardStore from '../store/useDashboardStore'
 import useAttendanceStore from '../store/useAttendanceStore'
 import useIncomeStore from '../store/useIncomeStore'
 import useTransactionStore from '../store/useTransactionStore'
 
-const filters = getTransactionLedgerFilterOptions()
+const filters = getTransactionLedgerFilterOptions({ includePayrollBills: false })
+const filterValueSet = new Set(filters.map((item) => item.value))
 const ledgerPageSize = 20
 const ledgerListStateStorageKey = 'banplex:transactions-list-state'
 const ledgerPerfEnabled = import.meta.env.DEV
+
+function createDefaultPageInfo() {
+  return {
+    hasMore: false,
+    nextCursor: null,
+    totalCount: 0,
+  }
+}
+
+function createWarmSeedPageInfo(transactions = []) {
+  return {
+    hasMore: false,
+    nextCursor: null,
+    totalCount: transactions.length,
+  }
+}
 
 function readLedgerListState(teamId) {
   if (!teamId || typeof window === 'undefined') {
@@ -106,12 +137,21 @@ function isMaterialExpense(transaction) {
 
 function TransactionsPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
+  const workspaceTransactions = useDashboardStore((state) => state.workspaceTransactions)
+  const workspaceLastUpdatedAt = useDashboardStore((state) => state.workspaceLastUpdatedAt)
   const restoredLedgerState = useMemo(
     () => readLedgerListState(currentTeamId),
     [currentTeamId]
   )
-  const shouldSkipInitialLoadRef = useRef(Boolean(restoredLedgerState?.hasLoaded))
+  const restoredLedgerTransactions = useMemo(() => {
+    return Array.isArray(restoredLedgerState?.transactions)
+      ? restoredLedgerState.transactions.filter((transaction) => !isPaidBillTransaction(transaction))
+      : []
+  }, [restoredLedgerState?.transactions])
+  const initialLedgerBootstrapRef = useRef(false)
+  const skipInitialReloadRef = useRef(true)
   const savedScrollPositionRef = useRef(Number(restoredLedgerState?.scrollY ?? 0))
   const ledgerMountedAtRef = useRef(nowMs())
   const ledgerFirstUsableLoggedRef = useRef(false)
@@ -128,26 +168,106 @@ function TransactionsPage() {
     (state) => state.softDeleteAttendanceRecord
   )
   const clearIncomeError = useIncomeStore((state) => state.clearError)
-  const [filter, setFilter] = useState(restoredLedgerState?.filter ?? 'all')
+  const [filter, setFilter] = useState(
+    filterValueSet.has(restoredLedgerState?.filter) ? restoredLedgerState.filter : 'all'
+  )
   const [searchTerm, setSearchTerm] = useState(restoredLedgerState?.searchTerm ?? '')
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(
     restoredLedgerState?.debouncedSearchTerm ?? restoredLedgerState?.searchTerm ?? ''
   )
-  const [transactions, setTransactions] = useState(restoredLedgerState?.transactions ?? [])
-  const [pageInfo, setPageInfo] = useState(
-    restoredLedgerState?.pageInfo ?? {
-      hasMore: false,
-      nextCursor: null,
-      totalCount: 0,
+  const [isSearchExpanded, setIsSearchExpanded] = useState(
+    Boolean((restoredLedgerState?.searchTerm ?? restoredLedgerState?.debouncedSearchTerm ?? '').trim())
+  )
+  const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false)
+  const [historyHeaderActionsTarget, setHistoryHeaderActionsTarget] = useState(null)
+  const ledgerTab = useMemo(() => {
+    const tab = new URLSearchParams(location.search).get('tab')
+
+    if (tab === 'history' || tab === 'tagihan') {
+      return tab
     }
+
+    return 'active'
+  }, [location.search])
+  const ledgerHeaderAction = useMemo(() => {
+    if (ledgerTab === 'history') {
+      return <div ref={setHistoryHeaderActionsTarget} className="flex items-center gap-2" />
+    }
+
+    if (ledgerTab === 'tagihan') {
+      return null
+    }
+
+    return (
+      <div className="flex items-center gap-2">
+        <AppButton
+          aria-label="Buka pencarian Jurnal"
+          iconOnly
+          leadingIcon={<Search className="h-4 w-4" />}
+          onClick={() => setIsSearchExpanded((currentValue) => !currentValue)}
+          size="sm"
+          type="button"
+          variant={isSearchExpanded || searchTerm.trim() ? 'primary' : 'secondary'}
+        />
+        <AppButton
+          aria-label="Buka filter Jurnal"
+          iconOnly
+          leadingIcon={<SlidersHorizontal className="h-4 w-4" />}
+          onClick={() => setIsFilterSheetOpen(true)}
+          size="sm"
+          type="button"
+          variant={filter === 'all' ? 'secondary' : 'primary'}
+        />
+        <AppButton
+          onClick={() => navigate('/transactions/recycle-bin')}
+          size="sm"
+          type="button"
+          variant="secondary"
+          iconOnly
+          aria-label="Buka Arsip"
+          leadingIcon={<Trash2 className="h-4 w-4" />}
+        >
+          <span className="sr-only">Arsip</span>
+        </AppButton>
+      </div>
+    )
+  }, [filter, isSearchExpanded, ledgerTab, navigate, searchTerm])
+  const warmWorkspaceSeed = useMemo(() => {
+    const hasRestoredLedger = Boolean(restoredLedgerState?.hasLoaded)
+    const shouldUseWarmSeed =
+      Boolean(currentTeamId) &&
+      !hasRestoredLedger &&
+      filter === 'all' &&
+      searchTerm.trim().length === 0 &&
+      workspaceTransactions.length > 0 &&
+      workspaceLastUpdatedAt
+
+    return shouldUseWarmSeed
+      ? workspaceTransactions
+          .filter((transaction) => !isPaidBillTransaction(transaction))
+          .slice(0, ledgerPageSize)
+      : []
+  }, [
+    currentTeamId,
+    filter,
+    restoredLedgerState?.hasLoaded,
+    searchTerm,
+    workspaceLastUpdatedAt,
+    workspaceTransactions,
+  ])
+  const [transactions, setTransactions] = useState(
+    restoredLedgerTransactions.length > 0 ? restoredLedgerTransactions : warmWorkspaceSeed
+  )
+  const [pageInfo, setPageInfo] = useState(
+    restoredLedgerState?.pageInfo ?? createWarmSeedPageInfo(warmWorkspaceSeed)
   )
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(false)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [ledgerError, setLedgerError] = useState(null)
-  const [selectedActionTransaction, setSelectedActionTransaction] = useState(null)
   const [actionError, setActionError] = useState(null)
+  const [activeActionCard, setActiveActionCard] = useState(null)
   const [hasLoadedLedger, setHasLoadedLedger] = useState(
-    Boolean(restoredLedgerState?.hasLoaded)
+    Boolean(restoredLedgerState?.hasLoaded || warmWorkspaceSeed.length > 0)
   )
   const requestSequenceRef = useRef(0)
 
@@ -168,6 +288,8 @@ function TransactionsPage() {
   useEffect(() => {
     ledgerMountedAtRef.current = nowMs()
     ledgerFirstUsableLoggedRef.current = false
+    initialLedgerBootstrapRef.current = false
+    skipInitialReloadRef.current = true
   }, [currentTeamId])
 
   useEffect(() => {
@@ -198,18 +320,14 @@ function TransactionsPage() {
   ])
 
   const loadLedgerPage = useCallback(
-    async ({ cursor = null, append = false } = {}) => {
+    async ({ cursor = null, append = false, background = false } = {}) => {
       const requestId = ++requestSequenceRef.current
       const requestStartedAt = nowMs()
 
       if (!currentTeamId) {
         if (!append) {
           setTransactions([])
-          setPageInfo({
-            hasMore: false,
-            nextCursor: null,
-            totalCount: 0,
-          })
+          setPageInfo(createDefaultPageInfo())
           setHasLoadedLedger(false)
         }
 
@@ -219,7 +337,7 @@ function TransactionsPage() {
 
       if (append) {
         setIsLoadingMore(true)
-      } else {
+      } else if (!background) {
         setIsLoadingTransactions(true)
         setHasLoadedLedger(false)
       }
@@ -241,13 +359,7 @@ function TransactionsPage() {
         setTransactions((currentTransactions) =>
           append ? [...currentTransactions, ...nextTransactions] : nextTransactions
         )
-        setPageInfo(
-          result.pageInfo ?? {
-            hasMore: false,
-            nextCursor: null,
-            totalCount: 0,
-          }
-        )
+        setPageInfo(result.pageInfo ?? createDefaultPageInfo())
         setHasLoadedLedger(true)
         setLedgerError(null)
 
@@ -273,13 +385,9 @@ function TransactionsPage() {
 
         setLedgerError(message)
 
-        if (!append) {
+        if (!append && !background) {
           setTransactions([])
-          setPageInfo({
-            hasMore: false,
-            nextCursor: null,
-            totalCount: 0,
-          })
+          setPageInfo(createDefaultPageInfo())
         }
       } finally {
         if (requestId === requestSequenceRef.current) {
@@ -292,20 +400,73 @@ function TransactionsPage() {
   )
 
   useEffect(() => {
-    if (shouldSkipInitialLoadRef.current) {
-      shouldSkipInitialLoadRef.current = false
+    if (!currentTeamId || initialLedgerBootstrapRef.current) {
       return
     }
 
-    setSelectedActionTransaction(null)
+    initialLedgerBootstrapRef.current = true
+
+    if (restoredLedgerState?.hasLoaded) {
+      void loadLedgerPage({ cursor: null, append: false, background: true })
+      return
+    }
+
+    if (warmWorkspaceSeed.length > 0) {
+      setActionError(null)
+      setLedgerError(null)
+      setTransactions(warmWorkspaceSeed)
+      setPageInfo(createWarmSeedPageInfo(warmWorkspaceSeed))
+      setHasLoadedLedger(true)
+      void loadLedgerPage({ cursor: null, append: false, background: true })
+      return
+    }
+
     setActionError(null)
     setLedgerError(null)
     setTransactions([])
-    setPageInfo({
-      hasMore: false,
-      nextCursor: null,
-      totalCount: 0,
-    })
+    setPageInfo(createDefaultPageInfo())
+    setHasLoadedLedger(false)
+    void loadLedgerPage({ cursor: null, append: false })
+  }, [
+    currentTeamId,
+    loadLedgerPage,
+    restoredLedgerState?.hasLoaded,
+    warmWorkspaceSeed,
+  ])
+
+  useEffect(() => {
+    if (!currentTeamId || restoredLedgerState?.hasLoaded) {
+      return
+    }
+
+    if (warmWorkspaceSeed.length === 0 || transactions.length > 0) {
+      return
+    }
+
+    setActionError(null)
+    setLedgerError(null)
+    setTransactions(warmWorkspaceSeed)
+    setPageInfo(createWarmSeedPageInfo(warmWorkspaceSeed))
+    setHasLoadedLedger(true)
+    void loadLedgerPage({ cursor: null, append: false, background: true })
+  }, [
+    currentTeamId,
+    loadLedgerPage,
+    restoredLedgerState?.hasLoaded,
+    transactions.length,
+    warmWorkspaceSeed,
+  ])
+
+  useEffect(() => {
+    if (skipInitialReloadRef.current) {
+      skipInitialReloadRef.current = false
+      return
+    }
+
+    setActionError(null)
+    setLedgerError(null)
+    setTransactions([])
+    setPageInfo(createDefaultPageInfo())
     void loadLedgerPage({ cursor: null, append: false })
   }, [filter, loadLedgerPage])
 
@@ -389,6 +550,14 @@ function TransactionsPage() {
     })
   }
 
+  const handleOpenActionMenu = (menuState) => {
+    setActiveActionCard(menuState)
+  }
+
+  const handleCloseActionMenu = () => {
+    setActiveActionCard(null)
+  }
+
   const handleEditTransaction = (transaction) => {
     const editRoute = transaction.editRoute ?? getTransactionEditRoute(transaction)
 
@@ -396,7 +565,6 @@ function TransactionsPage() {
       return
     }
 
-    setSelectedActionTransaction(null)
     if (typeof window !== 'undefined') {
       savedScrollPositionRef.current = window.scrollY
       saveLedgerListState(currentTeamId, {
@@ -420,7 +588,6 @@ function TransactionsPage() {
     }
 
     setActionError(null)
-    setSelectedActionTransaction(null)
     if (typeof window !== 'undefined') {
       savedScrollPositionRef.current = window.scrollY
       saveLedgerListState(currentTeamId, {
@@ -484,7 +651,6 @@ function TransactionsPage() {
         })
       }
 
-      setSelectedActionTransaction(null)
       await loadLedgerPage({ cursor: null, append: false })
 
       if (currentTeamId) {
@@ -511,256 +677,229 @@ function TransactionsPage() {
     })
   }
 
+  const handleChangeLedgerTab = useCallback(
+    (nextTab) => {
+      const nextPath =
+        nextTab === 'history'
+          ? '/transactions?tab=history'
+          : nextTab === 'tagihan'
+            ? '/transactions?tab=tagihan'
+            : '/transactions'
+      navigate(nextPath, { replace: true })
+    },
+    [navigate]
+  )
+
   return (
     <PageShell>
       <PageHeader
         title="Jurnal"
-        action={
-          <div className="flex items-center gap-2">
-            <AppButton
-              onClick={() => navigate('/transactions/history')}
-              size="sm"
-              type="button"
-              variant="secondary"
-              iconOnly
-              aria-label="Buka riwayat transaksi"
-              leadingIcon={<Clock3 className="h-4 w-4" />}
-            >
-              <span className="sr-only">Riwayat</span>
-            </AppButton>
-            <AppButton
-              onClick={() => navigate('/transactions/recycle-bin')}
-              size="sm"
-              type="button"
-              variant="secondary"
-              iconOnly
-              aria-label="Buka Halaman Sampah"
-              leadingIcon={<Trash2 className="h-4 w-4" />}
-            >
-              <span className="sr-only">Halaman Sampah</span>
-            </AppButton>
-          </div>
-        }
+        action={ledgerHeaderAction}
       />
 
       <div className="space-y-3">
-        <AppInput
-          aria-label="Cari ledger transaksi"
-          className="w-full"
-          onChange={(event) => setSearchTerm(event.target.value)}
-          type="search"
-          value={searchTerm}
+        <AppToggleGroup
+          buttonSize="sm"
+          compact
+          onChange={handleChangeLedgerTab}
+          options={[
+            { value: 'active', label: 'Aktif' },
+            { value: 'tagihan', label: 'Tagihan' },
+            { value: 'history', label: 'Riwayat' },
+          ]}
+          value={ledgerTab}
         />
-        <div className="flex flex-wrap gap-2">
-          {filters.map((item) => (
-            <AppButton
-              key={item.value}
-              className="rounded-full"
-              onClick={() => setFilter(item.value)}
-              size="sm"
-              type="button"
-              variant={filter === item.value ? 'primary' : 'secondary'}
-            >
-              {item.label}
-            </AppButton>
-          ))}
-        </div>
+
+        {ledgerTab === 'active' && isSearchExpanded ? (
+          <AppInput
+            aria-label="Cari ledger transaksi"
+            className="w-full"
+            onChange={(event) => setSearchTerm(event.target.value)}
+            type="search"
+            value={searchTerm}
+          />
+        ) : null}
       </div>
 
-      {ledgerError ? (
-        <AppCardDashed>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--app-destructive-color)]">
-            Gagal Memuat Ledger
-          </p>
-          <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">{ledgerError}</p>
-          <div className="mt-4">
-            <AppButton onClick={() => void loadLedgerPage({ cursor: null, append: false })} type="button" variant="secondary">
-              Coba Lagi
-            </AppButton>
-          </div>
-        </AppCardDashed>
-      ) : null}
-
-      {actionError ? (
-        <AppCardDashed>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--app-destructive-color)]">
-            Aksi Transaksi Gagal
-          </p>
-          <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">{actionError}</p>
-        </AppCardDashed>
-      ) : null}
-
-      {!currentTeamId ? (
-        <AppCardDashed className="px-4 py-5">
-          <p className="text-sm font-semibold text-[var(--app-text-color)]">
-            Team aktif belum tersedia.
-          </p>
-          <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">
-            Login ulang atau pilih workspace yang benar agar mutasi bisa dimuat.
-          </p>
-        </AppCardDashed>
-      ) : showSkeleton ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map((item) => (
-            <AppCardStrong key={item}>
-              <div className="flex items-start gap-3">
-                <div className="h-11 w-11 animate-pulse rounded-full bg-[var(--app-surface-low-color)]" />
-                <div className="min-w-0 flex-1">
-                  <div className="h-4 w-2/3 animate-pulse rounded-full bg-[var(--app-surface-low-color)]" />
-                  <div className="mt-2 h-3 w-1/2 animate-pulse rounded-full bg-[var(--app-surface-low-color)]" />
-                </div>
+      {ledgerTab === 'active' ? (
+        <>
+          {ledgerError ? (
+            <AppCardDashed>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--app-destructive-color)]">
+                Gagal Memuat Ledger
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">{ledgerError}</p>
+              <div className="mt-4">
+                <AppButton onClick={() => void loadLedgerPage({ cursor: null, append: false })} type="button" variant="secondary">
+                  Coba Lagi
+                </AppButton>
               </div>
-            </AppCardStrong>
-          ))}
-        </div>
-      ) : transactions.length === 0 ? (
-        <AppEmptyState
-          className="px-4 py-5"
-          title="Belum Ada Catatan"
-          description="Catatan kas akan muncul di sini setelah transaksi pertama tersimpan untuk workspace ini."
-        />
-      ) : (
-        <div className="space-y-3">
-          {transactions.map((transaction) => {
-            const presentation = getTransactionPresentation(transaction)
-            const Icon = presentation.Icon
-            const amount = Math.abs(Number(transaction.amount ?? 0))
-            const canEdit = Boolean(transaction.canEdit ?? canEditTransaction(transaction))
-            const canDelete = Boolean(transaction.canDelete ?? canDeleteTransaction(transaction))
-            const canPay = Boolean(transaction.canPay ?? canOpenTransactionPayment(transaction))
-            const ledgerSummary = getTransactionLedgerSummary(transaction)
-            const hasCreatorIdentity = Boolean(
-              transaction?.created_by_user_id ??
-                transaction?.createdByUserId ??
-                transaction?.telegram_user_id ??
-                transaction?.telegramUserId
-            )
-            const creatorLabel = hasCreatorIdentity ? getTransactionCreatorLabel(transaction) : null
-
-            return (
-              <AppCardStrong key={`${transaction.sourceType ?? 'transaction'}-${transaction.id}`}>
-                <div className="flex items-center gap-3">
-                  <button
-                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                    onClick={() => handleOpenDetail(transaction)}
-                    type="button"
-                  >
-                    <div
-                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${presentation.iconClassName}`}
-                    >
-                      <Icon className="h-[18px] w-[18px]" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
-                        {getTransactionTitle(transaction)}
-                      </p>
-                      <p className="mt-0.5 text-xs text-[var(--app-hint-color)]">
-                        {formatTransactionDateTime(
-                          transaction.transaction_date || transaction.created_at
-                        )}
-                      </p>
-                      {ledgerSummary ? (
-                        <p className="mt-1 truncate text-[11px] font-medium text-[var(--app-hint-color)]">
-                          {ledgerSummary}
-                        </p>
-                      ) : null}
-                      {creatorLabel ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <span className="inline-flex items-center rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-hint-color)]">
-                            {creatorLabel}
-                          </span>
-                        </div>
-                      ) : null}
-                    </div>
-                  </button>
-
-                  <div className="flex shrink-0 items-center gap-2">
-                    <span className={`text-sm font-semibold ${presentation.amountClassName}`}>
-                      {Number(transaction.amount ?? 0) < 0 || transaction.type === 'expense'
-                        ? '-'
-                        : '+'}
-                      {formatCurrency(amount)}
-                    </span>
-                    {canEdit || canDelete || canPay ? (
-                      <button
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] text-[var(--app-text-color)]"
-                        onClick={() => {
-                          setActionError(null)
-                          setSelectedActionTransaction(transaction)
-                        }}
-                        type="button"
-                        aria-label={`Buka menu aksi untuk ${getTransactionTitle(transaction)}`}
-                      >
-                        <MoreVertical className="h-4 w-4" />
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              </AppCardStrong>
-            )
-          })}
-
-          {pageInfo.hasMore ? (
-            <div className="flex justify-center pt-1">
-              <AppButton
-                onClick={handleLoadMore}
-                type="button"
-                variant="secondary"
-                disabled={isLoadingMore}
-              >
-                {isLoadingMore ? 'Memuat...' : 'Muat Berikutnya'}
-              </AppButton>
-            </div>
+            </AppCardDashed>
           ) : null}
-        </div>
+
+          {actionError ? (
+            <AppCardDashed>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--app-destructive-color)]">
+                Aksi Transaksi Gagal
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">{actionError}</p>
+            </AppCardDashed>
+          ) : null}
+
+          {!currentTeamId ? (
+            <AppCardDashed className="px-4 py-5">
+              <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                Team aktif belum tersedia.
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">
+                Login ulang atau pilih workspace yang benar agar mutasi bisa dimuat.
+              </p>
+            </AppCardDashed>
+          ) : showSkeleton ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((item) => (
+                <AppCardStrong key={item}>
+                  <div className="flex items-start gap-3">
+                    <div className="h-11 w-11 animate-pulse rounded-full bg-[var(--app-surface-low-color)]" />
+                    <div className="min-w-0 flex-1">
+                      <div className="h-4 w-2/3 animate-pulse rounded-full bg-[var(--app-surface-low-color)]" />
+                      <div className="mt-2 h-3 w-1/2 animate-pulse rounded-full bg-[var(--app-surface-low-color)]" />
+                    </div>
+                  </div>
+                </AppCardStrong>
+              ))}
+            </div>
+          ) : transactions.length === 0 ? (
+            <AppEmptyState
+              className="px-4 py-5"
+              title="Belum Ada Catatan"
+              description="Catatan kas akan muncul di sini setelah transaksi pertama tersimpan untuk workspace ini."
+            />
+          ) : (
+            <div className="space-y-3">
+              {transactions.map((transaction) => {
+                const presentation = getTransactionPresentation(transaction)
+                const Icon = presentation.Icon
+                const amount = Math.abs(Number(transaction.amount ?? 0))
+                const canEdit = Boolean(transaction.canEdit ?? canEditTransaction(transaction))
+                const canDelete = Boolean(transaction.canDelete ?? canDeleteTransaction(transaction))
+                const canPay = !isPayrollBillTransaction(transaction) && Boolean(
+                  transaction.canPay ?? canOpenTransactionPayment(transaction)
+                )
+                const actions = [
+                  {
+                    id: 'detail',
+                    label: 'Detail',
+                    icon: <Clock3 className="h-4 w-4" />,
+                    onClick: () => handleOpenDetail(transaction),
+                  },
+                  ...(canPay
+                    ? [
+                        {
+                          id: 'pay',
+                          label: getTransactionPaymentLabel(transaction),
+                          icon: <ArrowUpRight className="h-4 w-4" />,
+                          onClick: () => handleOpenPayment(transaction),
+                        },
+                      ]
+                    : []),
+                  ...(canEdit
+                    ? [
+                        {
+                          id: 'edit',
+                          label: 'Edit',
+                          icon: <Pencil className="h-4 w-4" />,
+                          onClick: () => handleEditTransaction(transaction),
+                        },
+                      ]
+                    : []),
+                  ...(canDelete
+                    ? [
+                        {
+                          id: 'delete',
+                          label: 'Hapus',
+                          destructive: true,
+                          icon: <Trash2 className="h-4 w-4" />,
+                          onClick: () => handleDeleteTransaction(transaction),
+                        },
+                      ]
+                    : []),
+                ]
+
+                return (
+                  <ActionCard
+                    key={`${transaction.sourceType ?? 'transaction'}-${transaction.id}`}
+                    title={getTransactionTitle(transaction)}
+                    subtitle={formatTransactionTimestamp(transaction, [
+                      'sort_at',
+                      'bill_paid_at',
+                      'updated_at',
+                      'created_at',
+                      'transaction_date',
+                    ])}
+                    details={[getTransactionContextLabel(transaction)].filter(Boolean)}
+                    amount={`${Number(transaction.amount ?? 0) < 0 || transaction.type === 'expense'
+                      ? '-'
+                      : '+'}${formatCurrency(amount)}`}
+                    amountClassName={presentation.amountClassName}
+                    badge={getTransactionCreatorLabel(transaction)}
+                    actions={actions}
+                    menuMode="shared"
+                    onOpenMenu={handleOpenActionMenu}
+                    leadingIcon={
+                      <div
+                        className={`flex h-11 w-11 items-center justify-center rounded-[18px] ${presentation.iconClassName}`}
+                      >
+                        <Icon className="h-[18px] w-[18px]" />
+                      </div>
+                    }
+                    className="app-card px-4 py-4"
+                  />
+                )
+              })}
+
+              {pageInfo.hasMore ? (
+                <div className="flex justify-center pt-1">
+                  <AppButton
+                    onClick={handleLoadMore}
+                    type="button"
+                    variant="secondary"
+                    disabled={isLoadingMore}
+                  >
+                    {isLoadingMore ? 'Memuat...' : 'Muat Berikutnya'}
+                  </AppButton>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </>
+      ) : ledgerTab === 'tagihan' ? (
+        <BillsPage embedded />
+      ) : (
+        <HistoryWorkspace embedded headerActionsTarget={historyHeaderActionsTarget} />
       )}
 
-      <AppSheet
-        open={Boolean(selectedActionTransaction)}
-        onClose={() => setSelectedActionTransaction(null)}
-        title="Aksi Transaksi"
-        description={
-          selectedActionTransaction ? getTransactionTitle(selectedActionTransaction) : null
-        }
-      >
-        {selectedActionTransaction ? (
-          <div className="space-y-3">
-            {(selectedActionTransaction.canPay ??
-              canOpenTransactionPayment(selectedActionTransaction)) ? (
-              <AppButton
-                onClick={() => handleOpenPayment(selectedActionTransaction)}
-                type="button"
-                variant="secondary"
-                leadingIcon={<ArrowUpRight className="h-4 w-4" />}
-              >
-                {getTransactionPaymentLabel(selectedActionTransaction)}
-              </AppButton>
-            ) : null}
-            {(selectedActionTransaction.canEdit ??
-              canEditTransaction(selectedActionTransaction)) ? (
-              <AppButton
-                onClick={() => handleEditTransaction(selectedActionTransaction)}
-                type="button"
-                variant="secondary"
-                leadingIcon={<Pencil className="h-4 w-4" />}
-              >
-                Edit
-              </AppButton>
-            ) : null}
-            {(selectedActionTransaction.canDelete ??
-              canDeleteTransaction(selectedActionTransaction)) ? (
-              <AppButton
-                onClick={() => handleDeleteTransaction(selectedActionTransaction)}
-                type="button"
-                variant="danger"
-                leadingIcon={<Trash2 className="h-4 w-4" />}
-              >
-                Hapus
-              </AppButton>
-            ) : null}
-          </div>
-        ) : null}
+      <ActionCardSheet
+        open={Boolean(activeActionCard)}
+        title="Detail dan Aksi"
+        description={activeActionCard?.description ?? null}
+        actions={activeActionCard?.actions ?? []}
+        onClose={handleCloseActionMenu}
+      />
+      <AppSheet onClose={() => setIsFilterSheetOpen(false)} open={isFilterSheetOpen} title="Filter">
+        <AppToggleGroup
+          buttonSize="sm"
+          compact
+          onChange={(nextFilter) => {
+            setFilter(nextFilter)
+            setIsFilterSheetOpen(false)
+          }}
+          options={filters}
+          stacked
+          value={filter}
+        />
       </AppSheet>
+
     </PageShell>
   )
 }

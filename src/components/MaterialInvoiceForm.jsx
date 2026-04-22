@@ -10,9 +10,9 @@ import FormLayout from './layouts/FormLayout'
 import { supplierTypeGroups } from './master/masterTabs'
 import MasterPickerField from './ui/MasterPickerField'
 import {
+  AppCard,
   AppButton,
   AppErrorState,
-  AppCardStrong,
   AppNominalInput,
   AppToggleGroup,
   FormSection,
@@ -186,7 +186,6 @@ function MaterialInvoiceForm({
       ? draftSnapshot.items
       : createInitialItems(initialData)
   )
-  const [successMessage, setSuccessMessage] = useState(null)
   const [savedExpenseId, setSavedExpenseId] = useState(
     recordId ?? initialData?.id ?? null
   )
@@ -215,6 +214,12 @@ function MaterialInvoiceForm({
   const isLocked = Boolean(initialData?.deleted_at) || hasBillPaymentHistory
   const activeExpenseId = savedExpenseId ?? recordId ?? initialData?.id ?? null
   const materialSuppliers = getSuppliersByTypes(supplierTypeGroups.material)
+  const resolvedFormId = formId ?? 'material-invoice-form'
+  const submitLabel = isEditMode
+    ? 'Perbarui Faktur Material'
+    : isDeliveryOrder
+      ? 'Simpan Surat Jalan'
+      : 'Simpan Faktur Material'
   const selectedSupplier = suppliers.find(
     (supplier) => supplier.id === header.supplierId
   )
@@ -303,10 +308,6 @@ function MaterialInvoiceForm({
     if (error) {
       clearError()
     }
-
-    if (successMessage) {
-      setSuccessMessage(null)
-    }
   }
 
   const handleHeaderChange = (event) => {
@@ -330,10 +331,6 @@ function MaterialInvoiceForm({
     if (error) {
       clearError()
     }
-
-    if (successMessage) {
-      setSuccessMessage(null)
-    }
   }
 
   const handleAddItem = (event) => {
@@ -356,7 +353,7 @@ function MaterialInvoiceForm({
   const handleSubmit = async (event) => {
     event.preventDefault()
 
-    if (isSubmitting || !isMasterDataReady) {
+    if (isSubmitting || !isMasterDataReady || isLocked) {
       return
     }
 
@@ -428,16 +425,12 @@ function MaterialInvoiceForm({
 
       setHeader(createInitialHeader(initialData))
       setItems(createInitialItems(initialData))
-      setSuccessMessage(
-        isEditMode
-          ? 'Faktur material berhasil diperbarui.'
-          : isDeliveryOrder
-            ? 'Surat jalan material berhasil disimpan.'
-            : 'Faktur material berhasil disimpan.'
-      )
-
       if (typeof onSuccess === 'function') {
         await onSuccess()
+      }
+
+      if (typeof onClose === 'function') {
+        await onClose()
       }
     } catch (submitError) {
       const message =
@@ -450,10 +443,13 @@ function MaterialInvoiceForm({
   }
 
   return (
-    <form id={formId ?? undefined} className="space-y-6" onSubmit={handleSubmit}>
+    <form id={resolvedFormId} className="space-y-6" onSubmit={handleSubmit}>
       <fieldset className="space-y-6" disabled={isSubmitting || isLocked}>
         <FormLayout
           embedded
+          actionLabel={hideActions ? null : submitLabel}
+          formId={hideActions ? null : resolvedFormId}
+          isSubmitting={isSubmitting}
           sections={[
             {
               id: 'invoice-header',
@@ -471,323 +467,295 @@ function MaterialInvoiceForm({
               description: 'Ringkasan, lampiran aktif, dan aksi simpan final.',
             },
           ]}
+          submitDisabled={!isMasterDataReady || isLocked}
         >
-        {hasBillPaymentHistory ? (
-          <AppErrorState
-            description="Faktur material yang sudah memiliki pembayaran tidak bisa diedit dari form ini. Gunakan detail bill untuk melihat histori pembayaran."
-            title="Faktur terkunci"
-          />
-        ) : null}
+          {hasBillPaymentHistory ? (
+            <AppErrorState
+              description="Faktur material yang sudah memiliki pembayaran tidak bisa diedit dari form ini. Gunakan detail bill untuk melihat histori pembayaran."
+              title="Faktur terkunci"
+            />
+          ) : null}
 
-        <AppCardStrong className="space-y-5">
-          <MasterPickerField
-            disabled={isSubmitting || isMasterLoading || projects.length === 0}
-            emptyMessage="Data proyek belum tersedia."
-            label="Proyek"
-            name="projectId"
-            onChange={(nextValue) => setHeaderField('projectId', nextValue)}
-            placeholder="Pilih proyek"
-            required
-            searchPlaceholder="Cari proyek..."
-            title="Pilih Proyek"
-            value={header.projectId}
-            options={projectPickerOptions}
-          />
-
-          <div className="grid gap-4 sm:grid-cols-2">
+          <FormSection
+            eyebrow="Header"
+            title={isDeliveryOrder ? 'Header Surat Jalan' : 'Header Faktur'}
+            description="Tentukan proyek, supplier, tipe dokumen, lalu lengkapi tanggal dan konteks singkat."
+          >
             <MasterPickerField
-              disabled={isSubmitting || isMasterLoading || availableMaterialSuppliers.length === 0}
-              emptyMessage="Data supplier material belum tersedia."
-              label="Supplier"
-              name="supplierId"
-              onChange={(nextValue) => setHeaderField('supplierId', nextValue)}
-              placeholder="Pilih supplier material"
+              disabled={isSubmitting || isMasterLoading || projects.length === 0}
+              emptyMessage="Data proyek belum tersedia."
+              label="Proyek"
+              name="projectId"
+              onChange={(nextValue) => setHeaderField('projectId', nextValue)}
+              options={projectPickerOptions}
+              placeholder="Pilih proyek"
               required
-              searchPlaceholder="Cari supplier..."
-              title="Pilih Supplier Material"
-              value={header.supplierId}
-              options={supplierPickerOptions}
+              searchPlaceholder="Cari proyek..."
+              title="Pilih Proyek"
+              value={header.projectId}
             />
 
-            <AppToggleGroup
-              description="Jenis dokumen hanya punya dua mode dan tidak mengambil master data."
-              label="Jenis Dokumen"
-              onChange={(nextValue) => setHeaderField('documentType', nextValue)}
-              options={[
-                { value: 'faktur', label: 'Faktur' },
-                { value: 'surat_jalan', label: 'Surat Jalan' },
-              ]}
-              value={header.documentType}
-            />
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                Tanggal
-              </span>
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                name="date"
-                onChange={handleHeaderChange}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <MasterPickerField
+                disabled={
+                  isSubmitting ||
+                  isMasterLoading ||
+                  availableMaterialSuppliers.length === 0
+                }
+                emptyMessage="Data supplier material belum tersedia."
+                label="Supplier"
+                name="supplierId"
+                onChange={(nextValue) => setHeaderField('supplierId', nextValue)}
+                options={supplierPickerOptions}
+                placeholder="Pilih supplier material"
                 required
-                type="date"
-                value={header.date}
+                searchPlaceholder="Cari supplier..."
+                title="Pilih Supplier Material"
+                value={header.supplierId}
               />
-            </label>
 
-            <AppToggleGroup
-              disabled={isDeliveryOrder}
-              description={
-                isDeliveryOrder
-                  ? 'Status pembayaran dikunci saat jenis dokumen surat jalan.'
-                  : 'Status pembayaran hanya punya dua opsi dan tidak mengambil master data.'
-              }
-              label="Status Pembayaran"
-              onChange={(nextValue) => setHeaderField('paymentStatus', nextValue)}
-              options={[
-                { value: 'paid', label: 'Lunas' },
-                { value: 'unpaid', label: 'Hutang' },
-              ]}
-              value={header.paymentStatus}
-            />
-          </div>
-
-          <details className="group rounded-[22px] border border-dashed border-[var(--app-outline-soft)] bg-[var(--app-surface-low-color)] px-4 py-3">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-[var(--app-text-color)]">
-              <span>Catatan opsional</span>
-              <span className="text-xs font-medium text-[var(--app-hint-color)] group-open:hidden">
-                Tampilkan
-              </span>
-              <span className="hidden text-xs font-medium text-[var(--app-hint-color)] group-open:inline">
-                Sembunyikan
-              </span>
-            </summary>
-            <div className="pt-4">
-              <textarea
-                className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                name="description"
-                onChange={handleHeaderChange}
-                placeholder="Tambahkan konteks singkat untuk invoice material ini."
-                value={header.description}
+              <AppToggleGroup
+                description="Jenis dokumen hanya punya dua mode dan tidak mengambil master data."
+                label="Jenis Dokumen"
+                onChange={(nextValue) => setHeaderField('documentType', nextValue)}
+                options={[
+                  { value: 'faktur', label: 'Faktur' },
+                  { value: 'surat_jalan', label: 'Surat Jalan' },
+                ]}
+                value={header.documentType}
               />
             </div>
-          </details>
-        </AppCardStrong>
 
-        <AppCardStrong className="space-y-4 bg-slate-950 text-white">
-          <div className="space-y-3">
-            {items.map((item, index) => {
-              const selectedMaterial = materials.find(
-                (material) => material.id === item.materialId
-              )
-              const lineTotal = getLineTotal(item)
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block space-y-2">
+                <span className="text-sm font-semibold text-[var(--app-text-color)]">
+                  Tanggal
+                </span>
+                <input
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  name="date"
+                  onChange={handleHeaderChange}
+                  required
+                  type="date"
+                  value={header.date}
+                />
+              </label>
 
-              return (
-                <article
-                  key={item.id}
-                  className="rounded-[24px] border border-white/10 bg-white/5 p-4"
-                >
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-white">
-                        Item {index + 1}
-                      </p>
-                      <p className="text-xs text-slate-300">
-                        {selectedMaterial?.unit
-                          ? `Satuan: ${selectedMaterial.unit}`
-                          : isDeliveryOrder
-                            ? 'Pilih material dan qty barang yang diterima.'
-                            : 'Pilih material, qty, dan harga satuan.'}
-                      </p>
+              <AppToggleGroup
+                description={
+                  isDeliveryOrder
+                    ? 'Status pembayaran dikunci saat jenis dokumen surat jalan.'
+                    : 'Status pembayaran hanya punya dua opsi dan tidak mengambil master data.'
+                }
+                disabled={isDeliveryOrder}
+                label="Status Pembayaran"
+                onChange={(nextValue) => setHeaderField('paymentStatus', nextValue)}
+                options={[
+                  { value: 'paid', label: 'Lunas' },
+                  { value: 'unpaid', label: 'Hutang' },
+                ]}
+                value={header.paymentStatus}
+              />
+            </div>
+
+            <details className="group rounded-[22px] border border-dashed border-[var(--app-outline-soft)] bg-[var(--app-surface-low-color)] px-4 py-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-[var(--app-text-color)]">
+                <span>Catatan opsional</span>
+                <span className="text-xs font-medium text-[var(--app-hint-color)] group-open:hidden">
+                  Tampilkan
+                </span>
+                <span className="hidden text-xs font-medium text-[var(--app-hint-color)] group-open:inline">
+                  Sembunyikan
+                </span>
+              </summary>
+              <div className="pt-4">
+                <textarea
+                  className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  name="description"
+                  onChange={handleHeaderChange}
+                  placeholder="Tambahkan konteks singkat untuk invoice material ini."
+                  value={header.description}
+                />
+              </div>
+            </details>
+          </FormSection>
+
+          <FormSection
+            eyebrow="Item"
+            title="Baris Material"
+            description="Tambahkan material per baris. Qty dan harga satuan tetap mengikuti dokumen yang dicatat."
+          >
+            <div className="space-y-3">
+              {items.map((item, index) => {
+                const selectedMaterial = materials.find(
+                  (material) => material.id === item.materialId
+                )
+                const lineTotal = getLineTotal(item)
+
+                return (
+                  <AppCard
+                    key={item.id}
+                    className="space-y-4 rounded-[24px] border border-slate-200 bg-white"
+                  >
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                          Item {index + 1}
+                        </p>
+                        <p className="text-xs text-[var(--app-hint-color)]">
+                          {selectedMaterial?.unit
+                            ? `Satuan: ${selectedMaterial.unit}`
+                            : isDeliveryOrder
+                              ? 'Pilih material dan qty barang yang diterima.'
+                              : 'Pilih material, qty, dan harga satuan.'}
+                        </p>
+                      </div>
+
+                      <AppButton
+                        aria-label={`Hapus item ${index + 1}`}
+                        className="shrink-0"
+                        disabled={items.length === 1}
+                        iconOnly
+                        leadingIcon={<Trash2 className="h-4 w-4" />}
+                        onClick={(event) => handleRemoveItem(event, item.id)}
+                        type="button"
+                        variant="danger"
+                      />
                     </div>
 
-                    <AppButton
-                      className="shrink-0"
-                      disabled={items.length === 1}
-                      iconOnly
-                      leadingIcon={<Trash2 className="h-4 w-4" />}
-                      onClick={(event) => handleRemoveItem(event, item.id)}
-                      type="button"
-                      variant="danger"
-                      aria-label={`Hapus item ${index + 1}`}
-                    />
-                  </div>
+                    <div className="grid gap-3">
+                      <MasterPickerField
+                        disabled={isSubmitting || isMasterLoading || materials.length === 0}
+                        emptyMessage="Data material belum tersedia."
+                        label="Material"
+                        onChange={(nextValue) =>
+                          handleItemChange(item.id, 'materialId', nextValue)
+                        }
+                        options={materialPickerOptions}
+                        placeholder="Pilih material"
+                        required
+                        searchPlaceholder="Cari material..."
+                        title={`Pilih Material ${index + 1}`}
+                        value={item.materialId}
+                      />
 
-                  <div className="grid gap-3">
-                    <MasterPickerField
-                      disabled={isSubmitting || isMasterLoading || materials.length === 0}
-                      emptyMessage="Data material belum tersedia."
-                      label="Material"
-                      onChange={(nextValue) => handleItemChange(item.id, 'materialId', nextValue)}
-                      placeholder="Pilih material"
-                      required
-                      searchPlaceholder="Cari material..."
-                      title={`Pilih Material ${index + 1}`}
-                      value={item.materialId}
-                      options={materialPickerOptions}
-                    />
-
-                    <div className={`grid gap-3 ${isDeliveryOrder ? '' : 'sm:grid-cols-2'}`}>
-                      <label className="block space-y-2">
-                        <span className="text-sm font-medium text-slate-200">
-                          Qty
-                        </span>
-                        <input
-                          className="w-full rounded-2xl border border-white/10 bg-white/90 px-4 py-3 text-base text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                          inputMode="decimal"
-                          min="0.01"
-                          onChange={(event) =>
-                            handleItemChange(item.id, 'qty', event.target.value)
-                          }
-                          placeholder="0"
-                          required
-                          step="0.01"
-                          type="number"
-                          value={item.qty}
-                        />
-                      </label>
-
-              {isDeliveryOrder ? null : (
-                <label className="block space-y-2">
-                          <span className="text-sm font-medium text-slate-200">
-                            Harga Satuan
+                      <div className={`grid gap-3 ${isDeliveryOrder ? '' : 'sm:grid-cols-2'}`}>
+                        <label className="block space-y-2">
+                          <span className="text-sm font-medium text-[var(--app-text-color)]">
+                            Qty
                           </span>
-                          <AppNominalInput
-                            className="w-full rounded-2xl border border-white/10 bg-white/90 px-4 py-3 text-base text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                            onValueChange={(nextValue) =>
-                              handleItemChange(item.id, 'unitPrice', nextValue)
+                          <input
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                            inputMode="decimal"
+                            min="0.01"
+                            onChange={(event) =>
+                              handleItemChange(item.id, 'qty', event.target.value)
                             }
-                            placeholder="Rp 0"
+                            placeholder="0"
                             required
-                            value={item.unitPrice}
+                            step="0.01"
+                            type="number"
+                            value={item.qty}
                           />
                         </label>
-                      )}
+
+                        {isDeliveryOrder ? null : (
+                          <label className="block space-y-2">
+                            <span className="text-sm font-medium text-[var(--app-text-color)]">
+                              Harga Satuan
+                            </span>
+                            <AppNominalInput
+                              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                              onValueChange={(nextValue) =>
+                                handleItemChange(item.id, 'unitPrice', nextValue)
+                              }
+                              placeholder="Rp 0"
+                              required
+                              value={item.unitPrice}
+                            />
+                          </label>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
-                  {isDeliveryOrder ? null : (
-                    <div className="mt-4 rounded-2xl border border-white/10 bg-black/15 px-4 py-3">
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-300">
-                        Subtotal
-                      </p>
-                      <p className="mt-2 text-lg font-semibold text-white">
-                        {formatCurrency(lineTotal)}
-                      </p>
-                    </div>
-                  )}
-                </article>
-              )
-            })}
-          </div>
-
-          <AppButton
-            className="w-full"
-            leadingIcon={<Plus className="h-4 w-4" />}
-            onClick={handleAddItem}
-            type="button"
-            variant="secondary"
-          >
-            Tambah Item
-          </AppButton>
-        </AppCardStrong>
-
-        <FormSection
-          eyebrow="Lampiran dan Simpan"
-          title="Ringkasan, Lampiran, dan Aksi Final"
-          description="Lihat total, unggah gambar pendukung, lalu simpan dari section terakhir."
-          className="bg-emerald-50/85"
-        >
-          {isDeliveryOrder ? (
-            <div className="rounded-2xl bg-white/80 px-4 py-4">
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">
-                Ringkasan Surat Jalan
-              </p>
-              <p className="mt-2 text-sm leading-6 text-emerald-900">
-                {items.length} item material akan dicatat sebagai barang masuk tanpa
-                nilai faktur.
-              </p>
+                    {isDeliveryOrder ? null : (
+                      <div className="mt-4 rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] px-4 py-3">
+                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--app-hint-color)]">
+                          Subtotal
+                        </p>
+                        <p className="mt-2 text-lg font-semibold text-[var(--app-text-color)]">
+                          {formatCurrency(lineTotal)}
+                        </p>
+                      </div>
+                    )}
+                  </AppCard>
+                )
+              })}
             </div>
-          ) : (
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">
-                  Total Keseluruhan
-                </p>
-                <p className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-emerald-800">
-                  {formatCurrency(totalAmount)}
-                </p>
-              </div>
-              <div className="rounded-2xl bg-white/80 px-4 py-3 text-right">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                  Jumlah Item
-                </p>
-                <p className="mt-1 text-lg font-semibold text-[var(--app-text-color)]">
-                  {items.length}
-                </p>
-              </div>
-            </div>
-          )}
 
-          {error ? <AppErrorState description={error} title="Form belum valid" /> : null}
-
-          {masterError ? (
-            <AppErrorState description={masterError} title="Master data belum siap" />
-          ) : null}
-
-          {materials.length === 0 && !isMasterLoading ? (
-            <AppErrorState
-              description="Data material masih kosong. Tambahkan master material di database agar faktur bisa disimpan."
-              title="Material belum tersedia"
-            />
-          ) : null}
-
-          {successMessage ? (
-            <div className="rounded-2xl border border-emerald-200 bg-white/80 px-4 py-3 text-sm leading-6 text-emerald-700">
-              <p>{successMessage}</p>
-              {onClose ? (
-                <div className="mt-3">
-                  <AppButton
-                    className="w-full"
-                    onClick={onClose}
-                    type="button"
-                    variant="secondary"
-                  >
-                    Tutup Form
-                  </AppButton>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          <ExpenseAttachmentSection
-            deferUploadUntilParentSaved
-            expenseId={activeExpenseId}
-            title="Lampiran Bukti"
-          />
-
-          {hideActions ? null : (
             <AppButton
               className="w-full"
-              disabled={isSubmitting || !isMasterDataReady}
-              size="lg"
-              type="submit"
+              leadingIcon={<Plus className="h-4 w-4" />}
+              onClick={handleAddItem}
+              type="button"
+              variant="secondary"
             >
-              {isSubmitting
-                ? isDeliveryOrder
-                  ? 'Menyimpan Surat Jalan...'
-                  : isEditMode
-                    ? 'Memperbarui Faktur...'
-                    : 'Menyimpan Faktur...'
-                : isEditMode
-                  ? 'Perbarui Faktur Material'
-                  : isDeliveryOrder
-                    ? 'Simpan Surat Jalan'
-                    : 'Simpan Faktur Material'}
+              Tambah Item
             </AppButton>
-          )}
-        </FormSection>
+          </FormSection>
+
+          <FormSection
+            eyebrow="Lampiran"
+            title="Ringkasan dan Lampiran"
+            description="Periksa total akhir, lampiran aktif, dan simpan dari footer halaman."
+          >
+            {isDeliveryOrder ? (
+              <AppCard className="app-tone-info">
+                <div className="space-y-2">
+                  <p className="app-meta text-[var(--app-tone-info-text)]">
+                    Ringkasan Surat Jalan
+                  </p>
+                  <p className="text-sm leading-6">
+                    {items.length} item material akan dicatat sebagai barang masuk tanpa nilai faktur.
+                  </p>
+                </div>
+              </AppCard>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <AppCard className="space-y-2 bg-white">
+                  <p className="app-meta">Total</p>
+                  <p className="text-2xl font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
+                    {formatCurrency(totalAmount)}
+                  </p>
+                </AppCard>
+                <AppCard className="space-y-2 bg-white">
+                  <p className="app-meta">Jumlah Item</p>
+                  <p className="text-2xl font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
+                    {items.length}
+                  </p>
+                </AppCard>
+              </div>
+            )}
+
+            {error ? <AppErrorState description={error} title="Form belum valid" /> : null}
+
+            {masterError ? (
+              <AppErrorState description={masterError} title="Master data belum siap" />
+            ) : null}
+
+            {materials.length === 0 && !isMasterLoading ? (
+              <AppErrorState
+                description="Data material masih kosong. Tambahkan master material di database agar faktur bisa disimpan."
+                title="Material belum tersedia"
+              />
+            ) : null}
+
+            <ExpenseAttachmentSection
+              deferUploadUntilParentSaved
+              expenseId={activeExpenseId}
+              title="Lampiran Bukti"
+            />
+          </FormSection>
         </FormLayout>
       </fieldset>
     </form>

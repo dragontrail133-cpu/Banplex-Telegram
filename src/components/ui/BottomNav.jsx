@@ -117,7 +117,7 @@ function QuickActionsSheet({ isOpen, onClose, onNavigate }) {
                 onClose()
               }
             }}
-            className="relative w-full max-w-md overflow-hidden rounded-[32px] border border-[var(--app-outline-soft)] bg-[var(--app-surface-strong-color)] shadow-telegram backdrop-blur-2xl"
+            className="relative w-full max-w-md overflow-hidden rounded-[32px] border border-[var(--app-outline-soft)] bg-[var(--app-surface-strong-color)] shadow-telegram"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -185,6 +185,7 @@ function BottomNav() {
   const { haptic } = useTelegram()
   const navigate = useNavigate()
   const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false)
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false)
 
   const navGridItems = useMemo(() => {
     return [
@@ -196,6 +197,63 @@ function BottomNav() {
     ]
   }, [])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined
+    }
+
+    const mobileQuery = window.matchMedia('(max-width: 767px)')
+    const isEditableElement = (element) => {
+      if (!(element instanceof HTMLElement)) {
+        return false
+      }
+
+      return (
+        element.isContentEditable ||
+        element.matches('input, textarea, select, [contenteditable="true"]')
+      )
+    }
+
+    const updateKeyboardVisibility = () => {
+      if (!mobileQuery.matches) {
+        setIsKeyboardVisible(false)
+        return
+      }
+
+      setIsKeyboardVisible(isEditableElement(document.activeElement))
+    }
+
+    const handleFocusIn = (event) => {
+      if (mobileQuery.matches && isEditableElement(event.target)) {
+        setIsKeyboardVisible(true)
+      }
+    }
+
+    const handleFocusOut = () => {
+      window.requestAnimationFrame(updateKeyboardVisibility)
+    }
+
+    const handleViewportChange = () => {
+      window.requestAnimationFrame(updateKeyboardVisibility)
+    }
+
+    updateKeyboardVisibility()
+
+    document.addEventListener('focusin', handleFocusIn)
+    document.addEventListener('focusout', handleFocusOut)
+    window.addEventListener('resize', handleViewportChange)
+    window.visualViewport?.addEventListener('resize', handleViewportChange)
+    window.visualViewport?.addEventListener('scroll', handleViewportChange)
+
+    return () => {
+      document.removeEventListener('focusin', handleFocusIn)
+      document.removeEventListener('focusout', handleFocusOut)
+      window.removeEventListener('resize', handleViewportChange)
+      window.visualViewport?.removeEventListener('resize', handleViewportChange)
+      window.visualViewport?.removeEventListener('scroll', handleViewportChange)
+    }
+  }, [])
+
   const handleNavigate = (to) => {
     setIsQuickActionsOpen(false)
     navigate(to)
@@ -203,8 +261,13 @@ function BottomNav() {
 
   return (
     <>
-      <nav className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-md px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
-        <div className="relative grid grid-cols-5 items-end gap-1 rounded-[30px] border border-[var(--app-nav-border)] bg-[var(--app-nav-bg)] px-2 pb-2 pt-3 shadow-[var(--app-nav-shadow)] backdrop-blur-2xl">
+      <nav
+        aria-hidden={isKeyboardVisible}
+        className={`fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-md px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 transition-[transform,opacity] duration-200 ease-out ${
+          isKeyboardVisible ? 'pointer-events-none translate-y-[calc(100%+1.25rem)] opacity-0' : 'opacity-100'
+        }`}
+      >
+        <div className="relative grid grid-cols-5 items-end gap-1 rounded-[30px] border border-[var(--app-nav-border)] bg-[var(--app-nav-bg)] px-2 pb-2 pt-3 shadow-[var(--app-nav-shadow)]">
           {navGridItems.map((item) => {
             if (item.kind === 'fab') {
               return (

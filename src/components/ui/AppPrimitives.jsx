@@ -6,6 +6,7 @@ import {
   formatNominalInputValue,
   normalizeNominalInputValue,
 } from '../../lib/nominal'
+import useMobileKeyboardVisible from '../../hooks/useMobileKeyboardVisible'
 
 function joinClasses(...values) {
   return values.flat().filter(Boolean).join(' ')
@@ -203,6 +204,8 @@ function AppToggleGroup({
   disabled = false,
   className = '',
   buttonSize = 'md',
+  compact = false,
+  stacked = false,
 }) {
   return (
     <div className={joinClasses('space-y-2', className)} role="group">
@@ -215,30 +218,40 @@ function AppToggleGroup({
         </div>
       ) : null}
 
-      <div className="overflow-x-auto pb-1">
+      <div className={stacked ? '' : 'overflow-x-auto pb-1'}>
         <div
-          className="grid min-w-full gap-2 rounded-[24px] border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] p-1"
-          style={{
-            gridTemplateColumns: `repeat(${Math.max(options.length, 1)}, minmax(7.5rem, 1fr))`,
-          }}
+          className={joinClasses(
+            'grid rounded-[24px] border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] p-1',
+            stacked ? 'gap-2' : compact ? 'gap-1.5 min-w-full' : 'gap-2'
+          )}
+          style={
+            stacked
+              ? {
+                  gridTemplateColumns: '1fr',
+                }
+              : {
+                  gridTemplateColumns: `repeat(${Math.max(options.length, 1)}, minmax(${compact ? '6rem' : '7.5rem'}, 1fr))`,
+                }
+          }
         >
           {options.map((option) => {
-          const isActive = value === option.value
+            const isActive = value === option.value
+            const isOptionDisabled = disabled || Boolean(option.disabled)
 
-          return (
-            <AppButton
-              key={option.value}
-              aria-pressed={isActive}
-              className="w-full rounded-[20px]"
-              disabled={disabled}
-              onClick={() => onChange?.(option.value)}
-              size={buttonSize}
-              type="button"
-              variant={isActive ? 'primary' : 'secondary'}
-            >
-              {option.label}
-            </AppButton>
-          )
+            return (
+              <AppButton
+                key={option.value}
+                aria-pressed={isActive}
+                className={joinClasses('w-full rounded-[20px]', stacked && 'justify-start text-left')}
+                disabled={isOptionDisabled}
+                onClick={() => onChange?.(option.value)}
+                size={buttonSize}
+                type="button"
+                variant={isActive ? 'primary' : 'secondary'}
+              >
+                {option.label}
+              </AppButton>
+            )
           })}
         </div>
       </div>
@@ -331,6 +344,24 @@ function AppBadge({
 }
 
 function renderHeaderControl({ backAction, backLabel, action }) {
+  if (backAction && action) {
+    return (
+      <div className="flex shrink-0 items-center gap-2">
+        {action}
+        <AppButton
+          className="shrink-0 rounded-full"
+          leadingIcon={<ArrowLeft className="h-4 w-4" />}
+          onClick={backAction}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          {backLabel ?? 'Kembali'}
+        </AppButton>
+      </div>
+    )
+  }
+
   if (backAction) {
     return (
       <AppButton
@@ -361,6 +392,7 @@ function PageHeader({
   backAction = null,
   backLabel = 'Kembali',
   chips = null,
+  compact = false,
   className = '',
 }) {
   return (
@@ -368,8 +400,8 @@ function PageHeader({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1.5">
           {eyebrow ? <p className="app-kicker">{eyebrow}</p> : null}
-          <h1 className="app-page-title">{title}</h1>
-          {description ? <p className="app-page-lead">{description}</p> : null}
+          <h1 className={compact ? 'app-form-page-title' : 'app-page-title'}>{title}</h1>
+          {description ? <p className={compact ? 'app-form-page-lead' : 'app-page-lead'}>{description}</p> : null}
         </div>
         {renderHeaderControl({ backAction, backLabel, action })}
       </div>
@@ -484,7 +516,7 @@ function AppListRow({
   return (
     <div
       className={joinClasses(
-        'flex items-start justify-between gap-3 border-b border-[var(--app-border-color)] px-2 py-2 last:border-b-0',
+        'flex items-start justify-between gap-3 border-b border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-2 py-2 last:border-b-0',
         className
       )}
       {...props}
@@ -549,6 +581,39 @@ function AppErrorState({
   )
 }
 
+function AppTechnicalCard({
+  label,
+  value,
+  className = '',
+}) {
+  return (
+    <AppCard className={joinClasses('space-y-2 bg-[var(--app-surface-low-color)] px-3 py-3', className)} padded={false}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+        {label}
+      </p>
+      <p className="text-sm font-semibold text-[var(--app-text-color)]">{value}</p>
+    </AppCard>
+  )
+}
+
+function AppTechnicalGrid({
+  items = [],
+  className = '',
+}) {
+  return (
+    <div className={joinClasses('grid gap-2 sm:grid-cols-2', className)}>
+      {items.map((item) => (
+        <AppTechnicalCard
+          key={item.key ?? item.label}
+          className={item.className ?? ''}
+          label={item.label}
+          value={item.value}
+        />
+      ))}
+    </div>
+  )
+}
+
 function OverlayPanel({
   open,
   onClose,
@@ -560,6 +625,8 @@ function OverlayPanel({
   maxWidth = 'md',
   className = '',
 }) {
+  const isKeyboardVisible = useMobileKeyboardVisible()
+
   useEffect(() => {
     if (!open) {
       return undefined
@@ -594,6 +661,7 @@ function OverlayPanel({
   }
 
   const isBottomPlacement = placement === 'bottom'
+  const hasFooter = Boolean(footer)
 
   return createPortal(
     <AnimatePresence>
@@ -632,7 +700,7 @@ function OverlayPanel({
                 : undefined
             }
             className={joinClasses(
-              'app-card-strong relative w-full overflow-hidden',
+              'app-card-strong relative flex w-full max-h-[calc(100dvh-1rem)] flex-col overflow-hidden',
               widthClassName,
               isBottomPlacement ? 'sm:rounded-[28px]' : 'rounded-[28px]',
               className
@@ -663,9 +731,25 @@ function OverlayPanel({
               ) : null}
             </div>
 
-            <div className="px-4 py-4">{children}</div>
+            <div
+              className={joinClasses(
+                'min-h-0 flex-1 overflow-y-auto px-4 py-4',
+                hasFooter ? 'pb-[calc(max(5.25rem,env(safe-area-inset-bottom))+0.5rem)]' : ''
+              )}
+            >
+              {children}
+            </div>
 
-            {footer ? <div className="border-t border-[var(--app-border-color)] px-4 py-4">{footer}</div> : null}
+            {footer ? (
+              <div
+                className={joinClasses(
+                  'pointer-events-auto border-t border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 transition-[transform,opacity] duration-200 ease-out',
+                  isKeyboardVisible ? 'pointer-events-none translate-y-[calc(100%+1rem)] opacity-0' : 'opacity-100'
+                )}
+              >
+                {footer}
+              </div>
+            ) : null}
           </Motion.div>
         </div>
       ) : null}
@@ -692,6 +776,8 @@ export {
   AppEmptyState,
   AppErrorState,
   AppInput,
+  AppTechnicalCard,
+  AppTechnicalGrid,
   AppNominalInput,
   AppListCard,
   AppListRow,

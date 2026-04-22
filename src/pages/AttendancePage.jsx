@@ -1,40 +1,34 @@
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import ProtectedRoute from '../components/ProtectedRoute'
 import FormLayout from '../components/layouts/FormLayout'
 import AttendanceForm from '../components/AttendanceForm'
-import { AppButton } from '../components/ui/AppPrimitives'
+import { formShellRegistry, resolveFormBackRoute } from '../lib/form-shell'
 import useAttendanceStore from '../store/useAttendanceStore'
 
 function AttendancePage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const formId = 'attendance-form'
   const isSheetSaving = useAttendanceStore((state) => state.isSheetSaving)
+  const attendanceShell = formShellRegistry.attendance
+  const backRoute = resolveFormBackRoute('attendance', {
+    locationState: location.state,
+    fallbackRoute: attendanceShell.defaultBackRoute,
+  })
 
   return (
     <ProtectedRoute
       allowedRoles={['Owner', 'Admin', 'Payroll']}
-      description="Absensi hanya tersedia untuk Owner, Admin, dan Payroll."
+      description={attendanceShell.description}
     >
       <FormLayout
-        actionLabel="Simpan Sheet Absensi"
+        actionLabel={attendanceShell.submitLabel}
         formId={formId}
         isSubmitting={isSheetSaving}
-        onBack={() => navigate(-1)}
-        title="Absensi Harian"
+        onBack={() => navigate(backRoute, { replace: true })}
+        title={attendanceShell.title}
       >
-        <div className="space-y-4">
-          <div className="flex justify-end">
-            <AppButton
-              onClick={() => navigate('/payroll')}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Catatan Absensi
-            </AppButton>
-          </div>
-          <AttendanceForm formId={formId} hideActions />
-        </div>
+        <AttendanceForm formId={formId} hideActions />
       </FormLayout>
     </ProtectedRoute>
   )

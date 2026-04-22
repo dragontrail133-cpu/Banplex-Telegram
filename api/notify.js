@@ -1,4 +1,6 @@
 import { jsPDF } from 'jspdf'
+import { APP_TIME_ZONE } from '../src/lib/date-time.js'
+import { createPaymentReceiptPdf } from '../src/lib/report-pdf.js'
 
 function normalizeText(value, fallback = '-') {
   const normalizedValue = String(value ?? '').trim()
@@ -15,33 +17,37 @@ function escapeHtml(value) {
 
 function formatDate(value) {
   const normalizedValue = String(value ?? '').trim()
+  const hasTimeComponent = /\dT\d|\d:\d/.test(normalizedValue)
+  const dateTimeOptions = {
+    dateStyle: 'medium',
+    timeZone: APP_TIME_ZONE,
+  }
 
   if (!normalizedValue) {
     return new Intl.DateTimeFormat('id-ID', {
       dateStyle: 'medium',
       timeStyle: 'short',
-      timeZone: 'Asia/Jakarta',
+      timeZone: APP_TIME_ZONE,
     }).format(new Date())
   }
 
   const parsedDate = new Date(normalizedValue)
 
-  if (!Number.isNaN(parsedDate.getTime())) {
+  if (hasTimeComponent && !Number.isNaN(parsedDate.getTime())) {
     return new Intl.DateTimeFormat('id-ID', {
-      dateStyle: 'medium',
+      ...dateTimeOptions,
       timeStyle: 'short',
-      timeZone: 'Asia/Jakarta',
     }).format(parsedDate)
   }
 
-  const parsedDateOnly = new Date(`${normalizedValue}T00:00:00`)
+  const parsedDateOnly = new Date(`${normalizedValue}T12:00:00Z`)
 
   if (!Number.isNaN(parsedDateOnly.getTime())) {
     return new Intl.DateTimeFormat('id-ID', {
       day: 'numeric',
       month: 'long',
       year: 'numeric',
-      timeZone: 'Asia/Jakarta',
+      timeZone: APP_TIME_ZONE,
     }).format(parsedDateOnly)
   }
 
@@ -850,6 +856,99 @@ function parseSalaryBillPayload(body) {
   return payload
 }
 
+function buildBillPaymentReceiptContext(payload) {
+  const amount = Math.max(Number(payload.amount) || 0, 0)
+  const remainingAmount = Math.max(Number(payload.remainingAmount) || 0, 0)
+  const paymentDate = normalizeText(
+    payload.paymentDate ?? payload.payment_date ?? payload.date,
+    new Date().toISOString()
+  )
+  const referenceId = normalizeText(payload.billId, 'payment')
+  const parentRecord = {
+    id: referenceId,
+    amount: amount + remainingAmount,
+    remainingAmount,
+    dueDate: paymentDate,
+    status: remainingAmount > 0 ? 'partial' : 'paid',
+    supplierName: normalizeText(payload.supplierName, '-'),
+    projectName: normalizeText(payload.projectName, '-'),
+    description: normalizeText(
+      payload.description,
+      'Pembayaran tagihan telah dilakukan.'
+    ),
+  }
+
+  return {
+    payment: {
+      id: referenceId,
+      referenceId,
+      billId: referenceId,
+      paymentDate,
+      createdAt: paymentDate,
+      amount,
+      notes: parentRecord.description,
+      supplierName: parentRecord.supplierName,
+      projectName: parentRecord.projectName,
+    },
+    parentRecord,
+  }
+}
+
+function buildLoanPaymentReceiptContext(payload) {
+  const amount = Math.max(Number(payload.amount) || 0, 0)
+  const remainingAmount = Math.max(Number(payload.remainingAmount) || 0, 0)
+  const paymentDate = normalizeText(
+    payload.paymentDate ?? payload.payment_date ?? payload.date,
+    new Date().toISOString()
+  )
+  const referenceId = normalizeText(payload.loanId, 'payment')
+  const parentRecord = {
+    id: referenceId,
+    amount: amount + remainingAmount,
+    repayment_amount: amount + remainingAmount,
+    remainingAmount,
+    dueDate: paymentDate,
+    status: remainingAmount > 0 ? 'partial' : 'paid',
+    creditor_name_snapshot: normalizeText(payload.creditorName, '-'),
+    description: normalizeText(
+      payload.description,
+      'Pembayaran pinjaman telah dilakukan.'
+    ),
+  }
+
+  return {
+    payment: {
+      id: referenceId,
+      referenceId,
+      loanId: referenceId,
+      paymentDate,
+      createdAt: paymentDate,
+      amount,
+      notes: parentRecord.description,
+      creditorNameSnapshot: parentRecord.creditor_name_snapshot,
+    },
+    parentRecord,
+  }
+}
+
+function buildPaymentReceiptDocument(paymentType, payload) {
+  const receiptContext =
+    paymentType === 'loan'
+      ? buildLoanPaymentReceiptContext(payload)
+      : buildBillPaymentReceiptContext(payload)
+  const { doc, fileName } = createPaymentReceiptPdf({
+    paymentType,
+    payment: receiptContext.payment,
+    parentRecord: receiptContext.parentRecord,
+    generatedAt: new Date(),
+  })
+
+  return {
+    pdfBytes: new Uint8Array(doc.output('arraybuffer')),
+    fileName,
+  }
+}
+
 async function sendTransactionNotification(payload, telegramBotToken, telegramChatId) {
   return sendTelegramDocumentNotification({
     telegramBotToken,
@@ -881,10 +980,17 @@ async function sendMaterialInvoiceNotification(
 }
 
 async function sendBillPaymentNotification(payload, telegramBotToken, telegramChatId) {
-  return sendTelegramTextNotification({
+  const { pdfBytes, fileName } = buildPaymentReceiptDocument('bill', payload)
+
+  return sendTelegramDocumentNotification({
     telegramBotToken,
     telegramChatId,
-    message: buildBillPaymentMessage(payload),
+    pdfBytes,
+    fileName,
+    caption: buildBillPaymentMessage(payload),
+    fallbackMessage: buildBillPaymentMessage(payload),
+    fallbackPrefix:
+      'PDF kwitansi pembayaran tagihan gagal dibuat atau gagal dikirim. Notifikasi teks dikirim sebagai cadangan.',
   })
 }
 
@@ -905,10 +1011,17 @@ async function sendLoanNotification(payload, telegramBotToken, telegramChatId) {
 }
 
 async function sendLoanPaymentNotification(payload, telegramBotToken, telegramChatId) {
-  return sendTelegramTextNotification({
+  const { pdfBytes, fileName } = buildPaymentReceiptDocument('loan', payload)
+
+  return sendTelegramDocumentNotification({
     telegramBotToken,
     telegramChatId,
-    message: buildLoanPaymentMessage(payload),
+    pdfBytes,
+    fileName,
+    caption: buildLoanPaymentMessage(payload),
+    fallbackMessage: buildLoanPaymentMessage(payload),
+    fallbackPrefix:
+      'PDF kwitansi pembayaran pinjaman gagal dibuat atau gagal dikirim. Notifikasi teks dikirim sebagai cadangan.',
   })
 }
 

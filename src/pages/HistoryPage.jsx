@@ -1,28 +1,44 @@
+import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownLeft, ArrowUpRight, ArrowLeft, Clock3, Trash2 } from 'lucide-react'
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  ArrowLeft,
+  Clock3,
+  Search,
+  SlidersHorizontal,
+  Trash2,
+} from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import ActionCard, { ActionCardSheet } from '../components/ui/ActionCard'
 import {
   AppButton,
   AppCardDashed,
   AppCardStrong,
   AppEmptyState,
   AppInput,
+  AppSheet,
+  AppToggleGroup,
   PageShell,
   PageHeader,
 } from '../components/ui/AppPrimitives'
 import {
   formatCurrency,
-  formatTransactionDateTime,
-  getTransactionCreatorLabel,
+  formatTransactionTimestamp,
+  getTransactionContextLabel,
   getTransactionLedgerFilterOptions,
-  getTransactionLedgerSummary,
   getTransactionTitle,
+  getTransactionCreatorLabel,
 } from '../lib/transaction-presentation'
 import { logPerf, nowMs, roundMs } from '../lib/timing'
 import { fetchHistoryTransactionPageFromApi } from '../lib/transactions-api'
 import useAuthStore from '../store/useAuthStore'
 
-const filters = getTransactionLedgerFilterOptions()
+const filters = getTransactionLedgerFilterOptions({
+  includeSuratJalan: false,
+  includePayrollBills: false,
+})
+const filterValueSet = new Set(filters.map((item) => item.value))
 const historyPageSize = 20
 const historyListStateStorageKey = 'banplex:history-list-state'
 const historyPerfEnabled = import.meta.env.DEV
@@ -86,24 +102,33 @@ function getTransactionPresentation(transaction) {
   }
 }
 
-function HistoryPage() {
+export function HistoryWorkspace({ embedded = false, headerActionsTarget = null } = {}) {
   const navigate = useNavigate()
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
   const restoredHistoryState = useMemo(
     () => readHistoryListState(currentTeamId),
     [currentTeamId]
   )
+  const restoredFilter = restoredHistoryState?.filter ?? 'all'
   const shouldSkipInitialLoadRef = useRef(
     Boolean(restoredHistoryState?.hasLoaded ?? restoredHistoryState?.transactions?.length > 0)
   )
   const savedScrollPositionRef = useRef(Number(restoredHistoryState?.scrollY ?? 0))
   const historyMountedAtRef = useRef(nowMs())
   const historyFirstUsableLoggedRef = useRef(false)
-  const [filter, setFilter] = useState(restoredHistoryState?.filter ?? 'all')
+  const [filter, setFilter] = useState(
+    filterValueSet.has(restoredFilter) ? restoredFilter : 'all'
+  )
   const [searchTerm, setSearchTerm] = useState(restoredHistoryState?.searchTerm ?? '')
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(
     restoredHistoryState?.debouncedSearchTerm ?? restoredHistoryState?.searchTerm ?? ''
   )
+  const [isSearchExpanded, setIsSearchExpanded] = useState(
+    Boolean(
+      (restoredHistoryState?.searchTerm ?? restoredHistoryState?.debouncedSearchTerm ?? '').trim()
+    )
+  )
+  const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false)
   const [transactions, setTransactions] = useState(restoredHistoryState?.transactions ?? [])
   const [pageInfo, setPageInfo] = useState(
     restoredHistoryState?.pageInfo ?? {
@@ -115,6 +140,7 @@ function HistoryPage() {
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(false)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [historyError, setHistoryError] = useState(null)
+  const [activeActionCard, setActiveActionCard] = useState(null)
   const [hasLoadedHistory, setHasLoadedHistory] = useState(
     Boolean(restoredHistoryState?.hasLoaded)
   )
@@ -355,60 +381,104 @@ function HistoryPage() {
     })
   }
 
-  return (
-    <PageShell>
-      <PageHeader
-        title="Riwayat"
-        action={
-          <div className="flex items-center gap-2">
-            <AppButton
-              onClick={() => navigate('/transactions')}
-              size="sm"
-              type="button"
-              variant="secondary"
-              iconOnly
-              aria-label="Buka Jurnal"
-              leadingIcon={<ArrowLeft className="h-4 w-4" />}
-            >
-              <span className="sr-only">Jurnal</span>
-            </AppButton>
-            <AppButton
-              onClick={() => navigate('/transactions/recycle-bin')}
-              size="sm"
-              type="button"
-              variant="secondary"
-              iconOnly
-              aria-label="Buka Halaman Sampah"
-              leadingIcon={<Trash2 className="h-4 w-4" />}
-            >
-              <span className="sr-only">Halaman Sampah</span>
-            </AppButton>
-          </div>
-        }
+  const handleOpenActionMenu = (menuState) => {
+    setActiveActionCard(menuState)
+  }
+
+  const handleCloseActionMenu = () => {
+    setActiveActionCard(null)
+  }
+
+  const Shell = embedded ? 'div' : PageShell
+  const compactToolbar = (
+    <div className="flex items-center justify-end gap-2">
+      <AppButton
+        aria-label="Buka pencarian Riwayat"
+        iconOnly
+        leadingIcon={<Search className="h-4 w-4" />}
+        onClick={() => setIsSearchExpanded((currentValue) => !currentValue)}
+        size="sm"
+        type="button"
+        variant={isSearchExpanded || searchTerm.trim() ? 'primary' : 'secondary'}
       />
+      <AppButton
+        aria-label="Buka filter Riwayat"
+        iconOnly
+        leadingIcon={<SlidersHorizontal className="h-4 w-4" />}
+        onClick={() => setIsFilterSheetOpen(true)}
+        size="sm"
+        type="button"
+        variant={filter === 'all' ? 'secondary' : 'primary'}
+      />
+    </div>
+  )
+  const headerActionsPortal =
+    embedded && headerActionsTarget ? createPortal(compactToolbar, headerActionsTarget) : null
+
+  return (
+    <Shell className={embedded ? 'space-y-4' : undefined}>
+      {headerActionsPortal}
+
+      {embedded ? null : (
+        <PageHeader
+          title="Riwayat"
+          action={
+            <div className="flex items-center gap-2">
+              <AppButton
+                aria-label="Buka pencarian Riwayat"
+                iconOnly
+                leadingIcon={<Search className="h-4 w-4" />}
+                onClick={() => setIsSearchExpanded((currentValue) => !currentValue)}
+                size="sm"
+                type="button"
+                variant={isSearchExpanded || searchTerm.trim() ? 'primary' : 'secondary'}
+              />
+              <AppButton
+                aria-label="Buka filter Riwayat"
+                iconOnly
+                leadingIcon={<SlidersHorizontal className="h-4 w-4" />}
+                onClick={() => setIsFilterSheetOpen(true)}
+                size="sm"
+                type="button"
+                variant={filter === 'all' ? 'secondary' : 'primary'}
+              />
+              <AppButton
+                onClick={() => navigate('/transactions')}
+                size="sm"
+                type="button"
+                variant="secondary"
+                iconOnly
+                aria-label="Buka Jurnal"
+                leadingIcon={<ArrowLeft className="h-4 w-4" />}
+              >
+                <span className="sr-only">Jurnal</span>
+              </AppButton>
+              <AppButton
+                onClick={() => navigate('/transactions/recycle-bin')}
+                size="sm"
+                type="button"
+                variant="secondary"
+                iconOnly
+                aria-label="Buka Arsip"
+                leadingIcon={<Trash2 className="h-4 w-4" />}
+              >
+                <span className="sr-only">Arsip</span>
+              </AppButton>
+            </div>
+          }
+        />
+      )}
 
       <div className="space-y-3">
-        <AppInput
-          aria-label="Cari riwayat transaksi"
-          className="w-full"
-          onChange={(event) => setSearchTerm(event.target.value)}
-          type="search"
-          value={searchTerm}
-        />
-        <div className="flex flex-wrap gap-2">
-          {filters.map((item) => (
-            <AppButton
-              key={item.value}
-              className="rounded-full"
-              onClick={() => setFilter(item.value)}
-              size="sm"
-              type="button"
-              variant={filter === item.value ? 'primary' : 'secondary'}
-            >
-              {item.label}
-            </AppButton>
-          ))}
-        </div>
+        {isSearchExpanded ? (
+          <AppInput
+            aria-label="Cari riwayat transaksi"
+            className="w-full"
+            onChange={(event) => setSearchTerm(event.target.value)}
+            type="search"
+            value={searchTerm}
+          />
+        ) : null}
       </div>
 
       {historyError ? (
@@ -462,59 +532,45 @@ function HistoryPage() {
             const presentation = getTransactionPresentation(transaction)
             const Icon = presentation.Icon
             const amount = Math.abs(Number(transaction.amount ?? 0))
-            const hasCreatorIdentity = Boolean(
-              transaction?.created_by_user_id ??
-                transaction?.createdByUserId ??
-                transaction?.telegram_user_id ??
-                transaction?.telegramUserId
-            )
-            const creatorLabel = hasCreatorIdentity ? getTransactionCreatorLabel(transaction) : null
-            const ledgerSummary = getTransactionLedgerSummary(transaction)
+            const actions = [
+              {
+                id: 'detail',
+                label: 'Detail',
+                icon: <Clock3 className="h-4 w-4" />,
+                onClick: () => handleOpenDetail(transaction),
+              },
+            ]
 
             return (
-              <AppCardStrong key={`${transaction.sourceType ?? 'transaction'}-${transaction.id}`}>
-                <button
-                  className="flex w-full items-center gap-3 text-left"
-                  onClick={() => handleOpenDetail(transaction)}
-                  type="button"
-                >
+              <ActionCard
+                key={`${transaction.sourceType ?? 'transaction'}-${transaction.id}`}
+                title={getTransactionTitle(transaction)}
+                subtitle={formatTransactionTimestamp(transaction, [
+                  'sort_at',
+                  'bill_paid_at',
+                  'updated_at',
+                  'created_at',
+                  'transaction_date',
+                  'expense_date',
+                ])}
+                details={[getTransactionContextLabel(transaction)].filter(Boolean)}
+                amount={`${Number(transaction.amount ?? 0) < 0 || transaction.type === 'expense'
+                  ? '-'
+                  : '+'}${formatCurrency(amount)}`}
+                amountClassName={presentation.amountClassName}
+                badge={getTransactionCreatorLabel(transaction)}
+                actions={actions}
+                menuMode="shared"
+                onOpenMenu={handleOpenActionMenu}
+                leadingIcon={
                   <div
-                    className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${presentation.iconClassName}`}
+                    className={`flex h-11 w-11 items-center justify-center rounded-[18px] ${presentation.iconClassName}`}
                   >
                     <Icon className="h-[18px] w-[18px]" />
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
-                      {getTransactionTitle(transaction)}
-                    </p>
-                    <p className="mt-0.5 text-xs text-[var(--app-hint-color)]">
-                      {formatTransactionDateTime(
-                        transaction.transaction_date ||
-                          transaction.expense_date ||
-                          transaction.created_at
-                      )}
-                    </p>
-                    {ledgerSummary ? (
-                      <p className="mt-1 truncate text-[11px] font-medium text-[var(--app-hint-color)]">
-                        {ledgerSummary}
-                      </p>
-                    ) : null}
-                    {creatorLabel ? (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <span className="inline-flex items-center rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-hint-color)]">
-                          {creatorLabel}
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-                  <span className={`shrink-0 text-sm font-semibold ${presentation.amountClassName}`}>
-                    {Number(transaction.amount ?? 0) < 0 || transaction.type === 'expense'
-                      ? '-'
-                      : '+'}
-                    {formatCurrency(amount)}
-                  </span>
-                </button>
-              </AppCardStrong>
+                }
+                className="app-card px-4 py-4"
+              />
             )
           })}
 
@@ -532,8 +588,33 @@ function HistoryPage() {
           ) : null}
         </div>
       )}
-    </PageShell>
+
+      <ActionCardSheet
+        open={Boolean(activeActionCard)}
+        title="Detail dan Aksi"
+        description={activeActionCard?.description ?? null}
+        actions={activeActionCard?.actions ?? []}
+        onClose={handleCloseActionMenu}
+      />
+      <AppSheet onClose={() => setIsFilterSheetOpen(false)} open={isFilterSheetOpen} title="Filter">
+        <AppToggleGroup
+          buttonSize="sm"
+          compact
+          stacked
+          onChange={(nextFilter) => {
+            setFilter(nextFilter)
+            setIsFilterSheetOpen(false)
+          }}
+          options={filters}
+          value={filter}
+        />
+      </AppSheet>
+    </Shell>
   )
 }
 
 export default HistoryPage
+
+function HistoryPage() {
+  return <HistoryWorkspace />
+}

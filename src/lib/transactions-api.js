@@ -87,6 +87,21 @@ export async function fetchWorkspaceTransactionPageFromApi(
   }
 }
 
+export async function fetchWorkspaceTransactionByIdFromApi(
+  teamId,
+  transactionId
+) {
+  const result = await requestTransactionsApi('GET', {
+    query: {
+      teamId,
+      view: 'workspace',
+      transactionId,
+    },
+  })
+
+  return result.record ?? null
+}
+
 export async function fetchHistoryTransactionPageFromApi(
   teamId,
   { cursor = null, limit = 20, search = '', filter = 'all' } = {}
@@ -111,6 +126,18 @@ export async function fetchHistoryTransactionPageFromApi(
     },
     timing: result.timing ?? null,
   }
+}
+
+export async function fetchHistoryTransactionByIdFromApi(teamId, transactionId) {
+  const result = await requestTransactionsApi('GET', {
+    query: {
+      teamId,
+      view: 'history',
+      transactionId,
+    },
+  })
+
+  return result.record ?? null
 }
 
 export async function fetchTransactionSummaryFromApi(teamId) {

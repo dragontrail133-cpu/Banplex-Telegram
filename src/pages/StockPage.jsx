@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowDownLeft, AlertTriangle, Boxes, RefreshCw, Search, TrendingUp } from 'lucide-react'
+import {
+  ArrowDownLeft,
+  Boxes,
+  Loader2,
+  RefreshCw,
+  Search,
+  TrendingUp,
+} from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import ProtectedRoute from '../components/ProtectedRoute'
 import {
@@ -9,6 +16,7 @@ import {
   AppCardDashed,
   AppCardStrong,
   AppEmptyState,
+  AppErrorState,
   AppInput,
   AppListCard,
   AppListRow,
@@ -23,7 +31,7 @@ import {
   fetchStockOverviewFromApi,
   fetchStockProjectOptionsFromApi,
 } from '../lib/records-api'
-import { canUseCapability } from '../lib/capabilities'
+import { canUseCapability, capabilityContracts } from '../lib/capabilities'
 import useAuthStore from '../store/useAuthStore'
 
 const stockFormatter = new Intl.NumberFormat('id-ID', {
@@ -252,6 +260,7 @@ function StockPageContent() {
   const [materials, setMaterials] = useState([])
   const [stockTransactions, setStockTransactions] = useState([])
   const [projectOptions, setProjectOptions] = useState([])
+  const [hasLoadedProjectOptions, setHasLoadedProjectOptions] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [filter, setFilter] = useState('all')
   const [isLoading, setIsLoading] = useState(false)
@@ -266,7 +275,10 @@ function StockPageContent() {
   const [manualOutQuantity, setManualOutQuantity] = useState('')
   const [isManualOutSubmitting, setIsManualOutSubmitting] = useState(false)
   const [manualOutError, setManualOutError] = useState(null)
-  const canManageManualStockOut = canUseCapability(currentRole, 'manual_stock_out')
+  const canManageManualStockOut = canUseCapability(
+    currentRole,
+    capabilityContracts.manual_stock_out.key
+  )
 
 
   const filteredProjectOptions = useMemo(() => {
@@ -338,12 +350,14 @@ function StockPageContent() {
     if (!canManageManualStockOut) {
       setProjectOptions([])
       setProjectOptionsError(null)
+      setHasLoadedProjectOptions(false)
       return
     }
 
     if (!currentTeamId) {
       setProjectOptions([])
       setProjectOptionsError(null)
+      setHasLoadedProjectOptions(false)
       return
     }
 
@@ -353,6 +367,7 @@ function StockPageContent() {
       const result = await fetchStockProjectOptionsFromApi(currentTeamId)
       setProjectOptions(Array.isArray(result) ? result.map(normalizeProjectOption) : [])
       setProjectOptionsError(null)
+      setHasLoadedProjectOptions(true)
     } catch (requestError) {
       const message =
         requestError instanceof Error
@@ -361,6 +376,7 @@ function StockPageContent() {
 
       setProjectOptions([])
       setProjectOptionsError(message)
+      setHasLoadedProjectOptions(false)
     } finally {
       setIsProjectOptionsLoading(false)
     }
@@ -409,8 +425,24 @@ function StockPageContent() {
   }, [loadOverview])
 
   useEffect(() => {
+    setHasLoadedProjectOptions(false)
+    setProjectOptions([])
+    setProjectOptionsError(null)
+    setIsProjectOptionsLoading(false)
+  }, [currentTeamId, canManageManualStockOut])
+
+  useEffect(() => {
+    if (!isManualOutSheetOpen || hasLoadedProjectOptions || isProjectOptionsLoading) {
+      return
+    }
+
     void loadProjectOptions()
-  }, [loadProjectOptions])
+  }, [
+    hasLoadedProjectOptions,
+    isManualOutSheetOpen,
+    isProjectOptionsLoading,
+    loadProjectOptions,
+  ])
   const submitManualStockOut = useCallback(
     async (event) => {
       event.preventDefault()
@@ -621,21 +653,18 @@ function StockPageContent() {
       </AppCardStrong>
 
       {error ? (
-        <AppCard className="app-tone-danger space-y-2">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div className="space-y-1">
-              <p className="text-sm font-semibold">Gagal memuat stok</p>
-              <p className="text-sm leading-6">{error}</p>
-            </div>
-          </div>
-        </AppCard>
+        <AppErrorState
+          description={error}
+          title="Stok gagal dimuat"
+        />
       ) : null}
 
       {isLoading && materials.length === 0 ? (
-        <AppCardDashed className="py-10 text-center text-sm text-[var(--app-hint-color)]">
-          Memuat stok barang...
-        </AppCardDashed>
+        <AppEmptyState
+          description="Menarik data stok terbaru dari server."
+          icon={<Loader2 className="h-10 w-10 animate-spin" />}
+          title="Memuat stok barang"
+        />
       ) : null}
 
       {isEmptyState ? (
@@ -722,9 +751,10 @@ function StockPageContent() {
         >
           <form className="space-y-4 pt-2" id="manual-stock-out-form" onSubmit={submitManualStockOut}>
             {manualOutError ? (
-              <AppCard className="app-tone-danger">
-                <p className="text-sm leading-6">{manualOutError}</p>
-              </AppCard>
+              <AppErrorState
+                description={manualOutError}
+                title="Stock-out manual gagal diproses"
+              />
             ) : null}
 
           <div className="space-y-2">
@@ -741,9 +771,10 @@ function StockPageContent() {
             />
 
             {projectOptionsError ? (
-              <AppCard className="app-tone-danger">
-                <p className="text-sm leading-6">{projectOptionsError}</p>
-              </AppCard>
+              <AppErrorState
+                description={projectOptionsError}
+                title="Unit Kerja gagal dimuat"
+              />
             ) : null}
 
             {selectedManualOutProject ? (
@@ -758,9 +789,11 @@ function StockPageContent() {
             ) : null}
 
             {isProjectOptionsLoading ? (
-              <AppCardDashed className="py-6 text-center text-sm text-[var(--app-hint-color)]">
-                Memuat Unit Kerja aktif...
-              </AppCardDashed>
+              <AppEmptyState
+                description="Menarik opsi Unit Kerja dari server."
+                icon={<Loader2 className="h-10 w-10 animate-spin" />}
+                title="Memuat Unit Kerja aktif"
+              />
             ) : filteredProjectOptions.length > 0 ? (
               <AppListCard className="space-y-0 overflow-hidden p-2">
                 {filteredProjectOptions.map((option) => {
@@ -862,7 +895,7 @@ function StockPageContent() {
 function StockPage() {
   return (
     <ProtectedRoute
-      requiredCapability="manual_stock_out"
+      requiredCapability={capabilityContracts.manual_stock_out.key}
       description="Stok Barang tersedia untuk Owner, Admin, dan Logistik."
     >
       <StockPageContent />

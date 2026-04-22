@@ -31,3 +31,5 @@ dist-ssr
 .vercel
 .env*.local
 .gemini/
+playwright-report/
+test-results/

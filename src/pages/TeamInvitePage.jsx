@@ -3,6 +3,7 @@ import TeamInviteManager from '../components/TeamInviteManager'
 import ProtectedRoute from '../components/ProtectedRoute'
 import FormHeader from '../components/layouts/FormHeader'
 import { AppViewportSafeArea, PageShell } from '../components/ui/AppPrimitives'
+import { capabilityContracts } from '../lib/capabilities'
 
 function TeamInvitePage() {
   const navigate = useNavigate()
@@ -15,7 +16,7 @@ function TeamInvitePage() {
           onBack={() => navigate('/more')}
           title="Tim"
         />
-        <ProtectedRoute requiredCapability="team_invite">
+        <ProtectedRoute requiredCapability={capabilityContracts.team_invite.key}>
           <TeamInviteManager />
         </ProtectedRoute>
       </PageShell>

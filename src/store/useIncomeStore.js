@@ -16,6 +16,7 @@ import {
   saveTransactionRecordFromApi,
   softDeleteTransactionFromApi,
 } from '../lib/transactions-api'
+import useToastStore from './useToastStore'
 
 function normalizeText(value, fallback = null) {
   const normalizedValue = String(value ?? '').trim()
@@ -38,17 +39,27 @@ function toError(error, fallbackMessage) {
   return error instanceof Error ? error : new Error(message)
 }
 
-function notifyTelegram(payload) {
-  void fetch('/api/notify', {
+async function notifyTelegram(payload) {
+  const response = await fetch('/api/notify', {
     method: 'POST',
     keepalive: true,
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
-  }).catch((error) => {
-    console.error('Gagal memanggil endpoint notifikasi pemasukan:', error)
   })
+
+  const result = await response.json().catch(() => ({}))
+
+  if (!response.ok || !result?.success) {
+    throw new Error(result?.error || 'Gagal mengirim notifikasi Telegram.')
+  }
+
+  return result
+}
+
+function showToast(toast) {
+  useToastStore.getState().showToast(toast)
 }
 
 const loanSelectColumns =
@@ -73,16 +84,23 @@ function buildProjectIncomeNotificationPayload(data = {}, projectName = '-') {
 function buildLoanNotificationPayload(data = {}, creditorName = '-') {
   const repaymentAmount =
     Number(data.repayment_amount ?? data.repaymentAmount ?? data.loan_terms_snapshot?.repayment_amount) || 0
+  const principalAmount =
+    Number(
+      data.principal_amount ??
+        data.principalAmount ??
+        data.amount ??
+        data.loan_terms_snapshot?.principal_amount
+    ) || 0
 
   return {
     notificationType: 'loan',
     userName: normalizeText(data.userName, 'Pengguna Telegram'),
-    creditorName: normalizeText(creditorName, '-'),
+    creditorName: normalizeText(creditorName, normalizeText(data.creditor_name_snapshot, '-')),
     transactionDate: normalizeText(
       data.transaction_date ?? data.transactionDate,
       new Date().toISOString()
     ),
-    principalAmount: Number(data.principal_amount ?? data.principalAmount) || 0,
+    principalAmount,
     repaymentAmount,
     interestType: normalizeLoanInterestType(data.interest_type ?? data.interestType),
     description: normalizeText(data.description ?? data.notes, 'Pinjaman baru dicatat.'),
@@ -546,15 +564,34 @@ const useIncomeStore = create((set) => ({
         throw new Error('Server tidak mengembalikan data pemasukan proyek.')
       }
 
-      notifyTelegram(buildProjectIncomeNotificationPayload(data, projectName))
+      void notifyTelegram(buildProjectIncomeNotificationPayload(data, projectName)).catch(
+        (notifyError) => {
+          console.error('Notifikasi termin proyek gagal dikirim:', notifyError)
+          showToast({
+            tone: 'warning',
+            title: 'Notifikasi termin proyek',
+            message: 'Pemasukan proyek tersimpan, tetapi notifikasi Telegram gagal dikirim.',
+          })
+        }
+      )
 
       set({ error: null })
+      showToast({
+        tone: 'success',
+        title: 'Pemasukan proyek tersimpan',
+        message: 'Termin proyek berhasil dicatat.',
+      })
 
       return apiRecord
     } catch (error) {
       const normalizedError = toError(error, 'Gagal menyimpan pemasukan proyek.')
 
       set({ error: normalizedError.message })
+      showToast({
+        tone: 'error',
+        title: 'Pemasukan proyek gagal disimpan',
+        message: normalizedError.message,
+      })
 
       throw normalizedError
     } finally {
@@ -708,12 +745,22 @@ const useIncomeStore = create((set) => ({
       }
 
       set({ error: null })
+      showToast({
+        tone: 'success',
+        title: 'Pinjaman diperbarui',
+        message: 'Perubahan pinjaman berhasil disimpan.',
+      })
 
       return apiRecord
     } catch (error) {
       const normalizedError = toError(error, 'Gagal memperbarui pinjaman.')
 
       set({ error: normalizedError.message })
+      showToast({
+        tone: 'error',
+        title: 'Pinjaman gagal diperbarui',
+        message: normalizedError.message,
+      })
 
       throw normalizedError
     } finally {
@@ -852,15 +899,44 @@ const useIncomeStore = create((set) => ({
         throw new Error('Server tidak mengembalikan data pinjaman.')
       }
 
-      notifyTelegram(buildLoanNotificationPayload(apiRecord, creditorName))
+      let notificationError = null
+
+      try {
+        await notifyTelegram(buildLoanNotificationPayload(apiRecord, creditorName))
+      } catch (notifyError) {
+        notificationError =
+          notifyError instanceof Error
+            ? notifyError.message
+            : 'Gagal mengirim notifikasi Telegram.'
+
+        console.error('Notifikasi loan gagal dikirim:', notifyError)
+        showToast({
+          tone: 'warning',
+          title: 'Notifikasi pinjaman',
+          message: 'Pinjaman tersimpan, tetapi notifikasi Telegram gagal dikirim.',
+        })
+      }
 
       set({ error: null })
+      showToast({
+        tone: 'success',
+        title: 'Pinjaman tersimpan',
+        message: 'Data pinjaman berhasil dicatat.',
+      })
 
-      return apiRecord
+      return {
+        ...apiRecord,
+        notificationError,
+      }
     } catch (error) {
       const normalizedError = toError(error, 'Gagal menyimpan pinjaman.')
 
       set({ error: normalizedError.message })
+      showToast({
+        tone: 'error',
+        title: 'Pinjaman gagal disimpan',
+        message: normalizedError.message,
+      })
 
       throw normalizedError
     } finally {

@@ -10,6 +10,7 @@ import {
   PageSection,
 } from './ui/AppPrimitives'
 import { formatAppDateTime } from '../lib/date-time'
+import { allRoles } from '../lib/rbac'
 import useAuthStore from '../store/useAuthStore'
 import useTeamStore, { inviteRoleOptions } from '../store/useTeamStore'
 
@@ -30,7 +31,7 @@ function formatApprovedAt(value) {
 }
 
 function TeamInviteManagerContent() {
-  const [selectedRole, setSelectedRole] = useState('Viewer')
+  const [selectedRole, setSelectedRole] = useState(allRoles[allRoles.length - 1])
   const [copyState, setCopyState] = useState('')
   const activeTeam = useTeamStore((state) => state.activeTeam)
   const latestInvite = useTeamStore((state) => state.latestInvite)
@@ -122,7 +123,7 @@ function TeamInviteManagerContent() {
           </div>
 
           {latestInvite?.invite_link ? (
-            <AppCard className="mt-0 space-y-3 border border-sky-100 bg-sky-50/80">
+            <AppCard className="mt-0 space-y-3 border border-sky-100 bg-sky-50">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
@@ -132,13 +133,13 @@ function TeamInviteManagerContent() {
                     {latestInvite.invite_link}
                   </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-sky-700">
-                    <span className="rounded-full border border-sky-200 bg-white/80 px-3 py-1.5">
+                    <span className="rounded-full border border-sky-200 bg-white px-3 py-1.5">
                       Role {latestInvite.role}
                     </span>
-                    <span className="rounded-full border border-sky-200 bg-white/80 px-3 py-1.5">
+                    <span className="rounded-full border border-sky-200 bg-white px-3 py-1.5">
                       Status {latestInvite.lifecycle_status_label}
                     </span>
-                    <span className="rounded-full border border-sky-200 bg-white/80 px-3 py-1.5">
+                    <span className="rounded-full border border-sky-200 bg-white px-3 py-1.5">
                       Berlaku sampai {formatApprovedAt(latestInvite.expires_at)}
                     </span>
                   </div>
@@ -197,7 +198,7 @@ function TeamInviteManagerContent() {
                 const isCurrentOwner =
                   member.telegram_user_id &&
                   member.telegram_user_id === authUser?.telegram_user_id &&
-                  member.role === 'Owner'
+                  member.role === allRoles[0]
 
                 return (
                   <ActionCard
@@ -216,7 +217,7 @@ function TeamInviteManagerContent() {
                     ]}
                     leadingIcon={
                       <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-white">
-                        {member.role === 'Owner' ? (
+                        {member.role === allRoles[0] ? (
                           <Shield className="h-5 w-5" />
                         ) : (
                           <span className="text-xs font-semibold">
@@ -225,9 +226,9 @@ function TeamInviteManagerContent() {
                         )}
                       </span>
                     }
-                    actions={[
-                      ...inviteRoleOptions
-                        .filter((role) => role !== member.role || role === 'Owner')
+                      actions={[
+                        ...inviteRoleOptions
+                        .filter((role) => role !== member.role || role === allRoles[0])
                         .map((role) => ({
                           id: `role-${role}`,
                           label: role === member.role ? `Aktif: ${role}` : `Set ${role}`,

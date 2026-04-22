@@ -30,7 +30,7 @@ function SmartList({
   const normalizedInitialCount = Math.max(initialCount, 0)
   const normalizedLoadMoreStep = Math.max(loadMoreStep, 1)
   const [visibleCount, setVisibleCount] = useState(() => {
-    return Math.min(normalizedInitialCount, data.length)
+    return normalizedInitialCount
   })
 
   const safeVisibleCount = Math.min(visibleCount, data.length)

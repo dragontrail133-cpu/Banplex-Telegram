@@ -222,6 +222,58 @@ export const masterTabs = [
     getDescription: (record) => record.notes || 'Siap dipakai pada expense dan bill.',
   },
   {
+    key: 'materials',
+    routeKey: 'barang',
+    label: 'Barang',
+    icon: Boxes,
+    stateKey: 'materials',
+    fetchAction: 'fetchMaterials',
+    createAction: 'addMaterial',
+    updateAction: 'updateMaterial',
+    deleteAction: 'deleteMaterial',
+    createLabel: 'Tambah Barang',
+    emptyTitle: 'Belum ada barang aktif.',
+    description: 'Siap dipakai di faktur barang dan stok.',
+    fields: [
+      {
+        name: 'material_name',
+        label: 'Nama Barang',
+        type: 'text',
+        required: true,
+        placeholder: 'Contoh: Semen Holcim',
+      },
+      {
+        name: 'unit',
+        label: 'Satuan',
+        type: 'text',
+        required: true,
+        placeholder: 'Contoh: Sak, Kg, Dus, Batang',
+      },
+      {
+        name: 'current_stock',
+        label: 'Stok Awal',
+        type: 'number',
+        defaultValue: 0,
+        inputMode: 'decimal',
+        min: '0',
+        step: '0.01',
+      },
+    ],
+    getBadges: (record) => [record.unit || 'Satuan belum diisi'],
+    getDetails: (record) => [
+      `Satuan ${normalizeText(record.unit, 'Belum diisi')}`,
+      `Stok ${Number(record.current_stock ?? 0)}`,
+      (record.usage_count ?? 0) > 0
+        ? `Dipakai di ${record.usage_count} transaksi`
+        : 'Belum dipakai di transaksi',
+    ],
+    getDeleteGuard: (record) => buildDeleteGuard(record.usage_count ?? 0, 'Barang'),
+    getDescription: (record) =>
+      `Satuan ${normalizeText(record.unit, 'Belum diisi')} | Stok ${Number(
+        record.current_stock ?? 0
+      )}`,
+  },
+  {
     key: 'expense_categories',
     routeKey: 'category',
     label: 'Kategori',

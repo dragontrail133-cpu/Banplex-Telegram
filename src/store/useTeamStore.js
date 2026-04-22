@@ -1,5 +1,10 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
+import { getAuthContext } from '../lib/auth-context'
+import {
+  assertCapabilityAccess,
+  capabilityContracts,
+} from '../lib/capabilities'
 import { resolveProfileId, resolveTeamId } from '../lib/auth-context'
 import { normalizeRole } from '../lib/rbac'
 
@@ -10,6 +15,8 @@ const inviteRoleOptions = [
   'Administrasi',
   'Viewer',
 ]
+
+const teamInviteContract = capabilityContracts.team_invite
 
 function getMemberStatusLabel(status) {
   const normalizedStatus = normalizeText(status, 'active')
@@ -66,6 +73,12 @@ function toError(error, fallbackMessage) {
       : fallbackMessage
 
   return error instanceof Error ? error : new Error(message)
+}
+
+function assertTeamInviteAccess() {
+  const { role } = getAuthContext()
+
+  return assertCapabilityAccess(role, teamInviteContract.key, teamInviteContract.accessDeniedMessage)
 }
 
 function randomTokenSegment(length = 10) {
@@ -226,6 +239,8 @@ const useTeamStore = create((set, get) => ({
     set({ isLoading: true, error: null })
 
     try {
+      assertTeamInviteAccess()
+
       if (!supabase) {
         throw new Error('Client Supabase belum dikonfigurasi.')
       }
@@ -288,6 +303,8 @@ const useTeamStore = create((set, get) => ({
     set({ isLoading: true, error: null })
 
     try {
+      assertTeamInviteAccess()
+
       if (!supabase) {
         throw new Error('Client Supabase belum dikonfigurasi.')
       }
@@ -340,6 +357,8 @@ const useTeamStore = create((set, get) => ({
     set({ isLoading: true, error: null })
 
     try {
+      assertTeamInviteAccess()
+
       if (!supabase) {
         throw new Error('Client Supabase belum dikonfigurasi.')
       }

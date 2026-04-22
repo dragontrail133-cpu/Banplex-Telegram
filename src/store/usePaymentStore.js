@@ -12,6 +12,7 @@ import {
 } from '../lib/transactions-api'
 import useIncomeStore from './useIncomeStore'
 import useBillStore from './useBillStore'
+import useToastStore from './useToastStore'
 
 function normalizeText(value, fallback = null) {
   const normalizedValue = String(value ?? '').trim()
@@ -28,17 +29,27 @@ function toError(error) {
   return error instanceof Error ? error : new Error(message)
 }
 
-function notifyTelegram(payload) {
-  void fetch('/api/notify', {
+function showToast(toast) {
+  useToastStore.getState().showToast(toast)
+}
+
+async function notifyTelegram(payload) {
+  const response = await fetch('/api/notify', {
     method: 'POST',
     keepalive: true,
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
-  }).catch((error) => {
-    console.error('Gagal memanggil endpoint notifikasi pembayaran:', error)
   })
+
+  const result = await response.json().catch(() => ({}))
+
+  if (!response.ok || !result?.success) {
+    throw new Error(result?.error || 'Gagal mengirim notifikasi Telegram.')
+  }
+
+  return result
 }
 
 function buildBillPaymentPayload(paymentData = {}) {
@@ -147,21 +158,78 @@ function buildBillPaymentDeletePayload(paymentData = {}) {
   }
 }
 
-function buildPaymentNotificationPayload(paymentData = {}) {
+function getBillPaymentRemainingAmount(bill = {}) {
+  const totalAmount = Number(bill.amount ?? bill.total_amount ?? bill.totalAmount)
+  const paidAmount = Number(bill.paid_amount ?? bill.paidAmount)
+  const remainingAmount = Number(bill.remainingAmount ?? bill.remaining_amount)
+
+  if (Number.isFinite(remainingAmount) && remainingAmount >= 0) {
+    return remainingAmount
+  }
+
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+    return 0
+  }
+
+  return Math.max(totalAmount - (Number.isFinite(paidAmount) ? paidAmount : 0), 0)
+}
+
+function getLoanPaymentRemainingAmount(loan = {}) {
+  const targetAmount = Number(
+    loan.loan_terms_snapshot?.base_repayment_amount ??
+      loan.loan_terms_snapshot?.repayment_amount ??
+      loan.repayment_amount ??
+      loan.principal_amount ??
+      loan.amount ??
+      loan.total_amount ??
+      loan.totalAmount
+  )
+  const paidAmount = Number(loan.paid_amount ?? loan.paidAmount)
+  const remainingAmount = Number(loan.remainingAmount ?? loan.remaining_amount)
+
+  if (Number.isFinite(remainingAmount) && remainingAmount >= 0) {
+    return remainingAmount
+  }
+
+  if (!Number.isFinite(targetAmount) || targetAmount <= 0) {
+    return 0
+  }
+
+  return Math.max(targetAmount - (Number.isFinite(paidAmount) ? paidAmount : 0), 0)
+}
+
+function buildPaymentNotificationPayload({ payment = {}, bill = {}, userName = 'Pengguna Telegram' } = {}) {
   return {
     notificationType: 'bill_payment',
-    billId: normalizeText(paymentData.bill_id ?? paymentData.billId, '-'),
+    billId: normalizeText(
+      payment.billId ?? payment.bill_id ?? bill.id ?? bill.billId,
+      '-'
+    ),
     paymentDate: normalizeText(
-      paymentData.payment_date ?? paymentData.paymentDate,
+      payment.paymentDate ?? payment.payment_date ?? payment.date,
       new Date().toISOString()
     ),
-    userName: normalizeText(paymentData.userName, 'Pengguna Telegram'),
-    supplierName: normalizeText(paymentData.supplierName, '-'),
-    projectName: normalizeText(paymentData.projectName, '-'),
-    amount: Number(paymentData.amount) || 0,
-    remainingAmount: Number(paymentData.remainingAmount) || 0,
+    userName: normalizeText(userName, 'Pengguna Telegram'),
+    supplierName: normalizeText(
+      bill.supplierName ??
+        bill.supplier_name_snapshot ??
+        bill.worker_name_snapshot ??
+        payment.supplierName ??
+        payment.supplier_name_snapshot ??
+        payment.worker_name_snapshot,
+      '-'
+    ),
+    projectName: normalizeText(
+      bill.projectName ??
+        bill.project_name_snapshot ??
+        payment.projectName ??
+        payment.project_name_snapshot,
+      '-'
+    ),
+    amount: Number(payment.amount) || 0,
+    remainingAmount: getBillPaymentRemainingAmount(bill),
     description: normalizeText(
-      paymentData.notes,
+      payment.notes ?? payment.description ?? bill.description,
       'Pembayaran tagihan telah dilakukan.'
     ),
   }
@@ -272,20 +340,26 @@ function buildLoanPaymentDeletePayload(paymentData = {}) {
   }
 }
 
-function buildLoanPaymentNotificationPayload(paymentData = {}) {
+function buildLoanPaymentNotificationPayload({ payment = {}, loan = {}, userName = 'Pengguna Telegram' } = {}) {
   return {
     notificationType: 'loan_payment',
-    loanId: normalizeText(paymentData.loan_id ?? paymentData.loanId, '-'),
+    loanId: normalizeText(payment.loanId ?? payment.loan_id ?? loan.id ?? loan.loanId, '-'),
     paymentDate: normalizeText(
-      paymentData.payment_date ?? paymentData.paymentDate,
+      payment.paymentDate ?? payment.payment_date ?? payment.date,
       new Date().toISOString()
     ),
-    userName: normalizeText(paymentData.userName, 'Pengguna Telegram'),
-    creditorName: normalizeText(paymentData.creditorName, '-'),
-    amount: Number(paymentData.amount) || 0,
-    remainingAmount: Number(paymentData.remainingAmount) || 0,
+    userName: normalizeText(userName, 'Pengguna Telegram'),
+    creditorName: normalizeText(
+      payment.creditorName ??
+        payment.creditor_name_snapshot ??
+        loan.creditorName ??
+        loan.creditor_name_snapshot,
+      '-'
+    ),
+    amount: Number(payment.amount) || 0,
+    remainingAmount: getLoanPaymentRemainingAmount(loan),
     description: normalizeText(
-      paymentData.notes,
+      payment.notes ?? payment.description ?? loan.description,
       'Pembayaran pinjaman telah dilakukan.'
     ),
   }
@@ -300,22 +374,45 @@ const usePaymentStore = create((set) => ({
 
     try {
       const payload = buildBillPaymentPayload(paymentData)
-      const { payment } = await createBillPaymentFromApi(payload)
+      const { payment, bill } = await createBillPaymentFromApi(payload)
 
       await useBillStore.getState().fetchUnpaidBills({
         teamId: payload.team_id,
         silent: true,
       })
 
-      notifyTelegram(buildPaymentNotificationPayload(paymentData))
+      notifyTelegram(
+        buildPaymentNotificationPayload({
+          payment,
+          bill,
+          userName: paymentData.userName,
+        })
+      ).catch((notifyError) => {
+        console.error('Gagal memanggil endpoint notifikasi pembayaran:', notifyError)
+        showToast({
+          tone: 'warning',
+          title: 'Notifikasi pembayaran',
+          message: 'Pembayaran tagihan tersimpan, tetapi notifikasi Telegram gagal dikirim.',
+        })
+      })
 
       set({ error: null })
+      showToast({
+        tone: 'success',
+        title: 'Pembayaran tagihan tersimpan',
+        message: 'Pembayaran tagihan berhasil dicatat.',
+      })
 
       return payment
     } catch (error) {
       const normalizedError = toError(error)
 
       set({ error: normalizedError.message })
+      showToast({
+        tone: 'error',
+        title: 'Pembayaran tagihan gagal',
+        message: normalizedError.message,
+      })
 
       throw normalizedError
     } finally {
@@ -335,6 +432,11 @@ const usePaymentStore = create((set) => ({
       })
 
       set({ error: null })
+      showToast({
+        tone: 'success',
+        title: 'Pembayaran tagihan diperbarui',
+        message: 'Perubahan pembayaran tagihan berhasil disimpan.',
+      })
 
       return {
         payment,
@@ -344,6 +446,11 @@ const usePaymentStore = create((set) => ({
       const normalizedError = toError(error)
 
       set({ error: normalizedError.message })
+      showToast({
+        tone: 'error',
+        title: 'Pembayaran tagihan gagal diperbarui',
+        message: normalizedError.message,
+      })
 
       throw normalizedError
     } finally {
@@ -363,12 +470,22 @@ const usePaymentStore = create((set) => ({
       })
 
       set({ error: null })
+      showToast({
+        tone: 'success',
+        title: 'Pembayaran tagihan diarsipkan',
+        message: 'Pembayaran tagihan berhasil dihapus.',
+      })
 
       return bill
     } catch (error) {
       const normalizedError = toError(error)
 
       set({ error: normalizedError.message })
+      showToast({
+        tone: 'error',
+        title: 'Pembayaran tagihan gagal diarsipkan',
+        message: normalizedError.message,
+      })
 
       throw normalizedError
     } finally {
@@ -387,6 +504,11 @@ const usePaymentStore = create((set) => ({
       })
 
       set({ error: null })
+      showToast({
+        tone: 'success',
+        title: 'Pembayaran pinjaman diperbarui',
+        message: 'Perubahan pembayaran pinjaman berhasil disimpan.',
+      })
 
       return {
         payment,
@@ -396,6 +518,11 @@ const usePaymentStore = create((set) => ({
       const normalizedError = toError(error)
 
       set({ error: normalizedError.message })
+      showToast({
+        tone: 'error',
+        title: 'Pembayaran pinjaman gagal diperbarui',
+        message: normalizedError.message,
+      })
 
       throw normalizedError
     } finally {
@@ -414,6 +541,11 @@ const usePaymentStore = create((set) => ({
       })
 
       set({ error: null })
+      showToast({
+        tone: 'success',
+        title: 'Pembayaran pinjaman diarsipkan',
+        message: 'Pembayaran pinjaman berhasil dihapus.',
+      })
 
       return {
         payment,
@@ -423,6 +555,11 @@ const usePaymentStore = create((set) => ({
       const normalizedError = toError(error)
 
       set({ error: normalizedError.message })
+      showToast({
+        tone: 'error',
+        title: 'Pembayaran pinjaman gagal diarsipkan',
+        message: normalizedError.message,
+      })
 
       throw normalizedError
     } finally {
@@ -434,21 +571,44 @@ const usePaymentStore = create((set) => ({
 
     try {
       const payload = buildLoanPaymentPayload(paymentData)
-      const { payment } = await createLoanPaymentFromApi(payload)
+      const { payment, loan } = await createLoanPaymentFromApi(payload)
 
       await useIncomeStore.getState().fetchLoans({
         teamId: payload.team_id,
       })
 
-      notifyTelegram(buildLoanPaymentNotificationPayload(paymentData))
+      notifyTelegram(
+        buildLoanPaymentNotificationPayload({
+          payment,
+          loan,
+          userName: paymentData.userName,
+        })
+      ).catch((notifyError) => {
+        console.error('Gagal memanggil endpoint notifikasi pembayaran:', notifyError)
+        showToast({
+          tone: 'warning',
+          title: 'Notifikasi pembayaran',
+          message: 'Pembayaran pinjaman tersimpan, tetapi notifikasi Telegram gagal dikirim.',
+        })
+      })
 
       set({ error: null })
+      showToast({
+        tone: 'success',
+        title: 'Pembayaran pinjaman tersimpan',
+        message: 'Pembayaran pinjaman berhasil dicatat.',
+      })
 
       return payment
     } catch (error) {
       const normalizedError = toError(error)
 
       set({ error: normalizedError.message })
+      showToast({
+        tone: 'error',
+        title: 'Pembayaran pinjaman gagal',
+        message: normalizedError.message,
+      })
 
       throw normalizedError
     } finally {

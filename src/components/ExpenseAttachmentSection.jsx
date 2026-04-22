@@ -68,9 +68,7 @@ function ExpenseAttachmentSection({
   const uploadQueue = useFileStore((state) => state.uploadQueue)
   const startBackgroundUpload = useFileStore((state) => state.startBackgroundUpload)
   const updateFileAssetMetadata = useFileStore((state) => state.updateFileAssetMetadata)
-  const permanentDeleteFileAsset = useFileStore(
-    (state) => state.permanentDeleteFileAsset
-  )
+  const purgeFileAsset = useFileStore((state) => state.purgeFileAsset)
   const canPerformAttachmentAction = useFileStore(
     (state) => state.canPerformAttachmentAction
   )
@@ -266,7 +264,7 @@ function ExpenseAttachmentSection({
         })
       } catch (attachError) {
         if (fileAsset?.id) {
-          await permanentDeleteFileAsset(fileAsset.id).catch(() => null)
+          await purgeFileAsset(fileAsset.id).catch(() => null)
         }
 
         throw attachError
@@ -285,9 +283,9 @@ function ExpenseAttachmentSection({
     canUpload,
     currentTeamId,
     isAuthReady,
-    permanentDeleteFileAsset,
     reloadAttachments,
     selectedFile,
+    purgeFileAsset,
     startBackgroundUpload,
     uploadScopeKey,
   ])
@@ -413,7 +411,7 @@ function ExpenseAttachmentSection({
   }
 
   return (
-    <section className="space-y-4 overflow-x-hidden rounded-[26px] border border-slate-200 bg-white/75 p-4 sm:p-5">
+    <section className="space-y-4 overflow-x-hidden rounded-[26px] border border-slate-200 bg-white p-4 sm:p-5">
       <div className="space-y-1">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
           {title}
@@ -535,15 +533,17 @@ function ExpenseAttachmentSection({
                         </button>
                       ) : null}
                       {canPermanentDelete ? (
-                        <button
-                          className="rounded-full border border-slate-200 p-2 text-rose-700 disabled:opacity-60"
-                          disabled={isBusy}
-                          onClick={() => handlePermanentDelete(attachment)}
-                          type="button"
-                          aria-label="Hapus permanen lampiran"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        attachment.deleted_at ? (
+                          <button
+                            className="rounded-full border border-slate-200 p-2 text-rose-700 disabled:opacity-60"
+                            disabled={isBusy}
+                            onClick={() => handlePermanentDelete(attachment)}
+                            type="button"
+                            aria-label="Hapus permanen lampiran"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        ) : null
                       ) : null}
                     </>
                   )}
@@ -591,6 +591,16 @@ function ExpenseAttachmentSection({
                       type="button"
                     >
                       <RotateCcw className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                  {canPermanentDelete ? (
+                    <button
+                      className="rounded-full border border-slate-200 p-2 text-rose-700 disabled:opacity-60"
+                      disabled={isBusy}
+                      onClick={() => handlePermanentDelete(attachment)}
+                      type="button"
+                    >
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   ) : null}
                 </div>
@@ -660,7 +670,7 @@ function ExpenseAttachmentSection({
                   </div>
 
                   <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-end bg-gradient-to-b from-slate-950/55 via-slate-950/10 to-transparent px-4 py-4 text-white">
-                    <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold backdrop-blur-sm">
+                    <span className="rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-2.5 py-1 text-[11px] font-semibold text-[var(--app-text-color)]">
                       {isDraftOverlayVisible ? 'Tutup' : 'Kelola'}
                     </span>
                   </div>
@@ -686,7 +696,7 @@ function ExpenseAttachmentSection({
                       Simpan
                     </button>
                     <button
-                      className="min-w-0 rounded-full border border-white/40 bg-white/10 px-2 py-2 text-center text-[11px] font-semibold text-white backdrop-blur-sm disabled:cursor-not-allowed disabled:opacity-50"
+                      className="min-w-0 rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-2 py-2 text-center text-[11px] font-semibold text-[var(--app-text-color)] disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={isBusy}
                       onClick={(event) => {
                         event.stopPropagation()
@@ -697,7 +707,7 @@ function ExpenseAttachmentSection({
                       Ganti
                     </button>
                     <button
-                      className="min-w-0 rounded-full border border-white/30 bg-slate-950/35 px-2 py-2 text-center text-[11px] font-semibold text-white backdrop-blur-sm disabled:cursor-not-allowed disabled:opacity-50"
+                      className="min-w-0 rounded-full border border-[var(--app-tone-danger-border)] bg-[var(--app-tone-danger-bg)] px-2 py-2 text-center text-[11px] font-semibold text-[var(--app-tone-danger-text)] disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={isBusy}
                       onClick={(event) => {
                         event.stopPropagation()

@@ -8,12 +8,24 @@ import ExpenseAttachmentSection from './ExpenseAttachmentSection'
 import FormLayout from './layouts/FormLayout'
 import { supplierTypeGroups } from './master/masterTabs'
 import MasterPickerField from './ui/MasterPickerField'
-import { AppNominalInput, AppToggleGroup } from './ui/AppPrimitives'
+import {
+  AppCard,
+  AppErrorState,
+  AppNominalInput,
+  AppToggleGroup,
+  FormSection,
+} from './ui/AppPrimitives'
 
 function normalizeText(value, fallback = null) {
   const normalizedValue = String(value ?? '').trim()
 
   return normalizedValue.length > 0 ? normalizedValue : fallback
+}
+
+function toNumber(value) {
+  const parsedValue = Number(value)
+
+  return Number.isFinite(parsedValue) ? parsedValue : NaN
 }
 
 function getUserDisplayName(user, authUser) {
@@ -71,7 +83,18 @@ function resolveExpenseType(category) {
   return 'lainnya'
 }
 
-function ExpenseForm({ initialData = null, onSuccess }) {
+function hasExpensePaymentHistory(expense = null) {
+  const paidAmount = toNumber(expense?.bill?.paid_amount ?? expense?.bill?.paidAmount)
+  const normalizedBillStatus = String(expense?.bill?.status ?? '').trim().toLowerCase()
+
+  return Boolean(
+    expense?.bill?.id &&
+      ((Number.isFinite(paidAmount) && paidAmount > 0) ||
+        ['partial', 'paid'].includes(normalizedBillStatus))
+  )
+}
+
+function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' }) {
   const [formData, setFormData] = useState(() => createInitialFormData(initialData))
   const [successMessage, setSuccessMessage] = useState(null)
   const [savedExpenseId, setSavedExpenseId] = useState(initialData?.id ?? null)
@@ -138,8 +161,10 @@ function ExpenseForm({ initialData = null, onSuccess }) {
   )
   const isMasterDataReady =
     !isMasterLoading && projects.length > 0 && selectableCategories.length > 0
-  const isLocked = Boolean(initialData?.deleted_at)
+  const isPaymentLocked = hasExpensePaymentHistory(initialData)
+  const isLocked = Boolean(initialData?.deleted_at) || isPaymentLocked
   const activeExpenseId = savedExpenseId ?? initialData?.id ?? null
+  const submitLabel = initialData?.id ? 'Perbarui Pengeluaran' : 'Simpan Pengeluaran'
   const projectPickerOptions = useMemo(
     () =>
       projects.map((project) => ({
@@ -198,7 +223,12 @@ function ExpenseForm({ initialData = null, onSuccess }) {
   const handleSubmit = async (event) => {
     event.preventDefault()
 
-    if (isSubmitting || !isMasterDataReady) {
+    if (isSubmitting || !isMasterDataReady || isLocked) {
+      return
+    }
+
+    if (isPaymentLocked) {
+      console.error('Pengeluaran yang sudah memiliki pembayaran tidak bisa diubah atau dihapus.')
       return
     }
 
@@ -262,10 +292,13 @@ function ExpenseForm({ initialData = null, onSuccess }) {
   }
 
   return (
-    <form className="space-y-6" onSubmit={handleSubmit}>
+    <form id={formId} className="space-y-6" onSubmit={handleSubmit}>
       <fieldset className="space-y-6" disabled={isSubmitting || isLocked}>
         <FormLayout
           embedded
+          actionLabel={submitLabel}
+          formId={formId}
+          isSubmitting={isSubmitting}
           sections={[
             {
               id: 'expense-identity',
@@ -283,201 +316,226 @@ function ExpenseForm({ initialData = null, onSuccess }) {
               description: 'Tambahkan catatan tambahan dan simpan perubahan.',
             },
           ]}
+          submitDisabled={!isMasterDataReady || isLocked}
         >
-        <section className="space-y-4 rounded-[26px] border border-slate-200 bg-white/75 p-4 sm:p-5">
-          <div className="space-y-1">
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--app-accent-color)]">
-              Pengeluaran Operasional
-            </p>
-          </div>
-
-          <MasterPickerField
-            disabled={isSubmitting || isMasterLoading || projects.length === 0}
-            emptyMessage="Data proyek belum tersedia."
-            label="Proyek"
-            name="projectId"
-            onChange={(nextValue) =>
-              handleChange({
-                target: {
-                  name: 'projectId',
-                  value: nextValue,
-                },
-              })
-            }
-            placeholder="Pilih proyek"
-            required
-            searchPlaceholder="Cari proyek..."
-            title="Pilih Proyek"
-            value={formData.projectId}
-            options={projectPickerOptions}
-          />
-
-          <MasterPickerField
-            disabled={
-              isSubmitting ||
-              isMasterLoading ||
-              selectableCategories.length === 0
-            }
-            emptyMessage="Data kategori belum tersedia."
-            label="Kategori"
-            name="categoryId"
-            onChange={(nextValue) =>
-              handleChange({
-                target: {
-                  name: 'categoryId',
-                  value: nextValue,
-                },
-              })
-            }
-            placeholder="Pilih kategori"
-            required
-            searchPlaceholder="Cari kategori..."
-            title="Pilih Kategori"
-            value={formData.categoryId}
-            options={categoryPickerOptions}
-          />
-
-          <MasterPickerField
-            disabled={isSubmitting || isMasterLoading || availableSuppliers.length === 0}
-            emptyMessage="Data supplier belum tersedia."
-            label="Supplier"
-            required={!initialData?.id || !resolvedSupplierName}
-            name="supplierId"
-            onChange={(nextValue) =>
-              handleChange({
-                target: {
-                  name: 'supplierId',
-                  value: nextValue,
-                },
-              })
-            }
-            placeholder="Pilih supplier"
-            searchPlaceholder="Cari supplier..."
-            title="Pilih Supplier"
-            value={formData.supplierId}
-            options={supplierPickerOptions}
-          />
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                Tanggal
-              </span>
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                name="date"
-                onChange={handleChange}
-                required
-                type="date"
-                value={formData.date}
-              />
-            </label>
-
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                Nominal
-              </span>
-              <AppNominalInput
-                className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                name="amount"
-                onValueChange={(nextValue) =>
-                  handleChange({
-                    target: {
-                      name: 'amount',
-                      value: nextValue,
-                    },
-                  })
-                }
-                placeholder="Rp 0"
-                required
-                value={formData.amount}
-              />
-            </label>
-          </div>
-
-          <AppToggleGroup
-            buttonSize="sm"
-            description="Status pembayaran hanya punya dua opsi dan tidak mengambil master data."
-            label="Status Pembayaran"
-            onChange={(nextValue) =>
-              handleChange({
-                target: {
-                  name: 'paymentStatus',
-                  value: nextValue,
-                },
-              })
-            }
-            options={[
-              { value: 'unpaid', label: 'Belum dibayar' },
-              { value: 'paid', label: 'Sudah dibayar' },
-            ]}
-            value={formData.paymentStatus}
-          />
-
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-[var(--app-text-color)]">
-              Deskripsi
-            </span>
-            <textarea
-              className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              name="description"
-              onChange={handleChange}
-              placeholder="Contoh: Pembelian alat kerja lapangan."
-              required
-              value={formData.description}
-            />
-          </label>
-
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-[var(--app-text-color)]">
-              Catatan
-            </span>
-            <textarea
-              className="min-h-24 w-full resize-none rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              name="notes"
-              onChange={handleChange}
-              placeholder="Catatan tambahan opsional."
-              value={formData.notes}
-            />
-          </label>
-          
-          <ExpenseAttachmentSection
-            deferUploadUntilParentSaved
-            expenseId={activeExpenseId}
-            title="Lampiran Bukti"
-          />
-
-          {error ? (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
-              {error}
-            </div>
-          ) : null}
-
-          {masterError ? (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-              {masterError}
-            </div>
-          ) : null}
-
-          {successMessage ? (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-700">
-              {successMessage}
-            </div>
-          ) : null}
-
-          <button
-            className="flex w-full items-center justify-center rounded-[22px] bg-slate-950 px-5 py-4 text-base font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isSubmitting || !isMasterDataReady}
-            type="submit"
+          <FormSection
+            eyebrow="Relasi"
+            title="Relasi Transaksi"
+            description="Pilih master proyek, kategori, dan supplier yang dipakai oleh pengeluaran ini."
           >
-            {isSubmitting
-              ? 'Menyimpan...'
-              : initialData?.id
-                ? 'Perbarui Pengeluaran'
-                : 'Simpan Pengeluaran'}
-          </button>
-        </section>
-      </FormLayout>
+            <MasterPickerField
+              disabled={isSubmitting || isMasterLoading || projects.length === 0}
+              emptyMessage="Data proyek belum tersedia."
+              label="Proyek"
+              name="projectId"
+              onChange={(nextValue) =>
+                handleChange({
+                  target: {
+                    name: 'projectId',
+                    value: nextValue,
+                  },
+                })
+              }
+              options={projectPickerOptions}
+              placeholder="Pilih proyek"
+              required
+              searchPlaceholder="Cari proyek..."
+              title="Pilih Proyek"
+              value={formData.projectId}
+            />
+
+            <MasterPickerField
+              disabled={
+                isSubmitting ||
+                isMasterLoading ||
+                selectableCategories.length === 0
+              }
+              emptyMessage="Data kategori belum tersedia."
+              label="Kategori"
+              name="categoryId"
+              onChange={(nextValue) =>
+                handleChange({
+                  target: {
+                    name: 'categoryId',
+                    value: nextValue,
+                  },
+                })
+              }
+              options={categoryPickerOptions}
+              placeholder="Pilih kategori"
+              required
+              searchPlaceholder="Cari kategori..."
+              title="Pilih Kategori"
+              value={formData.categoryId}
+            />
+
+            <MasterPickerField
+              disabled={
+                isSubmitting || isMasterLoading || availableSuppliers.length === 0
+              }
+              emptyMessage="Data supplier belum tersedia."
+              label="Supplier"
+              name="supplierId"
+              onChange={(nextValue) =>
+                handleChange({
+                  target: {
+                    name: 'supplierId',
+                    value: nextValue,
+                  },
+                })
+              }
+              options={supplierPickerOptions}
+              placeholder="Pilih supplier"
+              required={!initialData?.id || !resolvedSupplierName}
+              searchPlaceholder="Cari supplier..."
+              title="Pilih Supplier"
+              value={formData.supplierId}
+            />
+          </FormSection>
+
+          <FormSection
+            eyebrow="Nilai"
+            title="Nilai dan Status"
+            description="Isi tanggal transaksi, nominal, status pembayaran, dan deskripsi singkat."
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block space-y-2">
+                <span className="text-sm font-semibold text-[var(--app-text-color)]">
+                  Tanggal
+                </span>
+                <input
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  name="date"
+                  onChange={handleChange}
+                  required
+                  type="date"
+                  value={formData.date}
+                />
+              </label>
+
+              <label className="block space-y-2">
+                <span className="text-sm font-semibold text-[var(--app-text-color)]">
+                  Nominal
+                </span>
+                <AppNominalInput
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  name="amount"
+                  onValueChange={(nextValue) =>
+                    handleChange({
+                      target: {
+                        name: 'amount',
+                        value: nextValue,
+                      },
+                    })
+                  }
+                  placeholder="Rp 0"
+                  required
+                  value={formData.amount}
+                />
+              </label>
+            </div>
+
+            <AppToggleGroup
+              buttonSize="sm"
+              description="Status pembayaran hanya punya dua opsi dan tidak mengambil master data."
+              label="Status Pembayaran"
+              onChange={(nextValue) =>
+                handleChange({
+                  target: {
+                    name: 'paymentStatus',
+                    value: nextValue,
+                  },
+                })
+              }
+              options={[
+                { value: 'unpaid', label: 'Belum dibayar' },
+                { value: 'paid', label: 'Sudah dibayar' },
+              ]}
+              value={formData.paymentStatus}
+            />
+
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-[var(--app-text-color)]">
+                Deskripsi
+              </span>
+              <textarea
+                className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                name="description"
+                onChange={handleChange}
+                placeholder="Contoh: Pembelian alat kerja lapangan."
+                required
+                value={formData.description}
+              />
+            </label>
+          </FormSection>
+
+          <FormSection
+            eyebrow="Catatan"
+            title="Catatan dan Lampiran"
+            description="Tambahkan catatan tambahan, lampiran, lalu simpan dari footer halaman."
+          >
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-[var(--app-text-color)]">
+                Catatan
+              </span>
+              <textarea
+                className="min-h-24 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                name="notes"
+                onChange={handleChange}
+                placeholder="Catatan tambahan opsional."
+                value={formData.notes}
+              />
+            </label>
+
+            <ExpenseAttachmentSection
+              deferUploadUntilParentSaved
+              expenseId={activeExpenseId}
+              title="Lampiran Bukti"
+            />
+
+            {error ? (
+              <AppErrorState
+                description={error}
+                title="Pengeluaran belum tersimpan"
+              />
+            ) : null}
+
+            {masterError ? (
+              <AppCard className="app-tone-warning">
+                <div className="space-y-2">
+                  <p className="app-meta text-[var(--app-tone-warning-text)]">
+                    Master data belum siap
+                  </p>
+                  <p className="text-sm leading-6">{masterError}</p>
+                </div>
+              </AppCard>
+            ) : null}
+
+            {isPaymentLocked ? (
+              <AppCard className="app-tone-warning">
+                <div className="space-y-2">
+                  <p className="app-meta text-[var(--app-tone-warning-text)]">
+                    Pengeluaran terkunci
+                  </p>
+                  <p className="text-sm leading-6">
+                    Pengeluaran yang sudah memiliki pembayaran tidak bisa diubah atau dihapus.
+                  </p>
+                </div>
+              </AppCard>
+            ) : null}
+
+            {successMessage ? (
+              <AppCard className="app-tone-success">
+                <div className="space-y-2">
+                  <p className="app-meta text-[var(--app-tone-success-text)]">
+                    Pengeluaran tersimpan
+                  </p>
+                  <p className="text-sm leading-6">{successMessage}</p>
+                </div>
+              </AppCard>
+            ) : null}
+          </FormSection>
+        </FormLayout>
       </fieldset>
     </form>
   )

@@ -12,6 +12,7 @@ import FormLayout from './layouts/FormLayout'
 import MasterPickerField from './ui/MasterPickerField'
 import {
   AppButton,
+  AppCard,
   AppErrorState,
   AppNominalInput,
   AppToggleGroup,
@@ -119,10 +120,9 @@ function createInitialFormData(initialData = null) {
   }
 }
 
-function LoanForm({ onSuccess, initialData = null, recordId = null }) {
+function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'loan-form' }) {
   const [formData, setFormData] = useState(() => createInitialFormData(initialData))
   const [creditorNameDraft, setCreditorNameDraft] = useState('')
-  const [successMessage, setSuccessMessage] = useState(null)
   const { user } = useTelegram()
   const authUser = useAuthStore((state) => state.user)
   const fundingCreditors = useMasterStore((state) => state.fundingCreditors)
@@ -227,10 +227,6 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
     if (error) {
       clearError()
     }
-
-    if (successMessage) {
-      setSuccessMessage(null)
-    }
   }
 
   const handleCreateCreditor = async () => {
@@ -307,9 +303,6 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
         setFormData(createInitialFormData())
       }
 
-      setSuccessMessage(
-        isEditMode ? 'Pinjaman berhasil diperbarui.' : 'Pinjaman berhasil disimpan.'
-      )
     } catch (submitError) {
       const message =
         submitError instanceof Error
@@ -325,6 +318,9 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
       <fieldset className="space-y-6" disabled={isSubmitting}>
         <FormLayout
           embedded
+          actionLabel={isEditMode ? 'Perbarui Pinjaman' : 'Simpan Pinjaman'}
+          formId={formId}
+          isSubmitting={isSubmitting}
           sections={[
             {
               id: 'loan-identity',
@@ -339,9 +335,10 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
             {
               id: 'loan-late-charge',
               title: 'Denda dan Catatan',
-              description: 'Atur bunga keterlambatan, penalti, dan catatan internal.',
+              description: 'Atur denda keterlambatan dan catatan internal.',
             },
           ]}
+          submitDisabled={!isMasterDataReady}
         >
           <FormSection
             eyebrow="Pinjaman / Modal"
@@ -371,7 +368,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
             />
 
             {fundingCreditors.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-sky-200 bg-sky-50/80 p-4">
+              <div className="rounded-2xl border border-dashed border-sky-200 bg-sky-50 p-4">
                 <p className="text-sm font-medium text-sky-800">
                   Belum ada kreditur tersimpan.
                 </p>
@@ -404,7 +401,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
                   Tanggal
                 </span>
                 <input
-                  className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                   name="date"
                   onChange={handleChange}
                   required
@@ -445,7 +442,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
                   Pokok Pinjaman
                 </span>
                 <AppNominalInput
-                  className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                   name="principalAmount"
                   onValueChange={(nextValue) =>
                     handleChange({
@@ -466,7 +463,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
                   Total Pengembalian Otomatis
                 </span>
                 <AppNominalInput
-                  className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                   name="repaymentAmount"
                   placeholder="Rp 0"
                   required
@@ -482,7 +479,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
                   Suku Bunga (%)
                 </span>
                 <input
-                  className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200 disabled:cursor-not-allowed disabled:bg-slate-100"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200 disabled:cursor-not-allowed disabled:bg-slate-100"
                   disabled={formData.interestType !== 'interest'}
                   inputMode="decimal"
                   min="0"
@@ -500,7 +497,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
                   Tenor (Bulan)
                 </span>
                 <input
-                  className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                   inputMode="numeric"
                   min="0"
                   name="tenorMonths"
@@ -513,7 +510,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
               </label>
             </div>
 
-            <div className="space-y-4 rounded-[24px] border border-sky-100 bg-sky-50/70 p-4">
+            <div className="space-y-4 rounded-[24px] border border-sky-100 bg-sky-50 p-4">
               <div className="space-y-1">
                 <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-700">
                   Preview Otomatis
@@ -521,7 +518,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-sky-100 bg-white/90 px-4 py-3">
+                <div className="rounded-2xl border border-sky-100 bg-white px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
                     Pokok + Bunga
                   </p>
@@ -533,7 +530,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-sky-100 bg-white/90 px-4 py-3">
+                <div className="rounded-2xl border border-sky-100 bg-white px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
                     Jatuh Tempo
                   </p>
@@ -547,7 +544,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl bg-white/90 px-4 py-3">
+                <AppCard className="space-y-2 bg-white px-4 py-3" padded={false}>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
                     Bunga Pokok
                   </p>
@@ -560,18 +557,18 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
                       )
                     )}
                   </p>
-                </div>
+                </AppCard>
 
-                <div className="rounded-2xl bg-white/90 px-4 py-3">
+                <AppCard className="space-y-2 bg-white px-4 py-3" padded={false}>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
                     Estimasi Denda Saat Ini
                   </p>
                   <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
                     {formatPreviewCurrency(lateChargePreview.totalLateChargeAmount ?? 0)}
                   </p>
-                </div>
+                </AppCard>
 
-                <div className="rounded-2xl bg-white/90 px-4 py-3">
+                <AppCard className="space-y-2 bg-white px-4 py-3" padded={false}>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
                     Overdue
                   </p>
@@ -580,7 +577,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
                       ? `${lateChargePreview.overdueMonths} bulan`
                       : 'Belum lewat tempo'}
                   </p>
-                </div>
+                </AppCard>
               </div>
             </div>
           </FormSection>
@@ -597,7 +594,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
                   Bunga Keterlambatan (%)
                 </span>
                 <input
-                  className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                   inputMode="decimal"
                   min="0"
                   name="lateInterestRate"
@@ -654,7 +651,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
                   Nominal Penalti Flat
                 </span>
                 <AppNominalInput
-                  className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200 disabled:cursor-not-allowed disabled:bg-slate-100"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200 disabled:cursor-not-allowed disabled:bg-slate-100"
                   disabled={formData.latePenaltyType !== 'flat'}
                   name="latePenaltyAmount"
                   onValueChange={(nextValue) =>
@@ -683,7 +680,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
               </summary>
               <div className="pt-4">
                 <textarea
-                  className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                   name="notes"
                   onChange={handleChange}
                   placeholder="Contoh: Dana talangan untuk pembelian material."
@@ -697,25 +694,6 @@ function LoanForm({ onSuccess, initialData = null, recordId = null }) {
             {masterError ? (
               <AppErrorState description={masterError} title="Master data belum siap" />
             ) : null}
-
-            {successMessage ? (
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-700">
-                {successMessage}
-              </div>
-            ) : null}
-
-            <AppButton
-              className="w-full"
-              disabled={isSubmitting || !isMasterDataReady}
-              size="lg"
-              type="submit"
-            >
-              {isSubmitting
-                ? 'Menyimpan...'
-                : isEditMode
-                  ? 'Perbarui Pinjaman'
-                  : 'Simpan Pinjaman'}
-            </AppButton>
           </FormSection>
         </FormLayout>
       </fieldset>

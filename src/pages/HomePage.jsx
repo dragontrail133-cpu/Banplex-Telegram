@@ -25,8 +25,8 @@ function HomePage({ user, hasMainButton, isSupabaseConfigured }) {
   return (
     <main className="relative min-h-screen overflow-hidden px-4 py-8 sm:px-6 lg:px-8">
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute left-[-8rem] top-[-8rem] h-64 w-64 rounded-full bg-[color-mix(in_srgb,var(--app-brand-accent)_15%,transparent)] blur-3xl" />
-        <div className="absolute bottom-[-10rem] right-[-6rem] h-72 w-72 rounded-full bg-sky-300/15 blur-3xl" />
+        <div className="absolute left-[-8rem] top-[-8rem] h-64 w-64 rounded-full bg-[var(--app-brand-accent-soft)]" />
+        <div className="absolute bottom-[-10rem] right-[-6rem] h-72 w-72 rounded-full bg-[var(--app-tone-info-bg)]" />
       </div>
 
       <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] max-w-5xl items-center justify-center">

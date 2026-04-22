@@ -1,6 +1,7 @@
 # AI Execution Guardrails
 
 Freeze date: `2026-04-19`
+Runtime reconciliation: `2026-04-23`
 
 ## 1. Global rules for AI implementation
 
@@ -13,7 +14,9 @@ Freeze date: `2026-04-19`
 7. AI tidak boleh menggabungkan `Riwayat` dan `Recycle Bin` sebagai satu konsep.
 8. `Halaman Absensi` existing harus diperlakukan sebagai surface input absensi harian; `Catatan Absensi` adalah halaman baru untuk histori, filter, dan rekap; payroll payable yang masuk `Jurnal` adalah `Tagihan Upah` per worker.
 9. `Payment Receipt PDF` hanya output turunan dari `Pembayaran`, bukan source of truth.
-10. Dokumen barang diperlakukan sebagai inbound-stock contract untuk core release; stock-out otomatis dari dokumen barang adalah asumsi yang salah.
+10. Dokumen barang diperlakukan sebagai inbound-stock contract untuk core release; stock-out otomatis dari dokumen barang adalah asumsi yang salah, dan stock-out manual yang aktif saat ini hanya boundary terbatas di `Stok Barang`.
+11. Route-level code splitting frontend sudah aktif di `src/App.jsx`; jangan menulis brief yang mengembalikan page utama ke static import atau menganggap lazy route belum menjadi baseline runtime.
+12. `Referensi` / `Master` adalah core-release fondasional untuk semua form inti; boundary implementasi yang masih transitional tidak mengubah status domain ini sebagai release inti.
 
 ## 2. What AI must never assume
 
@@ -29,9 +32,13 @@ Freeze date: `2026-04-19`
 - `Tagihan Upah` tidak boleh muncul di `Jurnal` atau `Riwayat`.
 - `Riwayat` sama dengan `Recycle Bin`.
 - setiap `Pengeluaran` wajib selalu punya `Tagihan`.
-- `Stok Barang` adalah domain planned untuk stock-out manual, bukan otomatis dari dokumen barang.
+- Jangan menganggap `Stok Barang` masih planned-only atau belum punya route aktif; route `/stock` sudah aktif dan manual stock-out tetap dibatasi.
+- manual stock-out di `Stok Barang` boleh dijadikan adjustment bebas atau pattern umum baru untuk domain lain.
+- `Referensi` / `Master` boleh diperlakukan sebagai supporting module.
+- route-level code splitting frontend harus dipertahankan; jangan balik ke static import page utama.
 - Hapus payment berarti hard delete yang menghilangkan histori.
 - `Payment Receipt PDF` adalah source of truth atau full PDF suite inti.
+- `pdf_settings` adalah boundary konfigurasi PDF bisnis yang berbeda dari `Payment Receipt PDF`; jangan mencampur konfigurasi report dengan receipt settlement.
 - Dokumen lama atau brief chat lama boleh mengalahkan freeze package.
 - Supporting module seperti `HRD` atau `Penerima Manfaat` boleh dijadikan blocker core release tanpa keputusan baru.
 
@@ -90,8 +97,8 @@ Surface code legacy yang tidak boleh dijadikan target task baru tanpa verifikasi
 - `src/components/PaymentModal.jsx`
 - `src/components/TransactionForm.jsx`
 - `src/store/useAppStore.js`
-- `src/store/useTransactionStore.js` jalur `submitTransaction`
-- direct insert payment di `src/store/usePaymentStore.js`
+- jalur historis `submitTransaction` yang sudah dihapus dari `src/store/useTransactionStore.js`
+- narasi direct insert payment lama di `src/store/usePaymentStore.js`
 
 ## 6. How to write future micro-task prompts
 
@@ -156,18 +163,18 @@ Jika task menyentuh domain inti, output wajib menyebut:
 | `Dokumen Barang` | inbound stock, conversion `Surat Jalan Barang -> Faktur Barang`, dan risiko double-count stok masuk |
 | `Dana Masuk / Pinjaman` | formula repayment, late charge, dan snapshot terms |
 | `Tagihan` | bill list jangan berubah menjadi authoring parent baru |
-| `Pembayaran` | create path legacy masih ada; task baru tidak boleh memperluas direct insert; `Payment Receipt PDF` tetap turunan, bukan source of truth |
+| `Pembayaran` | runtime create path sudah API-owned; task baru tidak boleh mengembalikan direct Supabase insert; `Payment Receipt PDF` tetap turunan, bukan source of truth |
 | `Halaman Absensi` | surface input absensi harian existing; jangan disamakan dengan `Catatan Absensi` |
 | `Catatan Absensi` | halaman baru untuk histori absensi, filter per bulan, filter per worker, dan aksi rekap; jangan dipaksa menjadi row ledger finance |
 | `Tagihan Upah` | payroll payable hasil rekap per worker boleh tampil di `Jurnal`/`Riwayat`, tetapi koreksi setelah payment history sangat sensitif |
 | `Attachment` | orphan asset, role matrix, dan relation tree |
 | `Reports` | agregasi client-side bisa drift dari truth relasional |
-| `Stok Barang` | negative stock, manual stock-out future flow, dan adjustment liar |
+| `Stok Barang` | negative stock, manual stock-out terbatas yang sudah aktif, dan risiko adjustment liar |
 
 ## 10. Recommended implementation order
 
 1. pastikan brief implementasi berikut mengutip `docs/freeze/03-source-of-truth-contract-map.md`,
-2. tutup legacy create path `Pembayaran` agar write domain sensitif benar-benar API-owned,
+2. jaga `Pembayaran` tetap API-owned dan jangan reintroduce direct insert Supabase,
 3. audit dan rapikan sisa jalur write baru ke `transactions` agar tidak dipakai lagi,
 4. pastikan `Dashboard` dan `Jurnal` membaca read model server yang konsisten,
 5. harden `Pengeluaran` dan `Tagihan` sebagai tree parent-child,
@@ -175,7 +182,8 @@ Jika task menyentuh domain inti, output wajib menyebut:
 7. harden `Dana Masuk / Pinjaman`,
 8. koreksi docs lalu harden `Halaman Absensi`, `Catatan Absensi`, dan `Tagihan Upah`,
 9. finalkan report inti,
-10. buka `Stok Barang` sebagai modul planned setelah gate core release aman.
+10. harden `Stok Barang` sebagai route supporting aktif tanpa mengubahnya menjadi adjustment domain yang liar.
+11. perlakukan `Referensi` / `Master` sebagai fondasi semua form inti saat menyusun task boundary atau capability gate berikutnya.
 
 ## Prinsip penutup
 

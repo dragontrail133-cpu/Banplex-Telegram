@@ -1,8 +1,17 @@
 import { create } from 'zustand'
 import {
+  fetchBusinessReportFromApi,
   fetchProjectDetailFromApi,
+  fetchPdfSettingsFromApi,
   fetchProjectSummariesFromApi,
+  savePdfSettingsFromApi,
 } from '../lib/reports-api'
+import { saveBusinessReportPdf } from '../lib/report-pdf'
+import {
+  formatDateInputValue,
+  getDefaultBusinessReportPeriod,
+  normalizeReportKind,
+} from '../lib/business-report'
 
 function toError(error, fallbackMessage) {
   const message =
@@ -26,16 +35,75 @@ function createPortfolioSummary(rows = []) {
   }
 }
 
+function createReportQueryKey({ reportKind, dateFrom, dateTo, projectId }) {
+  return [
+    normalizeReportKind(reportKind),
+    formatDateInputValue(dateFrom),
+    formatDateInputValue(dateTo),
+    String(projectId ?? '').trim(),
+  ].join('|')
+}
+
 const useReportStore = create((set, get) => ({
   projectSummaries: [],
   portfolioSummary: createPortfolioSummary(),
   selectedProjectDetail: null,
+  reportKind: 'executive_finance',
+  reportPeriod: getDefaultBusinessReportPeriod(),
+  selectedProjectId: '',
+  reportData: null,
+  reportDataKey: null,
+  isReportLoading: false,
+  reportError: null,
+  pdfSettings: null,
+  pdfSettingsTeamId: null,
   isLoading: false,
   isDetailLoading: false,
+  isPdfSettingsLoading: false,
+  isPdfSettingsSaving: false,
+  isPdfGenerating: false,
   error: null,
   detailError: null,
+  pdfSettingsError: null,
+  pdfError: null,
   lastUpdatedAt: null,
-  clearError: () => set({ error: null, detailError: null }),
+  clearError: () =>
+    set({
+      error: null,
+      detailError: null,
+      reportError: null,
+      pdfSettingsError: null,
+      pdfError: null,
+    }),
+  setReportKind: (reportKind) =>
+    set((state) => ({
+      reportKind: normalizeReportKind(reportKind),
+      reportError: null,
+      reportDataKey: null,
+      reportData:
+        normalizeReportKind(reportKind) === 'project_pl' &&
+        String(state.selectedProjectId ?? '').trim().length === 0
+          ? null
+          : null,
+    })),
+  setReportPeriod: (patch = {}) =>
+    set((state) => ({
+      reportPeriod: {
+        dateFrom:
+          formatDateInputValue(patch?.dateFrom) || state.reportPeriod.dateFrom,
+        dateTo: formatDateInputValue(patch?.dateTo) || state.reportPeriod.dateTo,
+      },
+      reportError: null,
+      reportDataKey: null,
+      reportData: null,
+    })),
+  setSelectedProjectId: (projectId) =>
+    set({
+      selectedProjectId: String(projectId ?? '').trim(),
+      reportError: null,
+      reportDataKey: null,
+      reportData: null,
+    }),
   fetchProjectSummaries: async ({ force = false } = {}) => {
     const { projectSummaries, isLoading } = get()
 
@@ -91,6 +159,190 @@ const useReportStore = create((set, get) => ({
         selectedProjectDetail: null,
         isDetailLoading: false,
         detailError: normalizedError.message,
+      })
+
+      throw normalizedError
+    }
+  },
+  fetchBusinessReportData: async ({ force = false } = {}) => {
+    const { reportKind, reportPeriod, selectedProjectId, isReportLoading, reportDataKey, reportData } =
+      get()
+    const normalizedReportKind = normalizeReportKind(reportKind)
+    const normalizedProjectId = String(selectedProjectId ?? '').trim()
+    const dateFrom = formatDateInputValue(reportPeriod?.dateFrom)
+    const dateTo = formatDateInputValue(reportPeriod?.dateTo)
+    const queryKey = createReportQueryKey({
+      reportKind: normalizedReportKind,
+      dateFrom,
+      dateTo,
+      projectId: normalizedProjectId,
+    })
+
+    if (normalizedReportKind === 'project_pl' && !normalizedProjectId) {
+      set({
+        reportData: null,
+        reportDataKey: queryKey,
+        isReportLoading: false,
+        reportError: null,
+      })
+
+      return null
+    }
+
+    if (!force && !isReportLoading && reportDataKey === queryKey && reportData) {
+      return reportData
+    }
+
+    set({
+      isReportLoading: true,
+      reportError: null,
+      reportDataKey: queryKey,
+    })
+
+    try {
+      const nextReportData = await fetchBusinessReportFromApi({
+        reportKind: normalizedReportKind,
+        dateFrom,
+        dateTo,
+        projectId: normalizedReportKind === 'project_pl' ? normalizedProjectId : null,
+      })
+
+      set({
+        reportData: nextReportData,
+        isReportLoading: false,
+        reportError: null,
+        reportDataKey: queryKey,
+      })
+
+      return nextReportData
+    } catch (error) {
+      const normalizedError = toError(error, 'Gagal memuat data laporan.')
+
+      set({
+        reportData: null,
+        isReportLoading: false,
+        reportError: normalizedError.message,
+      })
+
+      throw normalizedError
+    }
+  },
+  fetchPdfSettings: async (teamId, { force = false } = {}) => {
+    const { pdfSettingsTeamId, isPdfSettingsLoading, pdfSettings } = get()
+
+    if (!teamId) {
+      set({
+        pdfSettings: null,
+        pdfSettingsTeamId: null,
+        isPdfSettingsLoading: false,
+        pdfSettingsError: null,
+      })
+
+      return null
+    }
+
+    if (!force && !isPdfSettingsLoading && pdfSettingsTeamId === teamId) {
+      return pdfSettings
+    }
+
+    set({
+      isPdfSettingsLoading: true,
+      pdfSettingsError: null,
+      pdfSettings: pdfSettingsTeamId === teamId ? pdfSettings : null,
+      pdfSettingsTeamId: teamId,
+    })
+
+    try {
+      const nextPdfSettings = await fetchPdfSettingsFromApi(teamId)
+
+      set({
+        pdfSettings: nextPdfSettings,
+        pdfSettingsTeamId: teamId,
+        isPdfSettingsLoading: false,
+        pdfSettingsError: null,
+      })
+
+      return nextPdfSettings
+    } catch (error) {
+      const normalizedError = toError(error, 'Gagal memuat pengaturan PDF.')
+
+      set({
+        pdfSettings: null,
+        pdfSettingsTeamId: teamId,
+        isPdfSettingsLoading: false,
+        pdfSettingsError: normalizedError.message,
+      })
+
+      throw normalizedError
+    }
+  },
+  savePdfSettings: async (payload = {}) => {
+    const teamId = payload?.teamId ?? payload?.team_id
+
+    if (!teamId) {
+      throw new Error('Team ID wajib diisi untuk menyimpan pengaturan PDF.')
+    }
+
+    set({ isPdfSettingsSaving: true, pdfSettingsError: null })
+
+    try {
+      const nextPdfSettings = await savePdfSettingsFromApi(payload)
+
+      set({
+        pdfSettings: nextPdfSettings,
+        pdfSettingsTeamId: nextPdfSettings?.team_id ?? teamId,
+        isPdfSettingsSaving: false,
+        pdfSettingsError: null,
+      })
+
+      return nextPdfSettings
+    } catch (error) {
+      const normalizedError = toError(error, 'Gagal menyimpan pengaturan PDF.')
+
+      set({
+        isPdfSettingsSaving: false,
+        pdfSettingsError: normalizedError.message,
+      })
+
+      throw normalizedError
+    }
+  },
+  downloadBusinessReportPdf: async () => {
+    const {
+      fetchBusinessReportData,
+      pdfSettings,
+      reportData,
+      isPdfGenerating,
+    } = get()
+
+    if (isPdfGenerating) {
+      return null
+    }
+
+    set({ isPdfGenerating: true, pdfError: null })
+
+    try {
+      const nextReportData = reportData ?? (await fetchBusinessReportData({ force: true }))
+
+      if (!nextReportData) {
+        set({ isPdfGenerating: false, pdfError: 'Data laporan belum tersedia.' })
+        return null
+      }
+
+      const fileName = await saveBusinessReportPdf({
+        reportData: nextReportData,
+        pdfSettings,
+      })
+
+      set({ isPdfGenerating: false, pdfError: null })
+
+      return fileName
+    } catch (error) {
+      const normalizedError = toError(error, 'Gagal membuat PDF bisnis.')
+
+      set({
+        isPdfGenerating: false,
+        pdfError: normalizedError.message,
       })
 
       throw normalizedError

@@ -5,6 +5,7 @@ function FormHeader({
   eyebrow = 'Form',
   description = null,
   onBack,
+  action = null,
   className = '',
   backLabel = 'Kembali',
 }) {
@@ -13,8 +14,10 @@ function FormHeader({
       eyebrow={eyebrow}
       title={title}
       description={description}
+      action={action}
       backAction={onBack}
       backLabel={backLabel}
+      compact
       className={className}
     />
   )

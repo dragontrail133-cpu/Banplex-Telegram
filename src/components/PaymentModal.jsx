@@ -4,8 +4,10 @@ import usePaymentStore from '../store/usePaymentStore'
 import { getAppTodayKey } from '../lib/date-time'
 import {
   AppButton,
+  AppCard,
   AppCardStrong,
   AppDialog,
+  AppErrorState,
   AppNominalInput,
   AppInput,
   AppTextarea,
@@ -39,6 +41,7 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
   const isSubmitting = usePaymentStore((state) => state.isSubmitting)
   const error = usePaymentStore((state) => state.error)
   const clearError = usePaymentStore((state) => state.clearError)
+  const formId = 'payment-modal-form'
 
   useEffect(() => {
     setFormData(createInitialForm(bill))
@@ -93,6 +96,21 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
   return (
     <AppDialog
       open
+      footer={
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <AppButton onClick={onClose} type="button" variant="secondary">
+            Batal
+          </AppButton>
+          <AppButton
+            disabled={isSubmitting}
+            form={formId}
+            type="submit"
+            variant="primary"
+          >
+            {isSubmitting ? 'Menyimpan...' : 'Simpan Pembayaran'}
+          </AppButton>
+        </div>
+      }
       onClose={onClose}
       title="Pembayaran Tagihan"
       description={bill.supplierName}
@@ -103,19 +121,19 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
         </p>
 
         <div className="grid gap-3 sm:grid-cols-3">
-          <AppCardStrong className="space-y-1.5 px-4 py-4">
+          <AppCard className="space-y-1.5 bg-white px-4 py-4">
             <p className="app-meta">Total Bill</p>
             <p className="text-base font-semibold text-[var(--app-text-color)]">
               {formatCurrency(bill.amount)}
             </p>
-          </AppCardStrong>
+          </AppCard>
 
-          <AppCardStrong className="space-y-1.5 px-4 py-4">
+          <AppCard className="space-y-1.5 bg-white px-4 py-4">
             <p className="app-meta">Sudah Dibayar</p>
             <p className="text-base font-semibold text-[var(--app-text-color)]">
               {formatCurrency(bill.paidAmount)}
             </p>
-          </AppCardStrong>
+          </AppCard>
 
           <AppCardStrong className="space-y-1.5 px-4 py-4 app-tone-warning">
             <p className="app-meta">Sisa Tagihan</p>
@@ -125,7 +143,7 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
           </AppCardStrong>
         </div>
 
-        <form className="space-y-5" onSubmit={handleSubmit}>
+        <form id={formId} className="space-y-5" onSubmit={handleSubmit}>
           <label className="block space-y-2">
             <span className="text-sm font-semibold text-[var(--app-text-color)]">
               Nominal Pembayaran
@@ -173,20 +191,11 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
           </label>
 
           {error ? (
-            <div className="app-card-dashed border-[var(--app-tone-danger-border)] px-4 py-3 text-sm leading-6 text-[var(--app-tone-danger-text)]">
-              {error}
-            </div>
+            <AppErrorState
+              title="Pembayaran belum tersimpan"
+              description={error}
+            />
           ) : null}
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <AppButton onClick={onClose} type="button" variant="secondary">
-              Batal
-            </AppButton>
-
-            <AppButton disabled={isSubmitting} type="submit" variant="primary">
-              {isSubmitting ? 'Menyimpan...' : 'Simpan Pembayaran'}
-            </AppButton>
-          </div>
         </form>
       </div>
     </AppDialog>

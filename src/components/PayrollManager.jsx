@@ -6,7 +6,13 @@ import useTelegram from '../hooks/useTelegram'
 import useAuthStore from '../store/useAuthStore'
 import useAttendanceStore from '../store/useAttendanceStore'
 import { formatAppDateLabel, getAppTodayKey } from '../lib/date-time'
-import { AppButton, AppCardDashed, PageSection } from './ui/AppPrimitives'
+import {
+  AppButton,
+  AppCardDashed,
+  AppEmptyState,
+  AppErrorState,
+  PageSection,
+} from './ui/AppPrimitives'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -31,6 +37,10 @@ function getStatusLabel(status) {
 
   if (status === 'overtime') {
     return 'Lembur'
+  }
+
+  if (status === 'absent') {
+    return 'Tidak Hadir'
   }
 
   return 'Full Day'
@@ -64,6 +74,13 @@ function getUserDisplayName(user, authUser) {
 
 function groupAttendances(attendances) {
   const grouped = attendances.reduce((accumulator, attendance) => {
+    const billingStatus = String(attendance?.billing_status ?? '').trim().toLowerCase()
+    const totalPay = Number(attendance?.total_pay ?? 0)
+
+    if (billingStatus !== 'unbilled' || totalPay <= 0) {
+      return accumulator
+    }
+
     const workerId = attendance.worker_id
     const workerName = attendance.worker_name ?? 'Pekerja belum terhubung'
     const groupKey = workerId ?? workerName
@@ -216,7 +233,12 @@ function PayrollManager({ onSuccess, recapContext = null }) {
   useEffect(() => () => clearError(), [clearError])
 
   const handleCreateBill = async (group) => {
-    if (!group?.workerId || group.records.length === 0 || !supabase) {
+    if (
+      !group?.workerId ||
+      group.records.length === 0 ||
+      Number(group?.totalAmount ?? 0) <= 0 ||
+      !supabase
+    ) {
       return
     }
 
@@ -287,9 +309,10 @@ function PayrollManager({ onSuccess, recapContext = null }) {
     >
 
       {error ? (
-        <AppCardDashed className="app-tone-danger text-sm leading-6 text-rose-700">
-          {error}
-        </AppCardDashed>
+        <AppErrorState
+          description={error}
+          title="Rekap gaji gagal dimuat"
+        />
       ) : null}
 
       {successMessage ? (
@@ -298,28 +321,30 @@ function PayrollManager({ onSuccess, recapContext = null }) {
             {successMessage}
           </AppCardDashed>
           {lastCreatedBillId ? (
-            <AppButton
-              onClick={() =>
-                navigate(`/tagihan/${lastCreatedBillId}`, {
-                  state: {
-                    surface: 'tagihan',
-                    detailSurface: 'tagihan',
-                  },
-                })
-              }
-              type="button"
-              variant="secondary"
-            >
-              Buka Tagihan Gaji
-            </AppButton>
+              <AppButton
+                onClick={() =>
+                  navigate(`/payment/${lastCreatedBillId}`, {
+                    state: {
+                      surface: 'tagihan',
+                      detailSurface: 'tagihan',
+                    },
+                  })
+                }
+                type="button"
+                variant="secondary"
+              >
+                Buka Tagihan Gaji
+              </AppButton>
           ) : null}
         </div>
       ) : null}
 
       {isLoading && orderedGroupedAttendances.length === 0 ? (
-        <AppCardDashed className="px-4 py-5 text-sm text-[var(--app-hint-color)]">
-          Memuat absensi yang belum ditagihkan...
-        </AppCardDashed>
+        <AppEmptyState
+          description="Menarik absensi yang belum ditagihkan dari server."
+          icon={<Loader2 className="h-10 w-10 animate-spin" />}
+          title="Memuat absensi yang belum ditagihkan"
+        />
       ) : orderedGroupedAttendances.length > 0 ? (
         <div className="space-y-4">
           {orderedGroupedAttendances.map((group) => {
@@ -348,8 +373,8 @@ function PayrollManager({ onSuccess, recapContext = null }) {
                 }}
                 className={`rounded-[26px] border p-4 shadow-sm transition ${
                   isHighlighted
-                    ? 'border-sky-300 bg-sky-50/80'
-                    : 'border-slate-200 bg-white/90'
+                    ? 'border-sky-300 bg-sky-50'
+                    : 'border-slate-200 bg-white'
                 }`}
               >
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -402,7 +427,7 @@ function PayrollManager({ onSuccess, recapContext = null }) {
 
                 <AppButton
                   className="mt-4"
-                  disabled={isProcessing}
+                  disabled={isProcessing || Number(group.totalAmount ?? 0) <= 0}
                   onClick={() => handleCreateBill(group)}
                   leadingIcon={isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                   type="button"
@@ -414,9 +439,11 @@ function PayrollManager({ onSuccess, recapContext = null }) {
           })}
         </div>
       ) : (
-        <AppCardDashed className="px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
-          Belum ada absensi yang belum ditagihkan.
-        </AppCardDashed>
+        <AppEmptyState
+          description="Absensi yang belum ditagihkan akan muncul di sini."
+          icon={<FileClock className="h-10 w-10" />}
+          title="Belum ada absensi yang belum ditagihkan"
+        />
       )}
     </PageSection>
   )

@@ -23,6 +23,7 @@ import {
   PageShell,
   SectionHeader,
 } from '../components/ui/AppPrimitives'
+import { capabilityContracts } from '../lib/capabilities'
 import { formatCurrency, formatTransactionDateTime } from '../lib/transaction-presentation'
 import useMasterStore from '../store/useMasterStore'
 import useAuthStore from '../store/useAuthStore'
@@ -73,7 +74,7 @@ const groupConfigs = [
   {
     entityType: 'material',
     key: 'materials',
-    label: 'Material',
+    label: 'Barang',
     Icon: Boxes,
   },
 ]
@@ -157,7 +158,7 @@ function MasterRecycleBinPage() {
     }
 
     void Promise.all([fetchMasters({ force: false }), fetchDeletedMasters()]).catch((loadError) => {
-      console.error('Gagal memuat recycle bin master:', loadError)
+      console.error('Gagal memuat Arsip master:', loadError)
     })
   }, [currentTeamId, fetchDeletedMasters, fetchMasters])
 
@@ -234,13 +235,13 @@ function MasterRecycleBinPage() {
 
   return (
     <ProtectedRoute
-      requiredCapability="master_data_admin"
-      description="Recycle bin master data hanya tersedia untuk Owner dan Admin."
+      requiredCapability={capabilityContracts.master_data_admin.key}
+      description="Arsip master data hanya tersedia untuk Owner dan Admin."
     >
       <PageShell>
         <PageHeader
           eyebrow="Data Referensi"
-          title="Recycle Bin Master"
+          title="Arsip Master"
           backAction={() => navigate('/master')}
         />
 
@@ -249,7 +250,7 @@ function MasterRecycleBinPage() {
             leadingIcon={<RefreshCcw className="h-4 w-4" />}
             onClick={() => {
               void fetchDeletedMasters().catch((loadError) => {
-                console.error('Gagal memuat recycle bin master:', loadError)
+                console.error('Gagal memuat Arsip master:', loadError)
               })
             }}
             size="sm"
@@ -260,9 +261,7 @@ function MasterRecycleBinPage() {
           </AppButton>
         </div>
 
-        {error ? (
-          <AppErrorState title="Recycle bin master gagal dimuat" description={error} />
-        ) : null}
+        {error ? <AppErrorState title="Arsip master gagal dimuat" description={error} /> : null}
 
         {actionError ? (
           <AppCardDashed>
@@ -281,7 +280,7 @@ function MasterRecycleBinPage() {
               Team aktif belum tersedia.
             </p>
             <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">
-              Login ulang atau pilih workspace yang benar agar recycle bin master bisa dimuat.
+              Login ulang atau pilih workspace yang benar agar Arsip master bisa dimuat.
             </p>
           </AppCardDashed>
         ) : showSkeleton ? (
@@ -298,7 +297,7 @@ function MasterRecycleBinPage() {
             {groupedRecords.map((group) => (
               <AppCardStrong key={group.key} className="space-y-4">
                 <SectionHeader
-                  eyebrow="Recycle Bin"
+                  eyebrow="Arsip"
                   title={group.label}
                   description={`${group.count} data terhapus`}
                   action={
@@ -346,7 +345,7 @@ function MasterRecycleBinPage() {
         ) : (
           <AppEmptyState
             icon={<Trash2 className="h-5 w-5" />}
-            title="Recycle bin master kosong"
+            title="Arsip master kosong"
             description="Data master yang dihapus akan muncul di sini."
           />
         )}

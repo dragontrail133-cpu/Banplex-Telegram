@@ -1,16 +1,36 @@
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { FilePenLine, Info, PencilLine } from 'lucide-react'
 import ExpenseForm from '../components/ExpenseForm'
 import FormLayout from '../components/layouts/FormLayout'
 import IncomeForm from '../components/IncomeForm'
 import LoanForm from '../components/LoanForm'
 import MaterialInvoiceForm from '../components/MaterialInvoiceForm'
-import { AppButton } from '../components/ui/AppPrimitives'
+import BrandLoader from '../components/ui/BrandLoader'
+import {
+  AppButton,
+  AppCardDashed,
+  AppCardStrong,
+  AppErrorState,
+  AppNominalInput,
+  AppToggleGroup,
+  AppTextarea,
+  PageHeader,
+  PageShell,
+  AppTechnicalGrid,
+} from '../components/ui/AppPrimitives'
+import { resolveFormBackRoute } from '../lib/form-shell'
 import { formatCurrency } from '../lib/transaction-presentation'
+import {
+  calculateAttendanceTotalPay,
+  deriveAttendanceBaseWage,
+  deriveAttendanceOvertimeFee,
+  getAttendanceDayWeight,
+} from '../lib/attendance-payroll'
+import { fetchAttendanceHistoryFromApi } from '../lib/records-api'
 import useAttendanceStore from '../store/useAttendanceStore'
+import useMasterStore from '../store/useMasterStore'
 import useTransactionStore from '../store/useTransactionStore'
 import useIncomeStore from '../store/useIncomeStore'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 function formatValue(value) {
   const normalizedValue = String(value ?? '').trim()
@@ -18,7 +38,102 @@ function formatValue(value) {
   return normalizedValue.length > 0 ? normalizedValue : '-'
 }
 
-function EditRecordPage() {
+function toNumber(value) {
+  const parsedValue = Number(value)
+
+  return Number.isFinite(parsedValue) ? parsedValue : NaN
+}
+
+function normalizeText(value, fallback = '') {
+  const normalizedValue = String(value ?? '').trim()
+
+  return normalizedValue.length > 0 ? normalizedValue : fallback
+}
+
+function getAllowedAttendanceStatusValues(usedDayWeight = 0, currentRowWeight = 0) {
+  const remainingDayWeight = Math.max(Number(usedDayWeight) - Number(currentRowWeight), 0)
+
+  return ['full_day', 'half_day', 'overtime', 'absent'].filter((status) => {
+    if (status === 'absent' || status === 'overtime') {
+      return true
+    }
+
+    return remainingDayWeight + getAttendanceDayWeight(status) <= 1
+  })
+}
+
+function getWorkerRate(workerId, projectId, workerWageRates = []) {
+  const exactRate =
+    workerWageRates.find(
+      (rate) => rate.worker_id === workerId && rate.project_id === projectId
+    ) ?? null
+
+  if (exactRate) {
+    return exactRate
+  }
+
+  const defaultRate =
+    workerWageRates.find(
+      (rate) => rate.worker_id === workerId && Boolean(rate.is_default)
+    ) ?? null
+
+  if (defaultRate) {
+    return defaultRate
+  }
+
+  return workerWageRates.find((rate) => rate.worker_id === workerId) ?? null
+}
+
+function hasExpensePaymentHistory(expense = null) {
+  const paidAmount = toNumber(expense?.bill?.paid_amount ?? expense?.bill?.paidAmount)
+  const normalizedBillStatus = String(expense?.bill?.status ?? '').trim().toLowerCase()
+
+  return Boolean(
+    expense?.bill?.id &&
+      ((Number.isFinite(paidAmount) && paidAmount > 0) ||
+        ['partial', 'paid'].includes(normalizedBillStatus))
+  )
+}
+
+function getMaterialInvoiceDeleteBlockReason(invoice = null) {
+  if (!invoice?.id || invoice?.deleted_at) {
+    return null
+  }
+
+  const normalizedDocumentType = String(invoice?.document_type ?? 'faktur')
+    .trim()
+    .toLowerCase()
+
+  const items = Array.isArray(invoice?.items) ? invoice.items : []
+
+  for (const item of items) {
+    const rollbackQuantity =
+      normalizedDocumentType === 'surat_jalan'
+        ? toNumber(item?.qty)
+        : -toNumber(item?.qty)
+    const currentStock = toNumber(
+      item?.materials?.current_stock ?? item?.material_current_stock ?? item?.current_stock
+    )
+    const nextStock = (Number.isFinite(currentStock) ? currentStock : 0) + rollbackQuantity
+
+    if (nextStock < 0) {
+      const materialName =
+        String(
+          item?.materials?.name ??
+            item?.material_name ??
+            item?.item_name ??
+            item?.material_id ??
+            'material'
+        ).trim() || 'material'
+
+      return `Dokumen barang ini tidak bisa dihapus karena stok material ${materialName} sudah terpakai di mutasi lain. Koreksi mutasi stok turunannya lebih dulu.`
+    }
+  }
+
+  return null
+}
+
+function EditRecordPage({ technicalView = false }) {
   const navigate = useNavigate()
   const { type, id } = useParams()
   const location = useLocation()
@@ -37,17 +152,106 @@ function EditRecordPage() {
     (state) => state.restoreMaterialInvoice
   )
   const fetchAttendanceById = useAttendanceStore((state) => state.fetchAttendanceById)
+  const attendanceStatusOptions = useAttendanceStore(
+    (state) => state.attendanceStatusOptions
+  )
+  const updateAttendanceRecord = useAttendanceStore(
+    (state) => state.updateAttendanceRecord
+  )
   const softDeleteAttendanceRecord = useAttendanceStore(
     (state) => state.softDeleteAttendanceRecord
   )
   const restoreAttendanceRecord = useAttendanceStore(
     (state) => state.restoreAttendanceRecord
   )
+  const workerWageRates = useMasterStore((state) => state.workerWageRates)
+  const fetchMasters = useMasterStore((state) => state.fetchMasters)
   const fetchProjectIncomeById = useIncomeStore((state) => state.fetchProjectIncomeById)
   const fetchLoanById = useIncomeStore((state) => state.fetchLoanById)
   const [resolvedItem, setResolvedItem] = useState(item)
   const [isLoadingRecord, setIsLoadingRecord] = useState(false)
   const [recordError, setRecordError] = useState(null)
+  const [attendanceEditState, setAttendanceEditState] = useState({
+    attendanceStatus: '',
+    notes: '',
+    overtimeFee: '',
+  })
+  const [attendanceDayHistory, setAttendanceDayHistory] = useState([])
+  const [isAttendanceSaving, setIsAttendanceSaving] = useState(false)
+  const isAttendanceRecord = normalizedType === 'attendance'
+  const attendanceFormId = 'attendance-edit-form'
+
+  const attendanceWorkerRate = useMemo(() => {
+    if (!isAttendanceRecord || !resolvedItem?.worker_id || !resolvedItem?.project_id) {
+      return null
+    }
+
+    return getWorkerRate(resolvedItem.worker_id, resolvedItem.project_id, workerWageRates)
+  }, [isAttendanceRecord, resolvedItem?.project_id, resolvedItem?.worker_id, workerWageRates])
+
+  const attendanceSelectedStatus = normalizeText(attendanceEditState.attendanceStatus, '')
+  const attendanceSelectedOption =
+    attendanceStatusOptions.find((option) => option.value === attendanceSelectedStatus) ?? null
+  const attendanceSelectedMultiplier = attendanceSelectedOption?.multiplier ?? 0
+  const attendanceIsOvertime = attendanceSelectedStatus === 'overtime'
+
+  const attendanceCurrentStatus = normalizeText(resolvedItem?.attendance_status, '')
+  const attendanceCurrentNotes = normalizeText(resolvedItem?.notes, '')
+
+  const attendanceBaseWage = useMemo(() => {
+    if (!isAttendanceRecord || !resolvedItem) {
+      return 0
+    }
+
+    const masterWage = Number(attendanceWorkerRate?.wage_amount ?? attendanceWorkerRate?.wageAmount)
+    if (Number.isFinite(masterWage) && masterWage > 0) {
+      return masterWage
+    }
+
+    return deriveAttendanceBaseWage({
+      attendanceStatus: attendanceCurrentStatus,
+      totalPay: resolvedItem.total_pay ?? 0,
+      overtimeFee: resolvedItem.overtime_fee ?? null,
+    })
+  }, [attendanceCurrentStatus, attendanceWorkerRate, isAttendanceRecord, resolvedItem])
+
+  const attendanceCurrentOvertimeFee = useMemo(() => {
+    if (!isAttendanceRecord || !resolvedItem) {
+      return 0
+    }
+
+    return deriveAttendanceOvertimeFee({
+      attendanceStatus: attendanceCurrentStatus,
+      baseWage: attendanceBaseWage,
+      totalPay: resolvedItem.total_pay ?? 0,
+      overtimeFee: resolvedItem.overtime_fee ?? null,
+    })
+  }, [attendanceBaseWage, attendanceCurrentStatus, isAttendanceRecord, resolvedItem])
+
+  const attendanceHasChanges =
+    attendanceSelectedStatus !== attendanceCurrentStatus ||
+    normalizeText(attendanceEditState.notes, '') !== attendanceCurrentNotes ||
+    Number(attendanceEditState.overtimeFee ?? 0) !== Number(attendanceCurrentOvertimeFee ?? 0)
+
+  const attendanceSelectedOvertimeFee = Number(attendanceEditState.overtimeFee ?? 0)
+
+  const attendancePreviewTotalPay = useMemo(() => {
+    const totalPay = calculateAttendanceTotalPay({
+      attendanceStatus: attendanceSelectedStatus,
+      baseWage: attendanceBaseWage,
+      overtimeFee: attendanceSelectedOvertimeFee,
+    })
+
+    return Number.isFinite(totalPay) && totalPay > 0 ? Math.round(totalPay) : 0
+  }, [attendanceBaseWage, attendanceSelectedOvertimeFee, attendanceSelectedStatus])
+
+  const isAttendanceEditable =
+    isAttendanceRecord &&
+    Boolean(resolvedItem) &&
+    !isLoadingRecord &&
+    !resolvedItem.deleted_at &&
+    normalizeText(resolvedItem.billing_status, '') === 'unbilled' &&
+    !resolvedItem.salary_bill_id
 
   const titleMap = {
     income: 'Pemasukan Proyek',
@@ -58,9 +262,25 @@ function EditRecordPage() {
     bill: 'Tagihan',
   }
   const resolvedTitle = formatValue(titleMap[normalizedType] ?? type)
+  const technicalRoute = `/edit/${normalizedType}/${id}/technical`
+  const backRoute = resolveFormBackRoute('editRecord', {
+    locationState: location.state,
+    type: normalizedType,
+    fallbackRoute: '/transactions',
+  })
+  const currentRoute = `${location.pathname}${location.search ?? ''}`
+  const expenseHasPaymentHistory =
+    normalizedType === 'expense' ? hasExpensePaymentHistory(resolvedItem) : false
+  const materialInvoiceDeleteBlockReason =
+    normalizedType === 'expense' &&
+    ['material', 'material_invoice'].includes(
+      String(resolvedItem?.expense_type ?? '').trim().toLowerCase()
+    )
+      ? getMaterialInvoiceDeleteBlockReason(resolvedItem)
+      : null
 
   const handleBack = () => {
-    navigate(-1)
+    navigate(backRoute, { replace: true })
   }
 
   const handleFormSuccess = async () => {
@@ -73,6 +293,11 @@ function EditRecordPage() {
 
   const handleExpenseDelete = async () => {
     if (!resolvedItem?.id || resolvedItem.deleted_at) {
+      return
+    }
+
+    if (expenseHasPaymentHistory) {
+      setRecordError('Pengeluaran yang sudah memiliki pembayaran tidak bisa diubah atau dihapus.')
       return
     }
 
@@ -122,6 +347,11 @@ function EditRecordPage() {
       return
     }
 
+    if (materialInvoiceDeleteBlockReason) {
+      setRecordError(materialInvoiceDeleteBlockReason)
+      return
+    }
+
     const shouldDelete = window.confirm(`Hapus ${resolvedTitle}?`)
 
     if (!shouldDelete) {
@@ -168,7 +398,12 @@ function EditRecordPage() {
   }
 
   const handleAttendanceDelete = async () => {
-    if (!resolvedItem?.id || resolvedItem.deleted_at || resolvedItem.billing_status === 'billed') {
+    if (
+      !resolvedItem?.id ||
+      resolvedItem.deleted_at ||
+      resolvedItem.billing_status === 'billed' ||
+      resolvedItem.salary_bill_id
+    ) {
       return
     }
 
@@ -206,6 +441,60 @@ function EditRecordPage() {
       setResolvedItem(nextRecord)
     } catch (error) {
       setRecordError(error instanceof Error ? error.message : 'Gagal memulihkan absensi.')
+    }
+  }
+
+  const handleAttendanceSave = async (event) => {
+    event.preventDefault()
+
+    if (!isAttendanceEditable || !resolvedItem?.id) {
+      return
+    }
+
+    if (!attendanceSelectedStatus) {
+      setRecordError('Status absensi wajib diisi.')
+      return
+    }
+
+    const selectedAttendanceOption = attendanceEditableStatusOptions.find(
+      (option) => option.value === attendanceSelectedStatus
+    )
+
+    if (!selectedAttendanceOption || selectedAttendanceOption.disabled) {
+      setRecordError('Status absensi tidak valid.')
+      return
+    }
+
+    try {
+      setIsAttendanceSaving(true)
+      setRecordError(null)
+
+      const nextAttendance = await updateAttendanceRecord({
+        attendanceId: resolvedItem.id,
+        teamId: resolvedItem.team_id,
+        attendanceStatus: attendanceSelectedStatus,
+        totalPay: attendancePreviewTotalPay,
+        overtimeFee: attendanceSelectedStatus === 'overtime' ? attendanceSelectedOvertimeFee : null,
+        notes: attendanceEditState.notes,
+        expectedUpdatedAt: resolvedItem.updated_at ?? resolvedItem.updatedAt ?? null,
+      })
+
+      if (nextAttendance) {
+        setResolvedItem(nextAttendance)
+        setAttendanceEditState({
+          attendanceStatus: normalizeText(nextAttendance.attendance_status, attendanceSelectedStatus),
+          notes: normalizeText(nextAttendance.notes, ''),
+          overtimeFee: normalizeText(
+            nextAttendance.overtime_fee ??
+              (attendanceSelectedStatus === 'overtime' ? attendanceSelectedOvertimeFee : null),
+            ''
+          ),
+        })
+      }
+    } catch (error) {
+      setRecordError(error instanceof Error ? error.message : 'Gagal menyimpan absensi.')
+    } finally {
+      setIsAttendanceSaving(false)
     }
   }
 
@@ -288,49 +577,233 @@ function EditRecordPage() {
     normalizedType,
   ])
 
+  useEffect(() => {
+    if (!isAttendanceEditable) {
+      return
+    }
+
+    fetchMasters().catch((fetchError) => {
+      console.error('Gagal memuat master absensi untuk edit:', fetchError)
+    })
+  }, [fetchMasters, isAttendanceEditable])
+
+  useEffect(() => {
+    if (!isAttendanceRecord || !resolvedItem) {
+      setAttendanceEditState({
+        attendanceStatus: '',
+        notes: '',
+        overtimeFee: '',
+      })
+      return
+    }
+
+    setAttendanceEditState({
+      attendanceStatus: normalizeText(resolvedItem.attendance_status, ''),
+      notes: normalizeText(resolvedItem.notes, ''),
+      overtimeFee: normalizeText(
+        resolvedItem.overtime_fee ??
+          (normalizeText(resolvedItem.attendance_status, '') === 'overtime'
+            ? attendanceCurrentOvertimeFee
+            : ''),
+        ''
+      ),
+    })
+  }, [attendanceCurrentOvertimeFee, isAttendanceRecord, resolvedItem])
+
+  useEffect(() => {
+    if (!isAttendanceRecord || !resolvedItem?.team_id || !resolvedItem?.attendance_date) {
+      setAttendanceDayHistory([])
+      return
+    }
+
+    let isActive = true
+
+    fetchAttendanceHistoryFromApi({
+      teamId: resolvedItem.team_id,
+      date: resolvedItem.attendance_date,
+      workerId: resolvedItem.worker_id,
+    })
+      .then((records) => {
+        if (!isActive) {
+          return
+        }
+
+        setAttendanceDayHistory(records)
+      })
+      .catch((fetchError) => {
+        if (!isActive) {
+          return
+        }
+
+        console.error('Gagal memuat histori absensi harian untuk edit:', fetchError)
+        setAttendanceDayHistory([])
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [isAttendanceRecord, resolvedItem?.attendance_date, resolvedItem?.team_id, resolvedItem?.worker_id])
+
+  const attendanceDayUsage = useMemo(() => {
+    return attendanceDayHistory.reduce((totalWeight, record) => {
+      if (String(record?.id ?? '').trim() === String(resolvedItem?.id ?? '').trim()) {
+        return totalWeight
+      }
+
+      return totalWeight + getAttendanceDayWeight(record?.attendance_status)
+    }, 0)
+  }, [attendanceDayHistory, resolvedItem?.id])
+
+  const attendanceEditableStatusOptions = useMemo(() => {
+    const currentRowWeight = getAttendanceDayWeight(attendanceCurrentStatus)
+    const allowedStatusValues = getAllowedAttendanceStatusValues(
+      attendanceDayUsage,
+      currentRowWeight
+    )
+
+    return attendanceStatusOptions.map((option) => ({
+      ...option,
+      disabled:
+        !allowedStatusValues.includes(option.value) &&
+        option.value !== attendanceSelectedStatus,
+    }))
+  }, [
+    attendanceCurrentStatus,
+    attendanceDayUsage,
+    attendanceSelectedStatus,
+    attendanceStatusOptions,
+  ])
+
+  const technicalStatusLabel = isLoadingRecord
+    ? 'Memuat...'
+    : resolvedItem
+      ? normalizedType === 'attendance'
+        ? resolvedItem.deleted_at
+          ? 'Terhapus'
+          : isAttendanceEditable
+            ? 'Siap diedit'
+            : 'Siap dilihat'
+        : 'Siap diedit'
+      : 'Belum ditemukan'
+  const technicalRows = [
+    {
+      key: 'type',
+      label: 'Jenis Data',
+      value: resolvedTitle,
+    },
+    {
+      key: 'id',
+      label: 'ID',
+      value: formatValue(id),
+    },
+    {
+      key: 'status',
+      label: 'Status Mentah',
+      value: technicalStatusLabel,
+    },
+    {
+      key: 'editable',
+      label: 'Editable',
+      value: !isCreateMode && resolvedItem ? (isAttendanceEditable ? 'Ya' : 'Tidak') : 'N/A',
+    },
+    {
+      key: 'route',
+      label: 'Route Teknik',
+      value: technicalRoute,
+    },
+  ]
+
+  if (!isCreateMode && isLoadingRecord) {
+    return (
+      <PageShell className="space-y-4">
+        <PageHeader
+          eyebrow={technicalView ? 'Owner' : 'Form'}
+          title={
+            technicalView
+              ? `Detail Teknis ${resolvedTitle}`
+              : `${isCreateMode ? 'Tambah' : 'Edit'} ${resolvedTitle}`
+          }
+          backAction={handleBack}
+        />
+
+        <section className="grid min-h-[calc(100dvh-16rem)] place-items-center px-4 text-center">
+          <div className="flex flex-col items-center gap-5">
+            <BrandLoader context="form" size="hero" />
+            <div className="space-y-2">
+              <h2 className="text-xl font-bold tracking-[-0.03em] text-[var(--app-text-color)]">
+                {technicalView
+                  ? `Memuat detail teknis ${resolvedTitle}`
+                  : `Memuat ${resolvedTitle}`}
+              </h2>
+              <p className="max-w-[20rem] text-sm leading-6 text-[var(--app-hint-color)]">
+                {technicalView
+                  ? 'Menyiapkan data teknis.'
+                  : 'Menyiapkan data yang akan diubah.'}
+              </p>
+            </div>
+          </div>
+        </section>
+      </PageShell>
+    )
+  }
+
+  if (!isCreateMode && !isLoadingRecord && !resolvedItem) {
+    return (
+      <PageShell className="space-y-4">
+        <PageHeader
+          eyebrow={technicalView ? 'Owner' : 'Form'}
+          title={
+            technicalView
+              ? `Detail Teknis ${resolvedTitle}`
+              : `${isCreateMode ? 'Tambah' : 'Edit'} ${resolvedTitle}`
+          }
+          backAction={handleBack}
+        />
+
+        <AppErrorState
+          action={
+            <AppButton onClick={handleBack} type="button" variant="secondary">
+              Kembali
+            </AppButton>
+          }
+          description={
+            recordError ??
+            `Data ${resolvedTitle} tidak ditemukan atau sudah tidak tersedia untuk diedit.`
+          }
+          title="Data tidak ditemukan"
+        />
+      </PageShell>
+    )
+  }
+
+  if (technicalView) {
+    return (
+      <PageShell>
+        <PageHeader eyebrow="Owner" title={`Detail Teknis ${resolvedTitle}`} backAction={handleBack} />
+
+        {recordError ? (
+          <AppCardDashed className="text-sm leading-6 text-[var(--app-hint-color)]">
+            {recordError}
+          </AppCardDashed>
+        ) : null}
+
+        <AppCardStrong className="space-y-4">
+          <AppTechnicalGrid items={technicalRows} />
+        </AppCardStrong>
+      </PageShell>
+    )
+  }
+
   return (
     <FormLayout
       onBack={handleBack}
+      actionLabel={isAttendanceEditable ? 'Simpan Perubahan' : null}
+      formId={isAttendanceEditable ? attendanceFormId : null}
+      isSubmitting={isAttendanceSaving}
+      submitDisabled={!attendanceHasChanges}
       title={`${isCreateMode ? 'Tambah' : 'Edit'} ${resolvedTitle}`}
     >
       <div className="space-y-4">
-        <section className=" ">
-          {!isCreateMode ? (
-            <div className="mt-4 grid gap-2 sm:grid-cols-3">
-              <div className="app-card rounded-[20px] px-3 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                  Tipe
-                </p>
-                <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                  {resolvedTitle}
-                </p>
-              </div>
-              <div className="app-card rounded-[20px] px-3 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                  ID
-                </p>
-                <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                  {formatValue(id)}
-                </p>
-              </div>
-              <div className="app-card rounded-[20px] px-3 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                  Status
-                </p>
-                <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                  {isLoadingRecord
-                    ? 'Memuat...'
-                    : resolvedItem
-                      ? normalizedType === 'attendance'
-                        ? 'Siap dilihat'
-                        : 'Siap diedit'
-                      : 'Belum ditemukan'}
-                </p>
-              </div>
-            </div>
-          ) : null}
-        </section>
-
         {isCreateMode && ['income', 'project-income'].includes(normalizedType) ? (
           <IncomeForm onSuccess={handleFormSuccess} />
         ) : null}
@@ -345,70 +818,9 @@ function EditRecordPage() {
 
         {!isCreateMode &&
         ['income', 'project-income'].includes(normalizedType) &&
-        resolvedItem ? (
+        resolvedItem &&
+        !isLoadingRecord ? (
           <div className="space-y-4">
-            {resolvedItem.bill?.id ? (
-              <section className="app-section-surface p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                      Fee Bill Terkait
-                    </p>
-                    <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                      {resolvedItem.bill.description || 'Bill fee pemasukan proyek'}
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-[var(--app-tone-neutral-bg)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--app-tone-neutral-text)]">
-                    {formatValue(resolvedItem.bill.status)}
-                  </span>
-                </div>
-
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-[18px] bg-[var(--app-surface-low-color)] px-4 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                      Nominal
-                    </p>
-                    <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                      {formatCurrency(resolvedItem.bill.amount ?? 0)}
-                    </p>
-                  </div>
-                  <div className="rounded-[18px] bg-[var(--app-surface-low-color)] px-4 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                      Terbayar
-                    </p>
-                    <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                      {formatCurrency(resolvedItem.bill.paidAmount ?? 0)}
-                    </p>
-                  </div>
-                  <div className="rounded-[18px] bg-[var(--app-surface-low-color)] px-4 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                      Sisa
-                    </p>
-                    <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                      {formatCurrency(resolvedItem.bill.remainingAmount ?? 0)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <AppButton
-                    onClick={() =>
-                      navigate(`/tagihan/${resolvedItem.bill.id}`, {
-                        state: {
-                          surface: 'tagihan',
-                          detailSurface: 'tagihan',
-                        },
-                      })
-                    }
-                    type="button"
-                    variant="secondary"
-                  >
-                    Buka Tagihan
-                  </AppButton>
-                </div>
-              </section>
-            ) : null}
-
             <IncomeForm
               initialData={resolvedItem}
               onSuccess={handleFormSuccess}
@@ -417,7 +829,7 @@ function EditRecordPage() {
           </div>
         ) : null}
 
-        {!isCreateMode && normalizedType === 'loan' && resolvedItem ? (
+        {!isCreateMode && normalizedType === 'loan' && resolvedItem && !isLoadingRecord ? (
           <LoanForm
             initialData={resolvedItem}
             onSuccess={handleFormSuccess}
@@ -427,92 +839,102 @@ function EditRecordPage() {
 
         {!isCreateMode && normalizedType === 'attendance' && resolvedItem ? (
           <div className="space-y-4">
-            <section className="app-section-surface p-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-[18px] bg-[var(--app-surface-low-color)] px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                    Pekerja
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                    {formatValue(resolvedItem.worker_name_snapshot ?? resolvedItem.worker_name)}
-                  </p>
-                </div>
-                <div className="rounded-[18px] bg-[var(--app-surface-low-color)] px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                    Proyek
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                    {formatValue(resolvedItem.project_name_snapshot ?? resolvedItem.project_name)}
-                  </p>
-                </div>
-                <div className="rounded-[18px] bg-[var(--app-surface-low-color)] px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                    Tanggal
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                    {formatValue(resolvedItem.attendance_date)}
-                  </p>
-                </div>
-                <div className="rounded-[18px] bg-[var(--app-surface-low-color)] px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                    Status Billing
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                    {formatValue(resolvedItem.billing_status)}
-                  </p>
-                </div>
-              </div>
+            {isAttendanceEditable ? (
+              <form id={attendanceFormId} className="space-y-3" onSubmit={handleAttendanceSave}>
+                <AppToggleGroup
+                  buttonSize="sm"
+                  description="Status absensi yang diedit akan menyesuaikan total upah sesuai komponen upah."
+                  label="Status Absensi"
+                  disabled={isAttendanceSaving}
+                  onChange={(nextValue) =>
+                    setAttendanceEditState((currentState) => ({
+                      ...currentState,
+                      attendanceStatus: nextValue,
+                    }))
+                  }
+                  options={attendanceEditableStatusOptions}
+                  value={attendanceSelectedStatus}
+                />
 
-              <div className="mt-4 rounded-[20px] border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-4 py-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                  Tagihan Gaji
-                </p>
-                <p className="mt-2 text-sm leading-6 text-[var(--app-text-color)]">
-                  {resolvedItem.salary_bill_id
-                    ? `Absensi ini sudah ditautkan ke tagihan gaji ${resolvedItem.salary_bill_id}.`
-                    : 'Absensi ini belum ditautkan ke tagihan gaji.'}
-                </p>
-                {resolvedItem.salary_bill?.id ? (
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <div className="rounded-[16px] bg-[var(--app-surface-low-color)] px-3 py-3">
-                      <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                        Status Bill
-                      </p>
-                      <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                        {formatValue(resolvedItem.salary_bill.status)}
-                      </p>
-                    </div>
-                    <div className="rounded-[16px] bg-[var(--app-surface-low-color)] px-3 py-3">
-                      <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                        Nominal
-                      </p>
-                      <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                        {formatValue(resolvedItem.salary_bill.amount)}
-                      </p>
-                    </div>
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-[var(--app-text-color)]">Catatan</p>
+                  <AppTextarea
+                    disabled={isAttendanceSaving}
+                    onChange={(event) =>
+                      setAttendanceEditState((currentState) => ({
+                        ...currentState,
+                        notes: event.target.value,
+                      }))
+                    }
+                    placeholder="Catatan absensi, opsional"
+                    value={attendanceEditState.notes}
+                  />
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-[18px] bg-[var(--app-surface-low-color)] px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+                      Upah Dasar
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
+                      {formatCurrency(attendanceBaseWage)}
+                    </p>
                   </div>
-                ) : null}
-              </div>
-            </section>
-
-            {resolvedItem.billing_status === 'billed' ? (
-              <section className="app-card-dashed p-4 text-sm leading-6 text-[var(--app-hint-color)]">
-                Absensi yang sudah ditagihkan hanya bisa dilihat dari halaman ini. Perubahan
-                data harus mengikuti tagihan gaji yang terkait agar relasinya tetap aman.
-              </section>
+                  <div className="rounded-[18px] bg-[var(--app-surface-low-color)] px-4 py-3">
+                    {attendanceIsOvertime ? (
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+                          Fee Lembur
+                        </p>
+                        <AppNominalInput
+                          disabled={isAttendanceSaving}
+                          onValueChange={(nextValue) =>
+                            setAttendanceEditState((currentState) => ({
+                              ...currentState,
+                              overtimeFee: nextValue,
+                            }))
+                          }
+                          value={attendanceEditState.overtimeFee}
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+                          Faktor Status
+                        </p>
+                        <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
+                          {attendanceSelectedOption
+                            ? `${attendanceSelectedOption.label} x ${attendanceSelectedMultiplier}`
+                            : 'Belum dipilih'}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                  <div className="rounded-[18px] bg-[var(--app-surface-low-color)] px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+                      Total Setelah Simpan
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
+                      {formatCurrency(attendancePreviewTotalPay)}
+                    </p>
+                  </div>
+                </div>
+              </form>
             ) : null}
 
             <div className="grid gap-3 sm:grid-cols-2">
               {resolvedItem.salary_bill?.id ? (
                 <AppButton
                   onClick={() =>
-                    navigate(`/tagihan/${resolvedItem.salary_bill.id}`, {
-                      state: {
-                        surface: 'tagihan',
-                        detailSurface: 'tagihan',
-                      },
-                    })
-                  }
+              navigate(`/payment/${resolvedItem.salary_bill.id}`, {
+                state: {
+                  surface: 'tagihan',
+                  detailSurface: 'tagihan',
+                  returnTo: currentRoute,
+                  returnToOnSuccess: true,
+                },
+              })
+            }
                   type="button"
                   variant="secondary"
                 >
@@ -520,7 +942,9 @@ function EditRecordPage() {
                 </AppButton>
               ) : null}
 
-              {!resolvedItem.deleted_at && resolvedItem.billing_status !== 'billed' ? (
+              {!resolvedItem.deleted_at &&
+              resolvedItem.billing_status !== 'billed' &&
+              !resolvedItem.salary_bill_id ? (
                 <AppButton onClick={handleAttendanceDelete} type="button" variant="danger">
                   Hapus
                 </AppButton>
@@ -537,63 +961,9 @@ function EditRecordPage() {
 
         {!isCreateMode &&
         normalizedType === 'expense' &&
-        resolvedItem ? (
+        resolvedItem &&
+        !isLoadingRecord ? (
           <div className="space-y-4">
-            <section className="app-section-surface p-4">
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-[18px] bg-[var(--app-surface-low-color)] px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                    Status Bill
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                    {formatValue(resolvedItem.bill?.status ?? 'tidak ada bill')}
-                  </p>
-                </div>
-                <div className="rounded-[18px] bg-[var(--app-surface-low-color)] px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                    Sisa Tagihan
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                    {formatValue(resolvedItem.bill?.remainingAmount ?? 0)}
-                  </p>
-                </div>
-                <div className="rounded-[18px] bg-[var(--app-surface-low-color)] px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-                    Lampiran
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-[var(--app-text-color)]">
-                    {Array.isArray(resolvedItem.attachments)
-                      ? `${resolvedItem.attachments.filter((attachment) => !attachment.deleted_at).length} aktif`
-                      : '0 aktif'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-3">
-                {resolvedItem.bill?.id ? (
-                  <AppButton
-                    onClick={() =>
-                      navigate(`/tagihan/${resolvedItem.bill.id}`, {
-                        state: {
-                          surface: 'tagihan',
-                          detailSurface: 'tagihan',
-                        },
-                      })
-                    }
-                    type="button"
-                    variant="secondary"
-                  >
-                    Buka Tagihan
-                  </AppButton>
-                ) : null}
-                {Array.isArray(resolvedItem.attachments) ? (
-                  <span className="rounded-full bg-[var(--app-tone-neutral-bg)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--app-tone-neutral-text)]">
-                    {resolvedItem.attachments.length} total lampiran
-                  </span>
-                ) : null}
-              </div>
-            </section>
-
             {['material', 'material_invoice'].includes(
               String(resolvedItem.expense_type ?? '').trim().toLowerCase()
             ) ? (
@@ -617,8 +987,15 @@ function EditRecordPage() {
                 String(resolvedItem.expense_type ?? '').trim().toLowerCase()
               ) ? (
                 <>
+                  {materialInvoiceDeleteBlockReason ? (
+                    <section className="app-card-dashed p-4 text-sm leading-6 text-[var(--app-hint-color)] sm:col-span-2">
+                      {materialInvoiceDeleteBlockReason}
+                    </section>
+                  ) : null}
+
                   {!resolvedItem.deleted_at ? (
                     <AppButton
+                      disabled={Boolean(materialInvoiceDeleteBlockReason)}
                       onClick={handleMaterialInvoiceDelete}
                       type="button"
                       variant="danger"
@@ -640,7 +1017,12 @@ function EditRecordPage() {
               ) : (
                 <>
                   {!resolvedItem.deleted_at ? (
-                    <AppButton onClick={handleExpenseDelete} type="button" variant="danger">
+                    <AppButton
+                      disabled={expenseHasPaymentHistory}
+                      onClick={handleExpenseDelete}
+                      type="button"
+                      variant="danger"
+                    >
                       Hapus
                     </AppButton>
                   ) : null}
@@ -654,51 +1036,6 @@ function EditRecordPage() {
               )}
             </div>
           </div>
-        ) : null}
-
-        {!isCreateMode &&
-        !['income', 'project-income', 'loan', 'expense'].includes(normalizedType) ? (
-          <section className="app-section-surface p-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--app-surface-low-color)] text-[var(--app-text-color)]">
-                <Info className="h-4 w-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-[var(--app-text-color)]">Ringkasan Data</p>
-                <p className="mt-1 text-sm leading-6 text-[var(--app-hint-color)]">
-                  Tipe ini belum memiliki editor final, jadi sementara hanya tampil ringkasan data.
-                </p>
-              </div>
-            </div>
-            <div className="mt-3 space-y-2 text-sm text-[var(--app-hint-color)]">
-              <p>
-                <span className="font-medium">ID:</span> {formatValue(id)}
-              </p>
-              <p>
-                <span className="font-medium">Tipe:</span> {formatValue(type)}
-              </p>
-              <p>
-                <span className="font-medium">Nama:</span>{' '}
-                {formatValue(
-                  item?.title ??
-                    item?.description ??
-                    item?.category ??
-                    item?.supplierName ??
-                    item?.creditor_name_snapshot
-                )}
-              </p>
-              <p>
-                <span className="font-medium">Catatan:</span>{' '}
-                {formatValue(item?.notes ?? item?.description)}
-              </p>
-            </div>
-          </section>
-        ) : null}
-
-        {!isCreateMode && isLoadingRecord ? (
-          <section className="app-section-surface p-4 text-sm text-[var(--app-hint-color)]">
-            Memuat data edit...
-          </section>
         ) : null}
 
         {!isCreateMode && recordError ? (

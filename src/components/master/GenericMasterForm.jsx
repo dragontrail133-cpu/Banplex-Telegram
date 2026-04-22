@@ -148,7 +148,7 @@ function GenericMasterForm({
                   className={`space-y-3 bg-white ${field.fullWidth ? 'sm:col-span-2' : ''}`}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-[14px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-[14px] border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] text-[var(--app-accent-color)]">
                       <FieldIcon className="h-4 w-4" />
                     </span>
                     <div>
@@ -176,7 +176,7 @@ function GenericMasterForm({
               return (
                 <AppCard key={field.name} className="space-y-3 bg-white">
                   <div className="flex items-center gap-2">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-[14px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-[14px] border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] text-[var(--app-accent-color)]">
                       <FieldIcon className="h-4 w-4" />
                     </span>
                     <div>
@@ -210,7 +210,7 @@ function GenericMasterForm({
                   className={`space-y-3 bg-white ${field.fullWidth ? 'sm:col-span-2' : ''}`}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-[14px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-[14px] border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] text-[var(--app-accent-color)]">
                       <FieldIcon className="h-4 w-4" />
                     </span>
                     <div>
@@ -244,7 +244,7 @@ function GenericMasterForm({
                 className={`space-y-3 bg-white ${field.fullWidth ? 'sm:col-span-2' : ''}`}
               >
                 <div className="flex items-center gap-2">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-[14px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-[14px] border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] text-[var(--app-accent-color)]">
                     <FieldIcon className="h-4 w-4" />
                   </span>
                   <div>

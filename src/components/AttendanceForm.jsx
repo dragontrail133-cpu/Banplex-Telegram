@@ -1,13 +1,31 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from 'react'
-import { Copy, RefreshCcw, Search, Users } from 'lucide-react'
+import {
+  ChevronDown,
+  Copy,
+  Search,
+  Settings2,
+  UserRound,
+  Users,
+} from 'lucide-react'
 import SmartList from './ui/SmartList'
 import useTelegram from '../hooks/useTelegram'
 import useAttendanceStore from '../store/useAttendanceStore'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
 import { getAppTodayKey } from '../lib/date-time'
+import { fetchAttendanceHistoryFromApi } from '../lib/records-api'
 import MasterPickerField from './ui/MasterPickerField'
-import { AppBadge, AppToggleGroup } from './ui/AppPrimitives'
+import {
+  AppBadge,
+  AppButton,
+  AppNominalInput,
+  AppSheet,
+} from './ui/AppPrimitives'
+import {
+  calculateAttendanceTotalPay,
+  deriveAttendanceOvertimeFee,
+  getAttendanceDayWeight,
+} from '../lib/attendance-payroll'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -45,6 +63,119 @@ function normalizeText(value, fallback = '') {
   const normalizedValue = String(value ?? '').trim()
 
   return normalizedValue.length > 0 ? normalizedValue : fallback
+}
+
+const ATTENDANCE_STATUS_META = {
+  full_day: { label: 'Penuh', tone: 'success' },
+  half_day: { label: '½ Hari', tone: 'warning' },
+  overtime: { label: 'Lembur', tone: 'info' },
+  absent: { label: 'Absen', tone: 'danger' },
+  '': { label: 'Belum', tone: 'neutral' },
+}
+
+function getAttendanceStatusMeta(status) {
+  return ATTENDANCE_STATUS_META[status] ?? ATTENDANCE_STATUS_META['']
+}
+
+function getWorkerProjectRateOptions(workerId, projectId, workerWageRates = []) {
+  return [...workerWageRates]
+    .filter(
+      (rate) =>
+        rate.worker_id === workerId &&
+        rate.project_id === projectId &&
+        !rate.deleted_at
+    )
+    .sort((left, right) => {
+      const defaultComparison = Number(Boolean(right.is_default)) - Number(Boolean(left.is_default))
+
+      if (defaultComparison !== 0) {
+        return defaultComparison
+      }
+
+      const roleComparison = normalizeText(left.role_name, '').localeCompare(
+        normalizeText(right.role_name, ''),
+        'id',
+        { sensitivity: 'base' }
+      )
+
+      if (roleComparison !== 0) {
+        return roleComparison
+      }
+
+      return Number(left.wage_amount ?? 0) - Number(right.wage_amount ?? 0)
+    })
+}
+
+function resolveWorkerProjectRate({
+  draftRateId = null,
+  rateOptions = [],
+  fallbackRate = null,
+}) {
+  const normalizedDraftRateId = normalizeText(draftRateId, null)
+
+  if (normalizedDraftRateId) {
+    const matchedDraftRate = rateOptions.find((rate) => rate.id === normalizedDraftRateId)
+
+    if (matchedDraftRate) {
+      return matchedDraftRate
+    }
+  }
+
+  const defaultRate = rateOptions.find((rate) => Boolean(rate.is_default))
+
+  if (defaultRate) {
+    return defaultRate
+  }
+
+  if (rateOptions.length > 0) {
+    return rateOptions[0]
+  }
+
+  return fallbackRate
+}
+
+function resolveAttendanceRowOvertimeFee({
+  attendanceStatus,
+  baseWage,
+  draftOvertimeFee,
+  existingAttendanceStatus,
+  existingOvertimeFee,
+  existingTotalPay,
+}) {
+  if (
+    draftOvertimeFee !== null &&
+    draftOvertimeFee !== undefined &&
+    draftOvertimeFee !== ''
+  ) {
+    return draftOvertimeFee
+  }
+
+  if (attendanceStatus === 'overtime') {
+    if (normalizeText(existingAttendanceStatus, '') === 'overtime') {
+      return deriveAttendanceOvertimeFee({
+        attendanceStatus,
+        baseWage,
+        totalPay: existingTotalPay,
+        overtimeFee: existingOvertimeFee,
+      })
+    }
+
+    return ''
+  }
+
+  return existingOvertimeFee ?? ''
+}
+
+function getAllowedAttendanceStatusValues(usedDayWeight = 0, currentRowWeight = 0) {
+  const remainingDayWeight = Math.max(Number(usedDayWeight) - Number(currentRowWeight), 0)
+
+  return ['full_day', 'half_day', 'overtime', 'absent'].filter((status) => {
+    if (status === 'absent' || status === 'overtime') {
+      return true
+    }
+
+    return remainingDayWeight + getAttendanceDayWeight(status) <= 1
+  })
 }
 
 function getWorkerRate(workerId, projectId, workerWageRates = []) {
@@ -86,6 +217,7 @@ function buildRowSummary(rows = []) {
         full_day: 0,
         half_day: 0,
         overtime: 0,
+        absent: 0,
       },
       totalWage: 0,
       filledCount: 0,
@@ -93,77 +225,299 @@ function buildRowSummary(rows = []) {
   )
 }
 
-function AttendanceSummaryChip({ label, value, toneClassName = '' }) {
+function AttendanceRowCard({ row, onOpen }) {
+  const isLocked = Boolean(row.readOnly)
+  const statusMeta = getAttendanceStatusMeta(row.attendanceStatus)
+
   return (
-    <div className={`rounded-2xl border px-3 py-3 ${toneClassName}`}>
-      <p className="text-[11px] uppercase tracking-[0.18em]">{label}</p>
-      <p className="mt-1 text-base font-semibold tracking-[-0.03em]">{value}</p>
+    <button
+      aria-disabled={isLocked}
+      aria-haspopup="dialog"
+      className={`flex w-full items-start gap-3 rounded-[22px] border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-3 py-3 text-left transition active:bg-[var(--app-surface-high-color)] ${
+        isLocked ? 'opacity-95' : ''
+      }`}
+      onClick={onOpen}
+      type="button"
+    >
+      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] text-[var(--app-text-color)]">
+        <UserRound className="h-4 w-4" />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
+          {row.workerName}
+        </p>
+        <p className="mt-0.5 truncate text-xs leading-5 text-[var(--app-hint-color)]">
+          {row.roleName || 'Pekerja'}
+        </p>
+      </div>
+
+      <div className="flex shrink-0 flex-col items-end gap-1 text-right">
+        <p className="text-sm font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
+          {formatCurrency(row.totalPay)}
+        </p>
+        <AppBadge tone={statusMeta.tone}>{statusMeta.label}</AppBadge>
+        {isLocked ? <AppBadge tone="warning">Terkunci</AppBadge> : null}
+      </div>
+    </button>
+  )
+}
+
+function AttendanceSheetStatCard({ label, value, className = '' }) {
+  return (
+    <div
+      className={`rounded-[20px] border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-3 py-3 ${className}`}
+    >
+      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--app-hint-color)]">
+        {label}
+      </p>
+      <p className="mt-1 text-sm font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
+        {value}
+      </p>
     </div>
   )
 }
 
-function AttendanceRowCard({ row, statusOptions, onStatusChange, onNotesChange }) {
-  const isLocked = Boolean(row.readOnly)
+function AttendanceWorkerSheet({
+  row,
+  onClose,
+  onRateChange,
+  onOvertimeFeeChange,
+  onStatusChange,
+  sheetDate,
+  selectedProjectName,
+}) {
+  if (!row) {
+    return null
+  }
+
+  const activeRate =
+    row.rateOptions.find((rate) => rate.id === row.selectedRateId) ?? row.rateOptions[0] ?? null
+  const hasRateOptions = row.rateOptions.length > 1
+  const statusMeta = getAttendanceStatusMeta(row.attendanceStatus)
+  const statusOptions = [
+    { value: 'full_day', label: 'Penuh', tone: 'success' },
+    { value: 'half_day', label: '½ Hari', tone: 'warning' },
+    { value: 'overtime', label: 'Lembur', tone: 'info' },
+    { value: 'absent', label: 'Absen', tone: 'danger' },
+  ]
 
   return (
-    <article className={`app-section-surface p-3 ${isLocked ? 'opacity-95' : ''}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
-            {row.workerName}
-          </p>
-          <p className="mt-1 text-xs text-[var(--app-hint-color)]">
-            {row.roleName || 'Pekerja'} • {row.projectName}
-          </p>
-          {row.hasRate ? (
-            <p className="mt-1 text-[11px] text-[var(--app-hint-color)]">
-              Upah dasar {formatCurrency(row.baseWage)}
+    <AppSheet
+      description={[sheetDate, selectedProjectName].filter(Boolean).join(' · ') || null}
+      onClose={onClose}
+      open={Boolean(row)}
+      title={row.workerName}
+    >
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-2">
+          <AttendanceSheetStatCard label="Status" value={statusMeta.label} />
+          <AttendanceSheetStatCard
+            label="Peran"
+            value={normalizeText(activeRate?.role_name ?? row.roleName, 'Pekerja')}
+          />
+          <AttendanceSheetStatCard
+            label="Nominal"
+            value={formatCurrency(activeRate?.wage_amount ?? row.baseWage)}
+          />
+          <AttendanceSheetStatCard
+            label="Total Upah"
+            value={formatCurrency(row.totalPay)}
+          />
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-[var(--app-text-color)]">
+              Status Kehadiran
             </p>
-          ) : (
-            <p className="mt-1 text-[11px] text-amber-700">
-              Rate upah belum diatur untuk worker ini.
-            </p>
-          )}
-          {isLocked ? (
-            <div className="mt-2">
-              <AppBadge tone="warning">Terkunci</AppBadge>
+
+            <AppButton
+              className="shrink-0"
+              disabled={row.readOnly}
+              onClick={() => onStatusChange(row.workerId, '')}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Kosongkan
+            </AppButton>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {statusOptions.map((statusOption) => {
+              const isActive = row.attendanceStatus === statusOption.value
+              const isAllowed =
+                row.allowedStatusValues.includes(statusOption.value) || isActive
+
+              return (
+                <AppButton
+                  key={statusOption.value}
+                  disabled={row.readOnly || !isAllowed}
+                  fullWidth
+                  onClick={() => onStatusChange(row.workerId, statusOption.value)}
+                  size="md"
+                  type="button"
+                  variant={isActive ? 'primary' : 'secondary'}
+                >
+                  {statusOption.label}
+                </AppButton>
+              )
+            })}
+          </div>
+        </div>
+
+        {row.attendanceStatus === 'overtime' ? (
+          <div className="space-y-2 rounded-[22px] border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-4 py-4">
+            <p className="text-sm font-semibold text-[var(--app-text-color)]">Fee Lembur</p>
+            <AppNominalInput
+              className="rounded-[18px]"
+              disabled={row.readOnly}
+              onValueChange={(nextValue) => onOvertimeFeeChange(row.workerId, nextValue)}
+              placeholder="0"
+              value={row.overtimeFee}
+            />
+          </div>
+        ) : null}
+
+        {hasRateOptions ? (
+          <details className="group rounded-[22px] border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)]">
+            <summary className="flex list-none items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
+                  Ubah Peran
+                </p>
+              </div>
+
+              <ChevronDown className="h-4 w-4 shrink-0 text-[var(--app-hint-color)] transition duration-200 group-open:rotate-180" />
+            </summary>
+
+            <div className="space-y-2 px-4 pb-4">
+              {row.rateOptions.map((rateOption) => {
+                const isActive = rateOption.id === row.selectedRateId
+
+                return (
+                  <button
+                    key={rateOption.id}
+                    className={`flex w-full items-start justify-between gap-3 rounded-[20px] border px-3 py-3 text-left transition ${
+                      isActive
+                        ? 'border-[var(--app-accent-color)] bg-[color-mix(in_srgb,var(--app-accent-color)_12%,white)]'
+                        : 'border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)]'
+                    }`}
+                    onClick={() => onRateChange(row.workerId, rateOption.id)}
+                    type="button"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
+                        {normalizeText(rateOption.role_name, 'Peran')}
+                      </p>
+                      {rateOption.is_default ? (
+                        <p className="mt-0.5 text-xs leading-5 text-[var(--app-hint-color)]">
+                          Default
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <p className="shrink-0 text-sm font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
+                      {formatCurrency(rateOption.wage_amount)}
+                    </p>
+                  </button>
+                )
+              })}
             </div>
-          ) : null}
-        </div>
-
-        <div className="shrink-0 text-right">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--app-hint-color)]">
-            Upah
-          </p>
-          <p className="mt-1 text-sm font-semibold text-[var(--app-text-color)]">
-            {formatCurrency(row.totalPay)}
-          </p>
-        </div>
+          </details>
+        ) : null}
       </div>
+    </AppSheet>
+  )
+}
 
-      <div className="mt-3 grid gap-2">
-        <AppToggleGroup
-          buttonSize="sm"
-          description="Status absensi memakai pilihan statis agar lebih cepat diisi."
-          label="Status Kehadiran"
-          disabled={isLocked}
-          onChange={(nextValue) => onStatusChange(row.workerId, nextValue)}
-          options={[
-            { value: '', label: 'Belum diisi' },
-            ...statusOptions,
-          ]}
-          value={row.attendanceStatus}
+function AttendanceKpiSheet({
+  open,
+  onClose,
+  summary,
+  rowCount,
+  sheetDate,
+  selectedProjectName,
+}) {
+  return (
+    <AppSheet
+      description={[sheetDate, selectedProjectName].filter(Boolean).join(' · ') || null}
+      onClose={onClose}
+      open={open}
+      title="KPI Absensi"
+    >
+      <div className="grid grid-cols-2 gap-2">
+        <AttendanceSheetStatCard
+          className="col-span-2 px-4 py-4"
+          label="Total Upah"
+          value={formatCurrency(summary.totalWage)}
         />
-
-        <input
-          className="w-full rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-3 py-3 text-sm text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200 disabled:cursor-not-allowed disabled:bg-[var(--app-surface-low-color)] disabled:text-[var(--app-hint-color)]"
-          disabled={isLocked}
-          onChange={(event) => onNotesChange(row.workerId, event.target.value)}
-          placeholder="Catatan singkat, opsional"
-          value={row.notes}
-        />
+        <AttendanceSheetStatCard label="Terisi" value={`${summary.filledCount}/${rowCount}`} />
+        <AttendanceSheetStatCard label="Penuh" value={String(summary.counts.full_day)} />
+        <AttendanceSheetStatCard label="½ Hari" value={String(summary.counts.half_day)} />
+        <AttendanceSheetStatCard label="Absen" value={String(summary.counts.absent)} />
       </div>
-    </article>
+    </AppSheet>
+  )
+}
+
+function AttendanceSettingsSheet({
+  open,
+  onClose,
+  onFullDayAll,
+  onHalfDayAll,
+  onOvertimeAll,
+  onAbsentAll,
+  onResetAll,
+  sheetDate,
+  selectedProjectName,
+}) {
+  return (
+    <AppSheet
+      description={[sheetDate, selectedProjectName].filter(Boolean).join(' · ') || null}
+      onClose={onClose}
+      open={open}
+      title="Pengaturan Semua"
+    >
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          className="rounded-[20px] border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100"
+          onClick={onFullDayAll}
+          type="button"
+        >
+          Full Day Semua
+        </button>
+        <button
+          className="rounded-[20px] border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
+          onClick={onHalfDayAll}
+          type="button"
+        >
+          Half Day Semua
+        </button>
+        <button
+          className="rounded-[20px] border border-sky-200 bg-sky-50 px-3 py-3 text-sm font-semibold text-sky-800 transition hover:bg-sky-100"
+          onClick={onOvertimeAll}
+          type="button"
+        >
+          Lembur Semua
+        </button>
+        <button
+          className="rounded-[20px] border border-rose-200 bg-rose-50 px-3 py-3 text-sm font-semibold text-rose-800 transition hover:bg-rose-100"
+          onClick={onAbsentAll}
+          type="button"
+        >
+          Tidak Hadir Semua
+        </button>
+        <button
+          className="col-span-2 rounded-[20px] border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-3 py-3 text-sm font-semibold text-[var(--app-hint-color)] transition hover:bg-[var(--app-surface-high-color)]"
+          onClick={onResetAll}
+          type="button"
+        >
+          Reset Semua
+        </button>
+      </div>
+    </AppSheet>
   )
 }
 
@@ -177,12 +531,6 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
   const isMasterLoading = useMasterStore((state) => state.isLoading)
   const masterError = useMasterStore((state) => state.error)
   const fetchMasters = useMasterStore((state) => state.fetchMasters)
-  const attendanceStatusOptions = useAttendanceStore(
-    (state) => state.attendanceStatusOptions
-  )
-  const attendanceStatusMultiplier = useAttendanceStore(
-    (state) => state.attendanceStatusMultiplier
-  )
   const sheetAttendances = useAttendanceStore((state) => state.sheetAttendances)
   const isSheetLoading = useAttendanceStore((state) => state.isSheetLoading)
   const isSheetSaving = useAttendanceStore((state) => state.isSheetSaving)
@@ -190,6 +538,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
   const clearError = useAttendanceStore((state) => state.clearError)
   const fetchAttendanceSheet = useAttendanceStore((state) => state.fetchAttendanceSheet)
   const saveAttendanceSheet = useAttendanceStore((state) => state.saveAttendanceSheet)
+  const [dateAttendances, setDateAttendances] = useState([])
   const [selectedDate, setSelectedDate] = useState(() => getTodayDateString())
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
@@ -198,6 +547,9 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
     values: {},
   })
   const [successMessage, setSuccessMessage] = useState(null)
+  const [activeWorkerSheetWorkerId, setActiveWorkerSheetWorkerId] = useState(null)
+  const [isKpiSheetOpen, setIsKpiSheetOpen] = useState(false)
+  const [isSettingsSheetOpen, setIsSettingsSheetOpen] = useState(false)
   const deferredSearchTerm = useDeferredValue(searchTerm)
   const telegramUserId = user?.id ?? authUser?.telegram_user_id ?? null
 
@@ -214,9 +566,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
       activeProjects.map((project) => ({
         value: project.id,
         label: project.name,
-        description: project.project_type
-          ? `Tipe: ${project.project_type}`
-          : 'Master proyek aktif',
+        description: '',
         searchText: [project.name, project.project_type, project.status].join(' '),
       })),
     [activeProjects]
@@ -284,9 +634,68 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
     })
   }, [currentTeamId, effectiveSelectedProjectId, fetchAttendanceSheet, selectedDate])
 
+  useEffect(() => {
+    if (!currentTeamId || !selectedDate) {
+      return
+    }
+
+    let isActive = true
+
+    fetchAttendanceHistoryFromApi({
+      teamId: currentTeamId,
+      date: selectedDate,
+    })
+      .then((records) => {
+        if (!isActive) {
+          return
+        }
+
+        setDateAttendances(records)
+      })
+      .catch((fetchError) => {
+        if (!isActive) {
+          return
+        }
+
+        console.error('Gagal memuat histori absensi harian:', fetchError)
+        setDateAttendances([])
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [currentTeamId, selectedDate])
+
   const rowDrafts = useMemo(() => {
     return rowDraftState.key === currentSheetKey ? rowDraftState.values : {}
   }, [currentSheetKey, rowDraftState.key, rowDraftState.values])
+
+  const dayUsageByWorkerId = useMemo(() => {
+    return dateAttendances.reduce((usageMap, record) => {
+      const workerId = normalizeText(record?.worker_id, null)
+
+      if (!workerId || record?.deleted_at) {
+        return usageMap
+      }
+
+      usageMap.set(
+        workerId,
+        (usageMap.get(workerId) ?? 0) + getAttendanceDayWeight(record?.attendance_status)
+      )
+
+      return usageMap
+    }, new Map())
+  }, [dateAttendances])
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setActiveWorkerSheetWorkerId(null)
+      setIsKpiSheetOpen(false)
+      setIsSettingsSheetOpen(false)
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [currentSheetKey])
 
   const rows = useMemo(() => {
     const existingByWorkerId = new Map(
@@ -304,11 +713,39 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
     return mergedWorkers.map((worker) => {
       const existingRecord = existingByWorkerId.get(worker.id) ?? null
       const draft = rowDrafts[worker.id] ?? null
+      const rateOptions = getWorkerProjectRateOptions(
+        worker.id,
+        effectiveSelectedProjectId,
+        workerWageRates
+      )
       const matchedRate = getWorkerRate(worker.id, effectiveSelectedProjectId, workerWageRates)
-      const baseWage = Number(matchedRate?.wage_amount ?? 0)
+      const selectedRate = resolveWorkerProjectRate({
+        draftRateId: draft?.selectedRateId ?? null,
+        rateOptions,
+        fallbackRate: matchedRate,
+      })
+      const selectedRateId = selectedRate?.id ?? null
+      const baseWage = Number(selectedRate?.wage_amount ?? matchedRate?.wage_amount ?? 0)
       const attendanceStatus =
         draft?.attendanceStatus ?? existingRecord?.attendance_status ?? ''
-      const multiplier = attendanceStatusMultiplier(attendanceStatus)
+      const draftOvertimeFee = draft?.overtimeFee ?? null
+      const existingAttendanceStatus = normalizeText(existingRecord?.attendance_status, '')
+      const existingOvertimeFee = existingRecord?.overtime_fee ?? null
+      const dayUsage = dayUsageByWorkerId.get(worker.id) ?? 0
+      const currentRecordWeight = getAttendanceDayWeight(existingRecord?.attendance_status)
+      const allowedStatusValues = getAllowedAttendanceStatusValues(dayUsage, currentRecordWeight)
+      const overtimeFee = resolveAttendanceRowOvertimeFee({
+        attendanceStatus,
+        baseWage,
+        draftOvertimeFee,
+        existingAttendanceStatus,
+        existingOvertimeFee,
+        existingTotalPay: existingRecord?.total_pay ?? 0,
+      })
+      const hasDraftChanges =
+        draft?.attendanceStatus != null ||
+        draft?.overtimeFee != null ||
+        draft?.selectedRateId != null
 
       return {
         sourceId: existingRecord?.id ?? null,
@@ -319,16 +756,29 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
           selectedProject?.name,
           existingRecord?.project_name ?? 'Proyek'
         ),
-        roleName: normalizeText(worker.default_role_name, ''),
+        roleName: normalizeText(selectedRate?.role_name ?? worker.default_role_name, 'Pekerja'),
         baseWage,
+        selectedRateId,
+        selectedRateName: normalizeText(selectedRate?.role_name, ''),
+        selectedRateWage: baseWage,
+        rateOptions,
         attendanceStatus,
-        notes: draft?.notes ?? existingRecord?.notes ?? '',
-        totalPay:
-          draft?.attendanceStatus != null || draft?.notes != null
-            ? Math.round(baseWage * multiplier)
-            : existingRecord?.id != null
-              ? Number(existingRecord.total_pay ?? 0)
-              : Math.round(baseWage * multiplier),
+        overtimeFee,
+        notes: existingRecord?.notes ?? '',
+        allowedStatusValues,
+        totalPay: hasDraftChanges
+          ? calculateAttendanceTotalPay({
+              attendanceStatus,
+              baseWage,
+              overtimeFee,
+            })
+          : existingRecord?.id != null
+            ? Number(existingRecord.total_pay ?? 0)
+            : calculateAttendanceTotalPay({
+                attendanceStatus,
+                baseWage,
+                overtimeFee,
+              }),
         hasRate: baseWage > 0,
         billingStatus: normalizeText(existingRecord?.billing_status, 'unbilled'),
         salaryBillId: existingRecord?.salary_bill_id ?? null,
@@ -338,9 +788,9 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
       }
     })
   }, [
-    attendanceStatusMultiplier,
     candidateWorkers,
     effectiveSelectedProjectId,
+    dayUsageByWorkerId,
     rowDrafts,
     selectedProject,
     sheetAttendances,
@@ -364,10 +814,36 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
 
   const summary = useMemo(() => buildRowSummary(rows), [rows])
 
+  const activeWorkerSheetRow = useMemo(
+    () => rows.find((row) => row.workerId === activeWorkerSheetWorkerId) ?? null,
+    [activeWorkerSheetWorkerId, rows]
+  )
+
+  const handleOpenWorkerSheet = (workerId) => {
+    setIsKpiSheetOpen(false)
+    setIsSettingsSheetOpen(false)
+    setActiveWorkerSheetWorkerId(workerId)
+  }
+
+  const handleOpenKpiSheet = () => {
+    setActiveWorkerSheetWorkerId(null)
+    setIsSettingsSheetOpen(false)
+    setIsKpiSheetOpen(true)
+  }
+
+  const handleOpenSettingsSheet = () => {
+    setActiveWorkerSheetWorkerId(null)
+    setIsKpiSheetOpen(false)
+    setIsSettingsSheetOpen(true)
+  }
+
   const handleRowStatusChange = (workerId, nextStatus) => {
     const targetRow = rows.find((row) => row.workerId === workerId)
 
-    if (targetRow?.readOnly) {
+    if (
+      targetRow?.readOnly ||
+      (nextStatus && !targetRow?.allowedStatusValues?.includes(nextStatus) && targetRow?.attendanceStatus !== nextStatus)
+    ) {
       return
     }
 
@@ -392,7 +868,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
     }
   }
 
-  const handleRowNotesChange = (workerId, nextNotes) => {
+  const handleRowRateChange = (workerId, nextRateId) => {
     const targetRow = rows.find((row) => row.workerId === workerId)
 
     if (targetRow?.readOnly) {
@@ -406,13 +882,45 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
         [workerId]: {
           ...((currentState.key === currentSheetKey ? currentState.values : {})[workerId] ??
             {}),
-          notes: nextNotes,
+          selectedRateId: normalizeText(nextRateId, null),
         },
       },
     }))
 
     if (error) {
       clearError()
+    }
+
+    if (successMessage) {
+      setSuccessMessage(null)
+    }
+  }
+
+  const handleRowOvertimeFeeChange = (workerId, nextOvertimeFee) => {
+    const targetRow = rows.find((row) => row.workerId === workerId)
+
+    if (targetRow?.readOnly) {
+      return
+    }
+
+    setRowDraftState((currentState) => ({
+      key: currentSheetKey,
+      values: {
+        ...(currentState.key === currentSheetKey ? currentState.values : {}),
+        [workerId]: {
+          ...((currentState.key === currentSheetKey ? currentState.values : {})[workerId] ??
+            {}),
+          overtimeFee: nextOvertimeFee,
+        },
+      },
+    }))
+
+    if (error) {
+      clearError()
+    }
+
+    if (successMessage) {
+      setSuccessMessage(null)
     }
   }
 
@@ -423,10 +931,44 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
         return accumulator
       }
 
+      if (
+        nextStatus &&
+        !row.allowedStatusValues.includes(nextStatus) &&
+        row.attendanceStatus !== nextStatus
+      ) {
+        accumulator[row.workerId] = rowDrafts[row.workerId] ?? {}
+        return accumulator
+      }
+
       accumulator[row.workerId] = {
         ...(rowDrafts[row.workerId] ?? {}),
         attendanceStatus: nextStatus,
       }
+      return accumulator
+    }, {})
+
+    setRowDraftState({
+      key: currentSheetKey,
+      values: nextValues,
+    })
+
+    if (error) {
+      clearError()
+    }
+
+    if (successMessage) {
+      setSuccessMessage(null)
+    }
+  }
+
+  const handleResetSheet = () => {
+    const nextValues = rows.reduce((accumulator, row) => {
+      if (row.readOnly) {
+        accumulator[row.workerId] = rowDrafts[row.workerId] ?? {}
+        return accumulator
+      }
+
+      accumulator[row.workerId] = {}
       return accumulator
     }, {})
 
@@ -479,10 +1021,28 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
           return accumulator
         }
 
+        const previousOvertimeFee =
+          normalizeText(previousRow.attendance_status, '') === 'overtime'
+            ? String(
+                deriveAttendanceOvertimeFee({
+                  attendanceStatus: previousRow.attendance_status,
+                  baseWage: row.baseWage,
+                  totalPay: previousRow.total_pay ?? 0,
+                  overtimeFee: previousRow.overtime_fee ?? null,
+                })
+              )
+            : ''
+
+        const previousStatus =
+          row.allowedStatusValues.includes(previousRow.attendance_status) ||
+          row.attendanceStatus === previousRow.attendance_status
+            ? previousRow.attendance_status
+            : row.attendanceStatus
+
         accumulator[row.workerId] = {
           ...(rowDrafts[row.workerId] ?? {}),
-          attendanceStatus: previousRow.attendance_status,
-          notes: previousRow.notes ?? '',
+          attendanceStatus: previousStatus,
+          overtimeFee: previousOvertimeFee,
         }
         return accumulator
       }, {})
@@ -519,13 +1079,14 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
         rows: rows
           .filter((row) => !row.readOnly)
           .map((row) => ({
-          sourceId: row.sourceId,
-          worker_id: row.workerId,
-          worker_name: row.workerName,
-          project_name: row.projectName,
-          attendance_status: row.attendanceStatus,
-          total_pay: row.totalPay,
-          notes: row.notes,
+            sourceId: row.sourceId,
+            worker_id: row.workerId,
+            worker_name: row.workerName,
+            project_name: row.projectName,
+            attendance_status: row.attendanceStatus,
+            overtime_fee: row.attendanceStatus === 'overtime' ? Number(row.overtimeFee ?? 0) : null,
+            total_pay: row.totalPay,
+            notes: row.notes,
           })),
       })
 
@@ -541,7 +1102,8 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
 
         accumulator[row.workerId] = {
           attendanceStatus: savedRow.attendance_status,
-          notes: savedRow.notes ?? '',
+          overtimeFee: savedRow.overtime_fee ?? null,
+          selectedRateId: rowDrafts[row.workerId]?.selectedRateId ?? null,
         }
         return accumulator
       }, {})
@@ -570,36 +1132,15 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
   return (
     <form id={formId ?? undefined} className="space-y-4" onSubmit={handleSubmit}>
       <fieldset className="space-y-4" disabled={isSheetSaving}>
-        <section className="app-page-surface p-4">
-          <div className="flex items-start justify-between gap-3">
+        <section className="app-page-surface p-3">
+          <div className="flex items-start gap-3">
             <div className="min-w-0">
               <p className="app-kicker">Sheet Harian</p>
             </div>
-
-            <button
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] text-[var(--app-text-color)] transition hover:bg-white"
-              onClick={() => {
-                if (!currentTeamId || !effectiveSelectedProjectId) {
-                  return
-                }
-
-                void fetchAttendanceSheet({
-                  teamId: currentTeamId,
-                  date: selectedDate,
-                  projectId: effectiveSelectedProjectId,
-                }).catch((fetchError) => {
-                  console.error('Gagal refresh sheet absensi:', fetchError)
-                })
-              }}
-              type="button"
-              aria-label="Refresh absensi"
-            >
-              <RefreshCcw className={`h-4 w-4 ${isSheetLoading ? 'animate-spin' : ''}`} />
-            </button>
           </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className="block space-y-2">
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <label className="block min-w-0 space-y-2">
               <span>Tanggal</span>
               <input
                 className="w-full rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-4 py-3 text-sm text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
@@ -613,6 +1154,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
             <MasterPickerField
               disabled={isMasterLoading || activeProjects.length === 0}
               emptyMessage="Data proyek belum tersedia."
+              compact
               label="Proyek"
               name="projectId"
               onChange={(nextValue) => setSelectedProjectId(nextValue)}
@@ -624,8 +1166,8 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
             />
           </div>
 
-          <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <label className="relative block">
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <label className="relative block min-w-0">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-hint-color)]" />
               <input
                 className="w-full rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] py-3 pl-10 pr-4 text-sm text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
@@ -642,7 +1184,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
             </label>
 
             <button
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-4 py-3 text-sm font-semibold text-[var(--app-text-color)] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-1.5 rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-3 py-2.5 text-xs font-semibold text-[var(--app-text-color)] transition hover:bg-[var(--app-surface-high-color)] disabled:cursor-not-allowed disabled:opacity-60"
               disabled={!effectiveSelectedProjectId || isSheetLoading}
               onClick={handleCopyPreviousDay}
               type="button"
@@ -653,73 +1195,63 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
           </div>
         </section>
 
-        <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <AttendanceSummaryChip
-            label="Worker Terisi"
-            toneClassName="border-emerald-200 bg-emerald-50 text-emerald-800"
-            value={`${summary.filledCount}/${rows.length}`}
-          />
-          <AttendanceSummaryChip
-            label="Full Day"
-            toneClassName="border-sky-200 bg-sky-50 text-sky-800"
-            value={String(summary.counts.full_day)}
-          />
-          <AttendanceSummaryChip
-            label="Half Day"
-            toneClassName="border-amber-200 bg-amber-50 text-amber-800"
-            value={String(summary.counts.half_day)}
-          />
-          <AttendanceSummaryChip
-            label="Total Upah"
-            toneClassName="border-slate-200 bg-slate-50 text-slate-900"
-            value={formatCurrency(summary.totalWage)}
-          />
+        <section className="grid grid-cols-[minmax(0,3fr)_minmax(0,1fr)] gap-2">
+          <button
+            className="flex min-w-0 items-center justify-between gap-3 rounded-[24px] border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-4 py-3 text-left transition hover:bg-[var(--app-surface-high-color)]"
+            onClick={handleOpenKpiSheet}
+            type="button"
+          >
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--app-hint-color)]">
+                Total Upah
+              </p>
+              <p className="mt-1 truncate text-lg font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">
+                {formatCurrency(summary.totalWage)}
+              </p>
+            </div>
+          </button>
+
+          <AppButton
+            aria-label="Buka pengaturan massal"
+            className="h-full w-full rounded-[24px]"
+            iconOnly
+            onClick={handleOpenSettingsSheet}
+            variant="secondary"
+          >
+            <Settings2 className="h-4 w-4" />
+          </AppButton>
         </section>
 
-        <section className="app-page-surface p-3">
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
-              onClick={() => applyStatusToAll('full_day')}
-              type="button"
-            >
-              Full Day Semua
-            </button>
-            <button
-              className="rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
-              onClick={() => applyStatusToAll('half_day')}
-              type="button"
-            >
-              Half Day Semua
-            </button>
-            <button
-              className="rounded-full border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
-              onClick={() => applyStatusToAll('overtime')}
-              type="button"
-            >
-              Lembur Semua
-            </button>
-            <button
-              className="rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-3 py-2 text-xs font-semibold text-[var(--app-hint-color)] transition hover:bg-white"
-              onClick={() =>
-                setRowDraftState({
-                  key: currentSheetKey,
-                  values: rows.reduce((accumulator, row) => {
-                    accumulator[row.workerId] = {
-                      ...(rowDrafts[row.workerId] ?? {}),
-                      attendanceStatus: '',
-                      notes: '',
-                    }
-                    return accumulator
-                  }, {}),
-                })
-              }
-              type="button"
-            >
-              Reset Sheet
-            </button>
-          </div>
-        </section>
+        <AttendanceWorkerSheet
+          row={activeWorkerSheetRow}
+          onClose={() => setActiveWorkerSheetWorkerId(null)}
+          onOvertimeFeeChange={handleRowOvertimeFeeChange}
+          onRateChange={handleRowRateChange}
+          onStatusChange={handleRowStatusChange}
+          selectedProjectName={selectedProject?.name ?? ''}
+          sheetDate={selectedDate}
+        />
+
+        <AttendanceKpiSheet
+          open={isKpiSheetOpen}
+          onClose={() => setIsKpiSheetOpen(false)}
+          rowCount={rows.length}
+          selectedProjectName={selectedProject?.name ?? ''}
+          sheetDate={selectedDate}
+          summary={summary}
+        />
+
+        <AttendanceSettingsSheet
+          open={isSettingsSheetOpen}
+          onAbsentAll={() => applyStatusToAll('absent')}
+          onClose={() => setIsSettingsSheetOpen(false)}
+          onFullDayAll={() => applyStatusToAll('full_day')}
+          onHalfDayAll={() => applyStatusToAll('half_day')}
+          onOvertimeAll={() => applyStatusToAll('overtime')}
+          onResetAll={handleResetSheet}
+          selectedProjectName={selectedProject?.name ?? ''}
+          sheetDate={selectedDate}
+        />
 
         {error ? (
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
@@ -759,12 +1291,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
           loadMoreStep={16}
           loadMoreClassName="border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)]"
           renderItem={(row) => (
-            <AttendanceRowCard
-              row={row}
-              statusOptions={attendanceStatusOptions}
-              onNotesChange={handleRowNotesChange}
-              onStatusChange={handleRowStatusChange}
-            />
+            <AttendanceRowCard row={row} onOpen={() => handleOpenWorkerSheet(row.workerId)} />
           )}
         />
 
@@ -774,7 +1301,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
             disabled={isSheetSaving || !effectiveSelectedProjectId}
             type="submit"
           >
-            {isSheetSaving ? 'Menyimpan Catatan...' : 'Simpan Catatan Absensi'}
+            {isSheetSaving ? 'Menyimpan Absensi...' : 'Simpan Absensi'}
           </button>
         )}
       </fieldset>

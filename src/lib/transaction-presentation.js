@@ -1,4 +1,5 @@
 import {
+  formatAppDateLabel,
   formatAppDateTime,
   formatAppSyncLabel,
   getAppSectionLabel,
@@ -24,6 +25,47 @@ function toNumber(value) {
   return Number.isFinite(parsedValue) ? parsedValue : 0
 }
 
+function readTimestampField(transaction, fieldName) {
+  if (!transaction || !fieldName) {
+    return null
+  }
+
+  const camelField = fieldName.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())
+
+  return transaction?.[fieldName] ?? transaction?.[camelField] ?? null
+}
+
+export function getTransactionTimestamp(transaction, preferredFields = []) {
+  const fallbackFields = [
+    'deleted_at',
+    'created_at',
+    'updated_at',
+    'payment_date',
+    'expense_date',
+    'income_date',
+    'transaction_date',
+  ]
+  const candidateFields = [...preferredFields, ...fallbackFields]
+  const seenFields = new Set()
+
+  for (const fieldName of candidateFields) {
+    if (seenFields.has(fieldName)) {
+      continue
+    }
+
+    seenFields.add(fieldName)
+
+    const value = readTimestampField(transaction, fieldName)
+    const normalizedValue = normalizeText(value, '')
+
+    if (normalizedValue) {
+      return normalizedValue
+    }
+  }
+
+  return ''
+}
+
 function formatCompactIdentifier(value) {
   const normalizedValue = normalizeText(value)
 
@@ -36,6 +78,44 @@ function formatCompactIdentifier(value) {
   }
 
   return `${normalizedValue.slice(0, 8)}…${normalizedValue.slice(-4)}`
+}
+
+function formatCreatorDisplayNameFromMetadata(metadata = null, fallbackTelegramUserId = null) {
+  const firstName = normalizeText(metadata?.first_name ?? metadata?.firstName, '')
+  const lastName = normalizeText(metadata?.last_name ?? metadata?.lastName, '')
+  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim()
+
+  if (fullName) {
+    return fullName
+  }
+
+  const explicitName = normalizeText(
+    metadata?.full_name ??
+      metadata?.fullName ??
+      metadata?.display_name ??
+      metadata?.displayName ??
+      metadata?.name ??
+      '',
+    ''
+  )
+
+  if (explicitName) {
+    return explicitName
+  }
+
+  const username = normalizeText(metadata?.username ?? metadata?.user_name ?? '', '')
+
+  if (username) {
+    return username.startsWith('@') ? username : `@${username}`
+  }
+
+  const normalizedFallbackTelegramUserId = normalizeText(fallbackTelegramUserId, '')
+
+  if (normalizedFallbackTelegramUserId) {
+    return `User ${formatCompactIdentifier(normalizedFallbackTelegramUserId)}`
+  }
+
+  return 'Sistem'
 }
 
 function formatBillStatusLabel(status) {
@@ -61,13 +141,24 @@ function formatBillStatusLabel(status) {
 }
 
 function normalizeBillStatus(transaction) {
-  return normalizeText(
-    transaction?.status ??
-      transaction?.bill?.status ??
-      transaction?.salaryBill?.status ??
-      transaction?.bill_status,
-    ''
-  ).toLowerCase()
+  const childBillStatus =
+    transaction?.bill?.status ??
+    transaction?.salaryBill?.status ??
+    transaction?.bill_status ??
+    transaction?.salary_bill?.status ??
+    null
+
+  return normalizeText(childBillStatus ?? transaction?.status, '').toLowerCase()
+}
+
+export function isPaidBillTransaction(transaction) {
+  const sourceType = normalizeText(transaction?.sourceType)
+
+  if (sourceType !== 'bill') {
+    return false
+  }
+
+  return normalizeBillStatus(transaction) === 'paid'
 }
 
 function getBillType(transaction) {
@@ -76,13 +167,19 @@ function getBillType(transaction) {
       transaction?.bill?.billType ??
       transaction?.bill_type ??
       transaction?.salaryBill?.billType ??
-      transaction?.salaryBill?.bill_type,
+      transaction?.salaryBill?.bill_type ??
+      transaction?.bill_type ??
+      transaction?.salary_bill?.bill_type,
     ''
   ).toLowerCase()
 }
 
 function isPayrollBill(transaction) {
   return getBillType(transaction) === 'gaji'
+}
+
+export function isPayrollBillTransaction(transaction) {
+  return normalizeText(transaction?.sourceType) === 'bill' && isPayrollBill(transaction)
 }
 
 function formatLoanSettlementLabel(status) {
@@ -129,6 +226,12 @@ export function formatTransactionDateTime(value) {
   return formatAppDateTime(value)
 }
 
+export function formatTransactionTimestamp(transaction, preferredFields = []) {
+  const timestamp = getTransactionTimestamp(transaction, preferredFields)
+
+  return timestamp ? formatAppDateTime(timestamp) : 'tanggal belum tersedia'
+}
+
 export function getTodayKey() {
   return getAppTodayKey()
 }
@@ -147,7 +250,7 @@ export function getTransactionTypeLabel(transaction) {
   }
 
   if (transaction?.sourceType === 'loan-disbursement') {
-    return 'Dana Masuk / Pinjaman'
+    return 'Pinjaman'
   }
 
   if (transaction?.sourceType === 'expense') {
@@ -166,11 +269,11 @@ export function getTransactionTypeLabel(transaction) {
   }
 
   if (transaction?.sourceType === 'loan') {
-    return 'Dana Masuk / Pinjaman'
+    return 'Pinjaman'
   }
 
   if (transaction?.sourceType === 'bill') {
-    return isPayrollBill(transaction) ? 'Tagihan Upah' : 'Tagihan'
+    return isPayrollBill(transaction) ? 'Gaji/Upah' : 'Tagihan'
   }
 
   if (transaction?.sourceType === 'attendance-record') {
@@ -208,7 +311,7 @@ export function getTransactionSourceLabel(transaction) {
       isPayrollBill(transaction)
         ? transaction?.party_label ?? transaction?.worker_name_snapshot ?? transaction?.project_name
         : transaction?.project_name ?? transaction?.party_label,
-      isPayrollBill(transaction) ? 'Tagihan Upah' : 'Tagihan'
+      isPayrollBill(transaction) ? 'Gaji/Upah' : 'Tagihan'
     )
   }
 
@@ -226,7 +329,366 @@ export function getTransactionSourceLabel(transaction) {
   return normalizeText(transaction?.party_label ?? transaction?.project_name, 'Pembayaran')
 }
 
+export function getTransactionContextLabel(transaction) {
+  if (!transaction) {
+    return ''
+  }
+
+  const sourceType = normalizeText(transaction?.sourceType)
+
+  if (sourceType === 'project-income') {
+    return normalizeText(transaction?.project_name ?? transaction?.project_name_snapshot, 'Proyek')
+  }
+
+  if (sourceType === 'loan-disbursement' || sourceType === 'loan-payment') {
+    return normalizeText(
+      transaction?.party_label ??
+        transaction?.party_name ??
+        transaction?.creditor_name ??
+        transaction?.creditor_name_snapshot,
+      'Kreditor'
+    )
+  }
+
+  if (sourceType === 'expense') {
+    return normalizeText(
+      transaction?.supplier_name ??
+        transaction?.supplier_name_snapshot ??
+        transaction?.project_name ??
+        transaction?.project_name_snapshot,
+      'Supplier'
+    )
+  }
+
+  if (sourceType === 'bill' || sourceType === 'attendance-record') {
+    return normalizeText(
+      transaction?.worker_name ??
+        transaction?.worker_name_snapshot ??
+        transaction?.party_label ??
+        transaction?.project_name ??
+        transaction?.project_name_snapshot,
+      'Pekerja'
+    )
+  }
+
+  return normalizeText(
+    transaction?.worker_name ??
+      transaction?.worker_name_snapshot ??
+      transaction?.supplier_name ??
+      transaction?.supplier_name_snapshot ??
+      transaction?.party_label ??
+      transaction?.party_name ??
+      transaction?.project_name ??
+      transaction?.project_name_snapshot,
+    ''
+  )
+}
+
+function getBillSummaryType(bill) {
+  return normalizeText(bill?.billType ?? bill?.bill_type, '').toLowerCase()
+}
+
+function getBillSummaryWorkerName(bill) {
+  return normalizeText(
+    bill?.workerName ??
+      bill?.worker_name ??
+      bill?.worker_name_snapshot ??
+      bill?.supplierName ??
+      bill?.description ??
+      '',
+    'Pekerja'
+  )
+}
+
+function getBillSummaryGroupKey(bill) {
+  return normalizeText(
+    bill?.workerId ??
+      bill?.worker_id ??
+      bill?.workerName ??
+      bill?.worker_name ??
+      bill?.worker_name_snapshot ??
+      bill?.supplierName ??
+      '',
+    ''
+  ).toLowerCase()
+}
+
+export function isPayrollBillSummary(bill) {
+  return getBillSummaryType(bill) === 'gaji'
+}
+
+export function getBillSummaryTitle(bill) {
+  return normalizeText(
+    bill?.description ?? bill?.billTitle ?? bill?.title ?? bill?.worker_name_snapshot ?? '',
+    'Tagihan'
+  )
+}
+
+export function getBillSummarySubtitle(bill) {
+  const label = normalizeText(
+    bill?.projectName ??
+      bill?.project_name ??
+      bill?.project_name_snapshot ??
+      '',
+    ''
+  )
+
+  if (label) {
+    return label
+  }
+
+  const dateLabel = formatAppDateLabel(bill?.dueDate ?? bill?.due_date ?? bill?.created_at ?? '')
+
+  return dateLabel || 'Tanggal belum tersedia'
+}
+
+export function getBillSummaryAmount(bill) {
+  return toNumber(bill?.remainingAmount ?? bill?.remaining_amount ?? bill?.amount ?? 0)
+}
+
+export function getBillSummaryWorkerLabel(bill) {
+  return getBillSummaryWorkerName(bill)
+}
+
+function getBillTotalAmount(bill) {
+  return toNumber(bill?.amount ?? bill?.total_amount ?? bill?.totalAmount ?? 0)
+}
+
+function getBillPaymentRows(bill) {
+  return Array.isArray(bill?.payments) ? bill.payments : []
+}
+
+function getBillPaidAmount(bill) {
+  const explicitPaidAmount = toNumber(bill?.paidAmount ?? bill?.paid_amount ?? bill?.paid)
+
+  if (explicitPaidAmount > 0) {
+    return explicitPaidAmount
+  }
+
+  const paymentRows = getBillPaymentRows(bill)
+
+  if (paymentRows.length > 0) {
+    return paymentRows.reduce((sum, payment) => sum + toNumber(payment?.amount), 0)
+  }
+
+  return Math.max(getBillTotalAmount(bill) - getBillSummaryAmount(bill), 0)
+}
+
+function getPayrollGroupUnbilledAmount(group) {
+  return toNumber(
+    group?.unbilledAmount ??
+      group?.unbilled_amount ??
+      group?.unbilledTotal ??
+      group?.unbilled_total ??
+      group?.unbilledPay ??
+      group?.unbilled_pay ??
+      0
+  )
+}
+
+function getBillPriorityTimestamp(value) {
+  const parsedValue = new Date(String(value ?? '')).getTime()
+
+  return Number.isFinite(parsedValue) ? parsedValue : Number.POSITIVE_INFINITY
+}
+
+function getPayrollBillTargetPriority(bill) {
+  const normalizedStatus = normalizeBillStatus(bill)
+
+  if (normalizedStatus === 'partial') {
+    return 0
+  }
+
+  if (normalizedStatus === 'unpaid') {
+    return 1
+  }
+
+  return 2
+}
+
+function hasOutstandingPayrollBill(bill) {
+  const normalizedStatus = normalizeBillStatus(bill)
+  const remainingAmount = getBillSummaryAmount(bill)
+
+  return normalizedStatus === 'partial' || normalizedStatus === 'unpaid' || remainingAmount > 0
+}
+
+export function getPayrollBillGroupPaymentTarget(group) {
+  const bills = Array.isArray(group?.bills) ? group.bills.filter(Boolean) : []
+  const candidateBills = bills.filter(hasOutstandingPayrollBill)
+
+  if (candidateBills.length === 0) {
+    return null
+  }
+
+  return candidateBills.slice().sort((left, right) => {
+    const priorityDiff =
+      getPayrollBillTargetPriority(left) - getPayrollBillTargetPriority(right)
+
+    if (priorityDiff !== 0) {
+      return priorityDiff
+    }
+
+    const dueDateDiff =
+      getBillPriorityTimestamp(left?.dueDate ?? left?.due_date) -
+      getBillPriorityTimestamp(right?.dueDate ?? right?.due_date)
+
+    if (dueDateDiff !== 0) {
+      return dueDateDiff
+    }
+
+    const createdAtDiff =
+      getBillPriorityTimestamp(left?.created_at ?? left?.createdAt) -
+      getBillPriorityTimestamp(right?.created_at ?? right?.createdAt)
+
+    if (createdAtDiff !== 0) {
+      return createdAtDiff
+    }
+
+    return String(left?.id ?? '').localeCompare(String(right?.id ?? ''))
+  })[0]
+}
+
+export function getPayrollBillGroupSummary(group) {
+  const bills = Array.isArray(group?.bills) ? group.bills : []
+  const workerName = normalizeText(group?.workerName ?? getBillSummaryWorkerLabel(bills[0] ?? group), 'Pekerja')
+  const billedAmount = bills.reduce((sum, bill) => sum + getBillTotalAmount(bill), 0)
+  const unbilledAmount = getPayrollGroupUnbilledAmount(group)
+  const remainingAmount = bills.reduce((sum, bill) => sum + getBillSummaryAmount(bill), 0)
+  const paidAmount = bills.reduce((sum, bill) => sum + getBillPaidAmount(bill), 0)
+  const paymentTarget = getPayrollBillGroupPaymentTarget(group)
+
+  return {
+    workerName,
+    recapCount: bills.length,
+    totalAmount: billedAmount + unbilledAmount,
+    billedAmount,
+    unbilledAmount,
+    remainingAmount,
+    paidAmount,
+    hasOutstandingPayment: Boolean(paymentTarget),
+    paymentTargetBillId: paymentTarget?.id ?? null,
+    paymentTargetBillStatus: paymentTarget ? normalizeBillStatus(paymentTarget) : null,
+  }
+}
+
+export function getPayrollBillGroupHistoryRows(bills = [], deletedPayments = []) {
+  const normalizedBills = Array.isArray(bills) ? bills.filter(Boolean) : []
+  const billById = new Map(
+    normalizedBills.map((bill) => [String(bill?.id ?? ''), bill]).filter(([billId]) => Boolean(billId))
+  )
+  const historyRows = []
+
+  for (const bill of normalizedBills) {
+    const billLabel = getBillSummaryTitle(bill)
+    const workerLabel = getBillSummaryWorkerLabel(bill)
+
+    for (const payment of getBillPaymentRows(bill)) {
+      historyRows.push({
+        kind: 'active',
+        id: `${bill?.id ?? 'bill'}:${payment?.id ?? payment?.createdAt ?? historyRows.length}`,
+        billId: bill?.id ?? null,
+        bill,
+        billLabel,
+        workerLabel,
+        payment,
+        amount: toNumber(payment?.amount),
+        paymentDate: payment?.paymentDate ?? payment?.createdAt ?? payment?.updatedAt ?? null,
+        notes: normalizeText(payment?.notes, ''),
+        isDeleted: false,
+        canRestore: false,
+        canPermanentDelete: false,
+        sortKey: payment?.paymentDate ?? payment?.createdAt ?? payment?.updatedAt ?? bill?.dueDate ?? bill?.created_at ?? '',
+      })
+    }
+  }
+
+  for (const payment of Array.isArray(deletedPayments) ? deletedPayments.filter(Boolean) : []) {
+    const billId = String(payment?.billId ?? payment?.bill_id ?? '')
+    const bill = billById.get(billId) ?? null
+    const billLabel = getBillSummaryTitle(bill ?? payment)
+    const workerLabel = getBillSummaryWorkerLabel(bill ?? payment)
+
+    historyRows.push({
+      kind: 'deleted',
+      id: `${billId || 'deleted'}:${payment?.id ?? payment?.createdAt ?? historyRows.length}`,
+      billId: billId || null,
+      bill,
+      billLabel,
+      workerLabel,
+      payment,
+      amount: toNumber(payment?.amount),
+      paymentDate: payment?.paymentDate ?? payment?.createdAt ?? payment?.updatedAt ?? null,
+      notes: normalizeText(payment?.notes, ''),
+      isDeleted: true,
+      canRestore: Boolean(payment?.canRestore ?? payment?.deleted_at ?? payment?.deletedAt),
+      canPermanentDelete: Boolean(payment?.canPermanentDelete ?? payment?.deleted_at ?? payment?.deletedAt),
+      deletedAt: payment?.deleted_at ?? payment?.deletedAt ?? null,
+      sortKey: payment?.paymentDate ?? payment?.createdAt ?? payment?.updatedAt ?? '',
+    })
+  }
+
+  return historyRows.sort((left, right) => {
+    const rightTime = new Date(String(right.sortKey ?? '')).getTime()
+    const leftTime = new Date(String(left.sortKey ?? '')).getTime()
+
+    return rightTime - leftTime
+  })
+}
+
+export function groupBillsByWorker(bills = []) {
+  const groupedBills = []
+  const workerGroups = new Map()
+
+  for (const bill of bills) {
+    if (!isPayrollBillSummary(bill)) {
+      groupedBills.push({
+        kind: 'bill',
+        bill,
+      })
+      continue
+    }
+
+    const groupKey = getBillSummaryGroupKey(bill) || String(bill?.id ?? '')
+    const nextGroup =
+      workerGroups.get(groupKey) ?? {
+        kind: 'worker-group',
+        groupKey,
+        workerName: getBillSummaryWorkerLabel(bill),
+        bills: [],
+        amount: 0,
+        totalAmount: 0,
+        remainingAmount: 0,
+      }
+
+    nextGroup.bills.push(bill)
+    nextGroup.amount += getBillSummaryAmount(bill)
+    nextGroup.totalAmount += getBillTotalAmount(bill)
+    nextGroup.remainingAmount += getBillSummaryAmount(bill)
+
+    if (!workerGroups.has(groupKey)) {
+      workerGroups.set(groupKey, nextGroup)
+      groupedBills.push(nextGroup)
+    }
+  }
+
+  return groupedBills
+}
+
 export function getTransactionCreatorLabel(transaction) {
+  const displayName = normalizeText(
+    transaction?.creator_display_name ?? 
+      transaction?.creatorDisplayName ??
+      transaction?.creator_name ??
+      transaction?.creatorName ??
+      '',
+    ''
+  )
+
+  if (displayName) {
+    return displayName
+  }
+
   const creatorId = normalizeText(
     transaction?.created_by_user_id ??
       transaction?.createdByUserId ??
@@ -241,7 +703,7 @@ export function getTransactionCreatorLabel(transaction) {
     return 'Sistem'
   }
 
-  return `Oleh ${formatCompactIdentifier(creatorId)}`
+  return formatCreatorDisplayNameFromMetadata(transaction, creatorId)
 }
 
 export function getTransactionTitle(transaction) {
@@ -352,13 +814,19 @@ export function getTransactionPaymentRoute(transaction) {
   }
 
   if (transaction?.sourceType === 'loan-disbursement') {
-    return `/pembayaran/pinjaman/${transaction.id}`
+    return `/loan-payment/${transaction.id}`
   }
+
+  const isDirectBillRecord =
+    normalizeText(transaction?.sourceType) === 'bill' ||
+    Boolean(transaction?.billType ?? transaction?.bill_type)
 
   const billId =
     transaction?.bill?.id ??
     transaction?.salaryBill?.id ??
-    (transaction?.sourceType === 'bill' ? transaction.id : null)
+    transaction?.bill_id ??
+    transaction?.salary_bill_id ??
+    (isDirectBillRecord ? transaction.id : null)
 
   if (!billId) {
     return null
@@ -368,7 +836,7 @@ export function getTransactionPaymentRoute(transaction) {
     return null
   }
 
-  return `/pembayaran/tagihan/${billId}`
+  return `/payment/${billId}`
 }
 
 export function canOpenTransactionPayment(transaction) {
@@ -380,12 +848,16 @@ export function getTransactionPaymentLabel(transaction) {
     return 'Bayar Pinjaman'
   }
 
-  if (transaction?.salaryBill?.id || transaction?.sourceType === 'attendance-record') {
-    return 'Bayar Tagihan Upah'
+  if (
+    transaction?.salaryBill?.id ||
+    transaction?.salary_bill_id ||
+    transaction?.sourceType === 'attendance-record'
+  ) {
+    return 'Bayar Gaji/Upah'
   }
 
   if (transaction?.sourceType === 'bill' && isPayrollBill(transaction)) {
-    return 'Bayar Tagihan Upah'
+    return 'Bayar Gaji/Upah'
   }
 
   return 'Bayar Tagihan'
@@ -405,6 +877,12 @@ export function getTransactionEditRoute(transaction) {
   }
 
   if (transaction?.sourceType === 'attendance-record') {
+    const normalizedBillingStatus = normalizeText(transaction?.billing_status, 'unbilled')
+
+    if (normalizedBillingStatus === 'billed' || Boolean(transaction?.salary_bill_id)) {
+      return null
+    }
+
     return `/edit/attendance/${transaction.id}`
   }
 
@@ -419,12 +897,18 @@ export function canDeleteTransaction(transaction) {
   const sourceType = normalizeText(transaction?.sourceType)
 
   if (sourceType === 'attendance-record') {
-    return normalizeText(transaction?.billing_status, 'unbilled') !== 'billed'
+    return (
+      normalizeText(transaction?.billing_status, 'unbilled') !== 'billed' &&
+      !transaction?.salary_bill_id
+    )
   }
 
   if (sourceType === 'expense') {
     const billPaidAmount = Number(
-      transaction?.bill?.paidAmount ?? transaction?.bill?.paid_amount ?? 0
+      transaction?.bill?.paidAmount ??
+        transaction?.bill?.paid_amount ??
+        transaction?.bill_paid_amount ??
+        0
     )
 
     return billPaidAmount <= 0
@@ -441,23 +925,46 @@ export function canEditTransaction(transaction) {
   return Boolean(getTransactionEditRoute(transaction))
 }
 
-export function getTransactionLedgerFilterOptions() {
-  return [
-    { value: 'all', label: 'Semua Catatan' },
-    { value: 'project-income', label: 'Termin Proyek' },
-    { value: 'loan-disbursement', label: 'Dana Masuk / Pinjaman' },
-    { value: 'expense', label: 'Pengeluaran' },
-    { value: 'bill', label: 'Tagihan' },
-    { value: 'material-invoice', label: 'Faktur Material' },
-    { value: 'surat-jalan', label: 'Surat Jalan' },
-  ]
+const transactionLedgerFilterOptions = [
+  { value: 'all', label: 'Semua Catatan' },
+  { value: 'project-income', label: 'Termin Proyek' },
+  { value: 'loan-disbursement', label: 'Pinjaman' },
+  { value: 'expense', label: 'Pengeluaran' },
+  { value: 'bill', label: 'Gaji/Upah' },
+  { value: 'material-invoice', label: 'Faktur' },
+  { value: 'surat-jalan', label: 'Surat Jalan' },
+]
+
+export function getTransactionLedgerFilterOptions({
+  includeSuratJalan = true,
+  includePayrollBills = true,
+} = {}) {
+  return transactionLedgerFilterOptions.filter((item) => {
+    if (!includeSuratJalan && item.value === 'surat-jalan') {
+      return false
+    }
+
+    if (!includePayrollBills && item.value === 'bill') {
+      return false
+    }
+
+    return true
+  })
 }
 
-export function matchesTransactionLedgerFilter(transaction, filterValue) {
+export function matchesTransactionLedgerFilter(
+  transaction,
+  filterValue,
+  { includePaidBills = true } = {}
+) {
   const normalizedFilter = normalizeText(filterValue, 'all')
   const sourceType = normalizeText(transaction?.sourceType)
   const documentType = normalizeText(transaction?.document_type).toLowerCase()
   const expenseType = normalizeText(transaction?.expense_type).toLowerCase()
+
+  if (!includePaidBills && isPaidBillTransaction(transaction)) {
+    return false
+  }
 
   if (normalizedFilter === 'all') {
     return true
@@ -468,7 +975,7 @@ export function matchesTransactionLedgerFilter(transaction, filterValue) {
   }
 
   if (normalizedFilter === 'bill') {
-    return sourceType === 'bill'
+    return sourceType === 'bill' && !isPaidBillTransaction(transaction)
   }
 
   if (normalizedFilter === 'material-invoice') {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { 
+import {
   AlertCircle,
   ArrowDownLeft,
   ArrowUpRight,
@@ -17,6 +17,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import ActionCard from '../components/ui/ActionCard'
+import BrandLoader from '../components/ui/BrandLoader'
 import SmartList from '../components/ui/SmartList'
 import useTelegram from '../hooks/useTelegram'
 import useAuthStore from '../store/useAuthStore'
@@ -31,12 +32,20 @@ import {
   toAppDateKey,
 } from '../lib/date-time'
 import { logPerf, nowMs, roundMs } from '../lib/timing'
-import { getTransactionCreatorLabel } from '../lib/transaction-presentation'
+import {
+  formatTransactionTimestamp,
+  getTransactionCreatorLabel,
+} from '../lib/transaction-presentation'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
   currency: 'IDR',
   maximumFractionDigits: 0,
+})
+const compactCurrencyFormatter = new Intl.NumberFormat('id-ID', {
+  notation: 'compact',
+  compactDisplay: 'short',
+  maximumFractionDigits: 1,
 })
 
 const quickFilters = [
@@ -89,28 +98,12 @@ function formatCurrency(value) {
   return currencyFormatter.format(Number.isFinite(Number(value)) ? Number(value) : 0)
 }
 
-function formatCurrencyCompact(value) {
-  const amount = Number(value)
+function formatCompactCurrency(value) {
+  const numericValue = Number(value)
+  const normalizedValue = Number.isFinite(numericValue) ? numericValue : 0
+  const formattedValue = compactCurrencyFormatter.format(Math.abs(normalizedValue))
 
-  if (!Number.isFinite(amount)) {
-    return 'Rp 0'
-  }
-
-  const absoluteAmount = Math.abs(amount)
-
-  if (absoluteAmount >= 1_000_000_000) {
-    return `Rp ${(amount / 1_000_000_000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} M`
-  }
-
-  if (absoluteAmount >= 1_000_000) {
-    return `Rp ${(amount / 1_000_000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} jt`
-  }
-
-  if (absoluteAmount >= 1_000) {
-    return `Rp ${(amount / 1_000).toLocaleString('id-ID', { maximumFractionDigits: 0 })} rb`
-  }
-
-  return formatCurrency(amount)
+  return `${normalizedValue < 0 ? '-' : ''}Rp ${formattedValue}`
 }
 
 function parseTimestamp(...values) {
@@ -182,11 +175,8 @@ function buildTransactionItem(transaction) {
     kind,
     sourceType: transaction.sourceType,
     title: pickText(transaction.description, fallbackTitle),
-    subtitle: pickText(
-      transaction.project_name,
-      transaction.party_label,
-      formatAppSyncLabel(transaction.transaction_date)
-    ),
+    subtitle: formatTransactionTimestamp(transaction, ['created_at', 'updated_at', 'transaction_date']),
+    details: [pickText(transaction.project_name, transaction.party_label)].filter(Boolean),
     amount: Number(transaction.amount) || 0,
     amountColorClass,
     badge,
@@ -337,6 +327,9 @@ function Dashboard() {
   const activeLoanAmount = useMemo(() => {
     return activeLoans.reduce((total, loan) => total + Number(loan.remaining_amount ?? 0), 0)
   }, [activeLoans])
+  const handleOpenBillsPage = useCallback(() => {
+    navigate('/tagihan')
+  }, [navigate])
 
   const isLoading = Boolean(currentTeamId) && (dashboardLoading || isWorkspaceLoading || billsLoading || isLoansLoading || reportLoading || isRefreshing)
   const currentProfit = portfolioSummary?.net_consolidated_profit ?? 0
@@ -376,6 +369,29 @@ function Dashboard() {
     isLoading,
     recentItems.length,
   ])
+
+  if (hasWorkspace && showDashboardSkeleton) {
+    return (
+      <section
+        className="grid min-h-[calc(100dvh-8.5rem)] place-items-center px-4 text-center"
+        style={{
+          marginTop: 'calc(-1 * max(0.75rem, env(safe-area-inset-top)))',
+        }}
+      >
+        <div className="flex flex-col items-center gap-5">
+          <BrandLoader context="server" size="hero" />
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold tracking-[-0.03em] text-[var(--app-text-color)]">
+              Memuat dashboard
+            </h2>
+            <p className="max-w-[20rem] text-sm leading-6 text-[var(--app-hint-color)]">
+              Menyiapkan data terbaru.
+            </p>
+          </div>
+        </div>
+      </section>
+    )
+  }
 
   return (
     <section className="space-y-4 pb-4">
@@ -425,14 +441,14 @@ function Dashboard() {
                 'linear-gradient(135deg, color-mix(in srgb, var(--app-brand-accent) 84%, #002116), var(--app-brand-accent))',
             }}
           >
-            <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-white/10 blur-2xl" />
+            <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-[var(--app-brand-accent-soft)]" />
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
               Saldo Kas
             </p>
             <p className="mt-3 text-[1.85rem] font-bold leading-none tracking-[-0.05em]">
-              {formatCurrencyCompact(cashBalance)}
+              {formatCurrency(cashBalance)}
             </p>
-            <div className="mt-4 inline-flex items-center gap-1 rounded-full bg-white/12 px-3 py-1 text-[11px] font-semibold text-white/80">
+            <div className="mt-4 inline-flex items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--app-brand-accent-contrast)_24%,transparent)] bg-[var(--app-surface-strong-color)] px-3 py-1 text-[11px] font-semibold text-[var(--app-text-color)]">
               <Wallet className="h-3.5 w-3.5" />
               Posisi kas aktif
             </div>
@@ -444,7 +460,7 @@ function Dashboard() {
                 Laba Bersih
               </p>
               <p className="mt-3 text-[1.5rem] font-bold leading-tight tracking-[-0.045em] text-[var(--app-text-color)]">
-                {formatCurrencyCompact(currentProfit)}
+                {formatCompactCurrency(currentProfit)}
               </p>
               <div className={`mt-4 inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-semibold ${profitToneClassName}`}>
                 <TrendingUp className="h-3.5 w-3.5" />
@@ -457,7 +473,7 @@ function Dashboard() {
                 Pinjaman Aktif
               </p>
               <p className="mt-3 text-[1.5rem] font-bold leading-tight tracking-[-0.045em] text-[var(--app-text-color)]">
-                {activeLoanAmount > 0 ? formatCurrencyCompact(activeLoanAmount) : 'Rp 0'}
+                {formatCompactCurrency(activeLoanAmount)}
               </p>
               <p className="mt-4 text-xs text-[var(--app-hint-color)]">
                 {activeLoans.length} pinjaman aktif
@@ -465,7 +481,12 @@ function Dashboard() {
             </article>
           </div>
 
-          <article className="app-card px-4 py-3">
+          <button
+            className="app-card group flex w-full items-center px-4 py-3 text-left transition active:scale-[0.985]"
+            onClick={handleOpenBillsPage}
+            type="button"
+            aria-label="Buka halaman Tagihan"
+          >
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[18px] bg-[var(--app-tone-warning-bg)] text-[var(--app-tone-warning-text)]">
                 <ArrowUpRight className="h-4 w-4" />
@@ -480,11 +501,12 @@ function Dashboard() {
               </div>
               <div className="shrink-0 text-right">
                 <p className="text-sm font-bold tracking-[-0.03em] text-[var(--app-text-color)]">
-                  {pendingBillAmount > 0 ? formatCurrency(pendingBillAmount) : 'Rp 0'}
+                  {formatCurrency(pendingBillAmount)}
                 </p>
               </div>
+              <ChevronRight className="h-4 w-4 text-[var(--app-hint-color)] transition group-active:translate-x-0.5" />
             </div>
-          </article>
+          </button>
         </div>
       </section>
 
@@ -499,7 +521,7 @@ function Dashboard() {
               </p>
             </div>
             <button
-              className="inline-flex shrink-0 items-center justify-center rounded-full bg-white/60 px-3 py-2 text-xs font-semibold text-[var(--app-tone-danger-text)] transition active:scale-[0.98]"
+              className="inline-flex shrink-0 items-center justify-center rounded-full bg-white px-3 py-2 text-xs font-semibold text-[var(--app-tone-danger-text)] transition active:scale-[0.98]"
               onClick={() => void refreshAllData()}
               type="button"
             >
@@ -585,25 +607,6 @@ function Dashboard() {
               </p>
             </div>
           </div>
-        ) : showDashboardSkeleton ? (
-          <div className="space-y-3 px-1 pt-3">
-            {[1, 2, 3].map((item) => (
-              <div
-                key={item}
-                className="app-card overflow-hidden px-4 py-4"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="h-11 w-11 animate-pulse rounded-[18px] bg-[var(--app-surface-low-color)]" />
-                  <div className="min-w-0 flex-1">
-                    <div className="h-4 w-2/3 animate-pulse rounded-full bg-[var(--app-surface-low-color)]" />
-                    <div className="mt-2 h-3 w-1/2 animate-pulse rounded-full bg-[var(--app-surface-low-color)]" />
-                    <div className="mt-3 h-8 w-full animate-pulse rounded-[16px] bg-[var(--app-surface-low-color)]" />
-                  </div>
-                  <div className="h-4 w-20 animate-pulse rounded-full bg-[var(--app-surface-low-color)]" />
-                </div>
-              </div>
-            ))}
-          </div>
         ) : (
           <SmartList
             key={`${activeFilter}-${recentItems.length}`}
@@ -627,7 +630,8 @@ function Dashboard() {
                 <ActionCard
                   key={item.id}
                   title={item.title}
-                  subtitle={item.subtitle || 'Jurnal'}
+                  subtitle={item.subtitle}
+                  details={item.details}
                   amount={`${item.amount < 0 ? '-' : '+'}${formatCurrency(Math.abs(item.amount))}`}
                 amountClassName={item.amountColorClass}
                 badge={item.badge}

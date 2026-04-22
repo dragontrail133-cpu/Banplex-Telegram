@@ -1,7 +1,8 @@
 # Freeze Package Index
 
-Freeze date: `2026-04-19`  
-Package status: `official active baseline`  
+Freeze date: `2026-04-19`
+Runtime reconciliation: `2026-04-23`
+Package status: `official active baseline, runtime-reconciled`
 Authority level: `primary planning authority for product, PRD, technical contract, lifecycle, and future AI task framing`
 
 ## Tujuan package
@@ -15,6 +16,18 @@ Mulai freeze ini:
 - kontrak `Dokumen Barang` dibekukan sebagai inbound-stock-first, sementara settlement child tidak mengubah identitas parent domain,
 - dokumen lama tidak lagi boleh dipakai sebagai sumber utama jika bertentangan,
 - brief AI berikutnya harus mengutip domain contract dan lifecycle dari package ini, bukan dari chat atau backlog lama secara liar.
+
+## Rekonsiliasi runtime aktif (`2026-04-23`)
+
+Audit repo aktual menegaskan boundary berikut sebagai baseline package ini:
+
+- dashboard summary aktif dibaca dari `/api/transactions?view=summary` melalui helper server `loadOperationalSummary()` di `api/transactions.js`; `vw_transaction_summary` tinggal artefak kompatibilitas/report legacy,
+- `src/store/usePaymentStore.js` sudah memakai wrapper API untuk create/update/delete payment; wording direct insert payment lama hanya historis dan tidak boleh dipakai lagi,
+- `src/App.jsx` sudah membuka route `/stock`, dan `src/pages/StockPage.jsx` sudah memuat monitoring stok + manual stock-out terbatas,
+- `Referensi` / `Master` adalah domain core-release yang menjadi fondasi semua form inti; boundary runtime yang masih transitional tidak mengubah status domain ini sebagai bagian release inti,
+- tabel/view legacy `transactions` dan `vw_transaction_summary` boleh tetap ada di migration chain/schema, tetapi bukan authority write path atau summary aktif,
+- direct Supabase write/RPC pada `Tim`, `Referensi`, `HRD`, `File`, dan generate payroll tetap tercatat sebagai runtime exception/transitional boundary, bukan pola baru untuk domain inti.
+- snapshot repo terbaru sampai backlog stream `UCW-293` yang sudah `validated` tetap selaras dengan freeze package; sisa kerja aktif berada di boundary transisional yang memang dipisahkan.
 
 ## Urutan baca yang direkomendasikan
 

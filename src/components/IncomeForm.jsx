@@ -7,7 +7,6 @@ import { getAppTodayKey } from '../lib/date-time'
 import FormLayout from './layouts/FormLayout'
 import MasterPickerField from './ui/MasterPickerField'
 import {
-  AppButton,
   AppCard,
   AppErrorState,
   AppNominalInput,
@@ -114,7 +113,7 @@ function buildStaffFeePreview(staffMembers = [], terminAmount = 0) {
   })
 }
 
-function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
+function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = 'income-form' }) {
   const [formData, setFormData] = useState(() => createInitialFormData(initialData))
   const [successMessage, setSuccessMessage] = useState(null)
   const { user } = useTelegram()
@@ -230,6 +229,9 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
       <fieldset className="space-y-6" disabled={isSubmitting}>
         <FormLayout
           embedded
+          actionLabel={isEditMode ? 'Perbarui Pemasukan Proyek' : 'Simpan Termin Proyek'}
+          formId={formId}
+          isSubmitting={isSubmitting}
           sections={[
             {
               id: 'income-identity',
@@ -244,15 +246,16 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
             {
               id: 'income-preview',
               title: 'Preview dan Simpan',
-              description: 'Cek estimasi fee lalu simpan data final.',
+              description: 'Cek ringkasan fee sebelum menyimpan.',
             },
           ]}
+          submitDisabled={!isMasterDataReady}
         >
           <FormSection
             title="Identitas Termin"
             description="Pilih proyek dan tanggal transaksi."
           >
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-4">
                 <MasterPickerField
                   disabled={isProjectDisabled}
@@ -277,13 +280,13 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
               </div>
 
               <div className="space-y-4">
-                <AppCard className="space-y-3 bg-white/80">
+                <AppCard className="space-y-3 bg-white">
                   <label className="block space-y-2">
                     <span className="text-sm font-semibold text-[var(--app-text-color)]">
                       Tanggal
                     </span>
                     <input
-                      className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                       name="date"
                       onChange={handleChange}
                       required
@@ -293,7 +296,7 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
                   </label>
                 </AppCard>
 
-                <AppCard className="space-y-2 bg-sky-50/80">
+                <AppCard className="space-y-2 bg-sky-50">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700">
                     Ringkasan Proyek
                   </p>
@@ -314,14 +317,14 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
             title="Nominal dan Deskripsi"
             description="Isi nominal termin dan ringkasan singkat."
           >
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-              <AppCard className="space-y-3 bg-white/80">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <AppCard className="space-y-3 bg-white">
                 <label className="block space-y-2">
                   <span className="text-sm font-semibold text-[var(--app-text-color)]">
                     Nominal Termin
                   </span>
                   <AppNominalInput
-                    className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                     name="amount"
                     onValueChange={(nextValue) =>
                       handleChange({
@@ -339,13 +342,13 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
               </AppCard>
 
               <div className="space-y-4">
-                <AppCard className="space-y-3 bg-white/80">
+                <AppCard className="space-y-3 bg-white">
                   <label className="block space-y-2">
                     <span className="text-sm font-semibold text-[var(--app-text-color)]">
                       Deskripsi
                     </span>
                     <textarea
-                      className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                      className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                       name="description"
                       onChange={handleChange}
                       placeholder="Contoh: Termin 1 pekerjaan struktur."
@@ -355,7 +358,7 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
                   </label>
                 </AppCard>
 
-                <AppCard className="space-y-2 bg-slate-50/80">
+                <AppCard className="space-y-2 bg-slate-50">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
                     Ringkasan Nominal
                   </p>
@@ -372,10 +375,10 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
 
           <FormSection
             title="Preview dan Simpan"
-            description="Cek estimasi fee lalu simpan data final."
+            description="Cek ringkasan nominal dan estimasi fee staf."
           >
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
-              <AppCard className="space-y-3 bg-white/80">
+            <div className="grid gap-4">
+              <AppCard className="space-y-3 bg-white">
                 <div className="space-y-1">
                   <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-700">
                     Preview Fee Staf
@@ -391,7 +394,7 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
                     {staffFeePreview.map((staffPreview) => (
                       <AppCard
                         key={staffPreview.id}
-                        className="space-y-2 bg-white/90 px-4 py-3"
+                        className="space-y-2 bg-white px-4 py-3"
                       >
                         <div className="flex items-start justify-between gap-4">
                           <div>
@@ -412,49 +415,40 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null }) {
                 )}
               </AppCard>
 
-              <div className="space-y-4">
-                <AppCard className="space-y-3 bg-sky-900 text-white">
-                  <p className="text-xs uppercase tracking-[0.18em] text-sky-100">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <AppCard className="space-y-2 bg-sky-50">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700">
                     Total Estimasi Fee
                   </p>
-                  <p className="text-xl font-semibold">
+                  <p className="text-lg font-semibold text-sky-900">
                     {formatCurrency(estimatedStaffFeeTotal)}
-                  </p>
-                  <p className="text-sm leading-6 text-sky-100">
-                    Estimasi dana bersih setelah fee:{' '}
-                    {formatCurrency(Math.max(terminAmount - estimatedStaffFeeTotal, 0))}
                   </p>
                 </AppCard>
 
-                {error ? (
-                  <AppErrorState title="Form belum valid" description={error} />
-                ) : null}
-
-                {masterError ? (
-                  <AppErrorState
-                    title="Master data belum siap"
-                    description={masterError}
-                  />
-                ) : null}
-
-                {successMessage ? (
-                  <AppCard className="border-emerald-200 bg-emerald-50 text-sm leading-6 text-emerald-700">
-                    {successMessage}
-                  </AppCard>
-                ) : null}
-
-                <AppButton
-                  className="w-full"
-                  disabled={isSubmitting || !isMasterDataReady}
-                  type="submit"
-                >
-                  {isSubmitting
-                    ? 'Menyimpan...'
-                    : isEditMode
-                      ? 'Perbarui Pemasukan Proyek'
-                      : 'Simpan Termin Proyek'}
-                </AppButton>
+                <AppCard className="space-y-2 bg-white">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+                    Estimasi Dana Bersih
+                  </p>
+                  <p className="text-lg font-semibold text-[var(--app-text-color)]">
+                    {formatCurrency(Math.max(terminAmount - estimatedStaffFeeTotal, 0))}
+                  </p>
+                </AppCard>
               </div>
+
+              {error ? <AppErrorState title="Form belum valid" description={error} /> : null}
+
+              {masterError ? (
+                <AppErrorState
+                  title="Master data belum siap"
+                  description={masterError}
+                />
+              ) : null}
+
+              {successMessage ? (
+                <AppCard className="border-emerald-200 bg-emerald-50 text-sm leading-6 text-emerald-700">
+                  {successMessage}
+                </AppCard>
+              ) : null}
             </div>
           </FormSection>
         </FormLayout>

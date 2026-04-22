@@ -1,6 +1,13 @@
 import { useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { BadgePlus, BriefcaseBusiness, FilePenLine, FolderTree, UserRoundCog } from 'lucide-react'
+import {
+  BadgePlus,
+  Boxes,
+  BriefcaseBusiness,
+  FilePenLine,
+  FolderTree,
+  UserRoundCog,
+} from 'lucide-react'
 import FormLayout from '../components/layouts/FormLayout'
 import ProtectedRoute from '../components/ProtectedRoute'
 import WorkerForm from '../components/WorkerForm'
@@ -9,9 +16,9 @@ import { masterTabs } from '../components/master/masterTabs'
 import {
   AppBadge,
   AppCard,
-  AppCardStrong,
   AppErrorState,
 } from '../components/ui/AppPrimitives'
+import { capabilityContracts } from '../lib/capabilities'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
 
@@ -40,6 +47,7 @@ function getRecordTitle(record, tabConfig) {
     record.creditor_name ||
     record.profession_name ||
     record.staff_name ||
+    record.material_name ||
     record.worker_name ||
     tabConfig?.label ||
     'Master'
@@ -57,6 +65,7 @@ function MasterFormPage() {
   const professions = useMasterStore((state) => state.professions)
   const workers = useMasterStore((state) => state.workers)
   const workerWageRates = useMasterStore((state) => state.workerWageRates)
+  const materials = useMasterStore((state) => state.materials)
   const staffMembers = useMasterStore((state) => state.staffMembers)
   const fetchProjects = useMasterStore((state) => state.fetchProjects)
   const fetchExpenseCategories = useMasterStore(
@@ -69,6 +78,7 @@ function MasterFormPage() {
   const fetchProfessions = useMasterStore((state) => state.fetchProfessions)
   const fetchWorkers = useMasterStore((state) => state.fetchWorkers)
   const fetchWorkerWageRates = useMasterStore((state) => state.fetchWorkerWageRates)
+  const fetchMaterials = useMasterStore((state) => state.fetchMaterials)
   const fetchStaff = useMasterStore((state) => state.fetchStaff)
   const isLoading = useMasterStore((state) => state.isLoading)
   const masterError = useMasterStore((state) => state.error)
@@ -89,11 +99,13 @@ function MasterFormPage() {
       fundingCreditors,
       professions,
       workers,
+      materials,
       staffMembers,
     }),
     [
       categories,
       fundingCreditors,
+      materials,
       professions,
       projects,
       staffMembers,
@@ -120,6 +132,7 @@ function MasterFormPage() {
     : null
 
   const recordTitle = getRecordTitle(currentRecord, tabConfig)
+  const formHydrationKey = isEditMode ? (currentRecord ? 'hydrated' : 'pending') : 'new'
 
   useEffect(() => {
     void Promise.all([
@@ -130,6 +143,7 @@ function MasterFormPage() {
       fetchProfessions(),
       fetchWorkers(),
       fetchWorkerWageRates(),
+      fetchMaterials(),
       fetchStaff(),
     ]).catch((error) => {
       console.error('Gagal memuat master form:', error)
@@ -137,6 +151,7 @@ function MasterFormPage() {
   }, [
     fetchExpenseCategories,
     fetchFundingCreditors,
+    fetchMaterials,
     fetchProfessions,
     fetchProjects,
     fetchStaff,
@@ -175,7 +190,10 @@ function MasterFormPage() {
 
   if (!tabConfig) {
     return (
-      <ProtectedRoute requiredCapability="master_data_admin" description="Master form tidak tersedia.">
+      <ProtectedRoute
+        requiredCapability={capabilityContracts.master_data_admin.key}
+        description="Master form tidak tersedia."
+      >
         <section className="app-page-surface px-4 py-4">
           <AppErrorState
             title="Form master tidak ditemukan"
@@ -188,11 +206,13 @@ function MasterFormPage() {
 
   return (
     <ProtectedRoute
-      requiredCapability="master_data_admin"
+      requiredCapability={capabilityContracts.master_data_admin.key}
       description="Form master hanya tersedia untuk Owner dan Admin."
     >
       <FormLayout
         actionLabel={isEditMode ? 'Simpan Perubahan' : tabConfig.createLabel}
+        description="Lengkapi data master agar picker dan transaksi lintas domain tetap konsisten."
+        eyebrow="Master"
         formId={formId}
         isSubmitting={isLoading}
         onBack={handleBack}
@@ -200,7 +220,7 @@ function MasterFormPage() {
         title={`${isEditMode ? 'Edit' : 'Tambah'} ${tabConfig.label}`}
       >
         <div className="space-y-4">
-          <AppCardStrong className="space-y-4">
+          <AppCard className="space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 space-y-2">
                 <AppBadge tone="info" icon={isEditMode ? FilePenLine : BadgePlus}>
@@ -215,9 +235,11 @@ function MasterFormPage() {
                   </p>
                 </div>
               </div>
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] text-[var(--app-accent-color)]">
                 {tabConfig.key === 'workers' ? (
                   <UserRoundCog className="h-5 w-5" />
+                ) : tabConfig.key === 'materials' ? (
+                  <Boxes className="h-5 w-5" />
                 ) : tabConfig.key === 'projects' ? (
                   <BriefcaseBusiness className="h-5 w-5" />
                 ) : (
@@ -225,8 +247,7 @@ function MasterFormPage() {
                 )}
               </span>
             </div>
-
-          </AppCardStrong>
+          </AppCard>
 
           {masterError ? (
             <AppErrorState
@@ -247,7 +268,7 @@ function MasterFormPage() {
             />
           ) : (
             <GenericMasterForm
-              key={formKey}
+              key={`${formKey}-${formHydrationKey}`}
               config={tabConfig}
               formId={formId}
               hideActions

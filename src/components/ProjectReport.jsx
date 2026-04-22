@@ -1,18 +1,40 @@
-import { useEffect, useState } from 'react'
-import { BarChart3, FileText, RefreshCcw, Sparkles, WalletCards } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  BarChart3,
+  Coins,
+  CreditCard,
+  FileDown,
+  FileText,
+  RefreshCcw,
+  Receipt,
+  SlidersHorizontal,
+  WalletCards,
+} from 'lucide-react'
+import useAuthStore from '../store/useAuthStore'
 import useReportStore from '../store/useReportStore'
 import {
-  AppBadge,
+  REPORT_KIND_OPTIONS,
+  formatDateInputValue,
+  formatReportPeriodLabel,
+  getReportKindOption,
+  getBusinessSourceLabel,
+} from '../lib/business-report'
+import { formatAppDateLabel } from '../lib/date-time'
+import {
   AppButton,
   AppCard,
-  AppCardDashed,
   AppCardStrong,
   AppEmptyState,
   AppErrorState,
+  AppInput,
+  AppListCard,
+  AppListRow,
+  AppSelect,
+  AppSheet,
+  AppToggleGroup,
+  PageShell,
   SectionHeader,
 } from './ui/AppPrimitives'
-import { formatAppDateLabel } from '../lib/date-time'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -21,400 +43,451 @@ const currencyFormatter = new Intl.NumberFormat('id-ID', {
 })
 
 function formatCurrency(value) {
-  const amount = Number(value)
-
-  return currencyFormatter.format(Number.isFinite(amount) ? amount : 0)
+  return currencyFormatter.format(Number(value) || 0)
 }
 
-function formatDate(value) {
-  return formatAppDateLabel(value)
+function MetricCard({ label, value, icon }) {
+  const IconComponent = icon
+
+  return (
+    <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <p className="app-meta">{label}</p>
+          <p className="text-lg font-semibold tracking-[-0.03em] text-[var(--app-text-color)]">{value}</p>
+        </div>
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
+          <IconComponent className="h-4 w-4" />
+        </span>
+      </div>
+    </AppCard>
+  )
 }
 
-function getProfitStyles(value) {
-  if (value >= 0) {
-    return {
-      cardClassName: 'app-tone-success',
-      amountClassName: 'text-[var(--app-tone-success-text)]',
-      badgeTone: 'success',
-      label: 'Untung',
-    }
+function getSummaryCards(reportKind, summary = {}) {
+  if (reportKind === 'project_pl') {
+    return [
+      { label: 'Pendapatan', value: formatCurrency(summary.total_income), icon: WalletCards },
+      { label: 'Biaya Material', value: formatCurrency(summary.material_expense), icon: Receipt },
+      { label: 'Biaya Gaji', value: formatCurrency(summary.salary_expense), icon: CreditCard },
+      { label: 'Net Profit', value: formatCurrency(summary.net_profit ?? summary.net_profit_project), icon: Coins },
+    ]
   }
 
-  return {
-    cardClassName: 'app-tone-danger',
-    amountClassName: 'text-[var(--app-tone-danger-text)]',
-    badgeTone: 'danger',
-    label: 'Rugi',
-  }
-}
-
-function getProjectName(summary) {
-  return summary.project_name ?? 'Proyek tanpa nama'
-}
-
-function getRelationRecord(value) {
-  if (Array.isArray(value)) {
-    return value[0] ?? null
+  if (reportKind === 'cash_flow') {
+    return [
+      { label: 'Cash In', value: formatCurrency(summary.total_inflow), icon: WalletCards },
+      { label: 'Cash Out', value: formatCurrency(summary.total_outflow), icon: CreditCard },
+      { label: 'Net Cash Flow', value: formatCurrency(summary.total_net_cash_flow), icon: Coins },
+      { label: 'Mutasi', value: String(summary.total_mutation ?? 0), icon: FileText },
+    ]
   }
 
-  return value ?? null
+  return [
+    { label: 'Laba Bersih', value: formatCurrency(summary.net_consolidated_profit), icon: Coins },
+    { label: 'Pendapatan', value: formatCurrency(summary.total_income), icon: WalletCards },
+    { label: 'Pengeluaran', value: formatCurrency(summary.total_expense), icon: CreditCard },
+    { label: 'Outstanding', value: formatCurrency(summary.total_outstanding_bill), icon: Receipt },
+  ]
 }
 
-function getSalarySourceRoute(salary) {
-  const salaryBill = getRelationRecord(salary?.bills)
-
-  return salaryBill?.id ? `/tagihan/${salaryBill.id}` : null
+function getProjectLabel(summary) {
+  return summary?.project_name ?? summary?.name ?? 'Proyek tanpa nama'
 }
 
 function ProjectReport() {
-  const navigate = useNavigate()
-  const [expandedProjectId, setExpandedProjectId] = useState(null)
+  const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false)
+  const currentTeamId = useAuthStore((state) => state.currentTeamId)
+  const reportKind = useReportStore((state) => state.reportKind)
+  const reportPeriod = useReportStore((state) => state.reportPeriod)
+  const selectedProjectId = useReportStore((state) => state.selectedProjectId)
   const projectSummaries = useReportStore((state) => state.projectSummaries)
-  const portfolioSummary = useReportStore((state) => state.portfolioSummary)
-  const selectedProjectDetail = useReportStore((state) => state.selectedProjectDetail)
+  const reportData = useReportStore((state) => state.reportData)
   const isLoading = useReportStore((state) => state.isLoading)
-  const isDetailLoading = useReportStore((state) => state.isDetailLoading)
+  const isReportLoading = useReportStore((state) => state.isReportLoading)
+  const isPdfGenerating = useReportStore((state) => state.isPdfGenerating)
   const error = useReportStore((state) => state.error)
-  const detailError = useReportStore((state) => state.detailError)
+  const reportError = useReportStore((state) => state.reportError)
+  const pdfSettingsError = useReportStore((state) => state.pdfSettingsError)
+  const pdfError = useReportStore((state) => state.pdfError)
   const fetchProjectSummaries = useReportStore((state) => state.fetchProjectSummaries)
-  const fetchProjectDetail = useReportStore((state) => state.fetchProjectDetail)
+  const fetchPdfSettings = useReportStore((state) => state.fetchPdfSettings)
+  const fetchBusinessReportData = useReportStore((state) => state.fetchBusinessReportData)
+  const downloadBusinessReportPdf = useReportStore((state) => state.downloadBusinessReportPdf)
+  const setReportKind = useReportStore((state) => state.setReportKind)
+  const setReportPeriod = useReportStore((state) => state.setReportPeriod)
+  const setSelectedProjectId = useReportStore((state) => state.setSelectedProjectId)
 
   useEffect(() => {
-    fetchProjectSummaries({ force: true }).catch((fetchError) => {
-      console.error('Gagal memuat laporan proyek:', fetchError)
+    void fetchProjectSummaries({ force: true }).catch((fetchError) => {
+      console.error('Gagal memuat ringkasan Unit Kerja:', fetchError)
     })
   }, [fetchProjectSummaries])
 
-  const handleToggleDetail = async (projectId) => {
-    if (expandedProjectId === projectId) {
-      setExpandedProjectId(null)
+  useEffect(() => {
+    if (!currentTeamId) {
       return
     }
 
-    setExpandedProjectId(projectId)
-    await fetchProjectDetail(projectId)
+    void fetchPdfSettings(currentTeamId).catch((fetchError) => {
+      console.error('Gagal memuat pengaturan PDF:', fetchError)
+    })
+  }, [currentTeamId, fetchPdfSettings])
+
+  useEffect(() => {
+    void fetchBusinessReportData().catch((fetchError) => {
+      console.error('Gagal memuat data laporan:', fetchError)
+    })
+  }, [fetchBusinessReportData, reportKind, reportPeriod.dateFrom, reportPeriod.dateTo, selectedProjectId])
+
+  const selectedKindOption = getReportKindOption(reportKind)
+  const periodLabel = formatReportPeriodLabel(reportPeriod.dateFrom, reportPeriod.dateTo)
+  const summaryCards = getSummaryCards(reportKind, reportData?.summary ?? {})
+  const selectedProjectSummary = useMemo(
+    () => projectSummaries.find((summary) => String(summary.project_id ?? '').trim() === String(selectedProjectId ?? '').trim()) ?? null,
+    [projectSummaries, selectedProjectId]
+  )
+  const canDownloadPdf =
+    !isPdfGenerating && !isReportLoading && (reportKind !== 'project_pl' || Boolean(selectedProjectId))
+  const reportTabOptions = useMemo(
+    () => REPORT_KIND_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
+    []
+  )
+
+  const handleRefresh = () => {
+    void fetchBusinessReportData({ force: true }).catch((fetchError) => {
+      console.error('Gagal menyegarkan laporan bisnis:', fetchError)
+    })
   }
 
-  const handleOpenSource = (route) => {
-    if (!route) {
-      return
-    }
-
-    navigate(route)
+  const handleDownloadPdf = () => {
+    void downloadBusinessReportPdf().catch((downloadError) => {
+      console.error('Gagal mengunduh PDF bisnis:', downloadError)
+    })
   }
 
   return (
-    <section className="space-y-4">
-      <AppCardStrong className="space-y-4 sm:p-5">
-        <SectionHeader
-          eyebrow="Laporan Proyek"
-          action={
+    <PageShell className="space-y-4">
+      <AppCardStrong className="space-y-4 p-4 sm:p-5">
+        <AppToggleGroup
+          buttonSize="sm"
+          className="space-y-2"
+          compact
+          options={reportTabOptions}
+          onChange={setReportKind}
+          value={reportKind}
+        />
+
+        <div className="space-y-3 rounded-[24px] border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <p className="app-meta">Rentang tanggal</p>
+              <p className="text-sm font-medium leading-6 text-[var(--app-text-color)]">{periodLabel}</p>
+            </div>
+            <AppButton
+              aria-label="Sinkronkan"
+              iconOnly
+              variant="secondary"
+              disabled={isLoading || isReportLoading}
+              leadingIcon={<RefreshCcw className={`h-4 w-4 ${isReportLoading ? 'animate-spin' : ''}`} />}
+              onClick={handleRefresh}
+              type="button"
+            />
+          </div>
+          <div className="min-w-0 space-y-1 sm:border-t sm:border-[var(--app-border-color)] sm:pt-3">
+            <p className="app-meta">{reportKind === 'project_pl' ? 'Unit Kerja' : 'Cakupan'}</p>
+            <p className="text-sm font-medium leading-6 text-[var(--app-text-color)]">
+              {reportKind === 'project_pl'
+                ? selectedProjectSummary
+                  ? getProjectLabel(selectedProjectSummary)
+                  : 'Belum dipilih'
+                : 'Seluruh Unit Kerja'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-[var(--app-hint-color)]">{selectedKindOption.description}</p>
+          <div className="grid w-full grid-cols-2 gap-2 sm:w-auto sm:min-w-[320px]">
             <AppButton
               variant="secondary"
-              disabled={isLoading}
-              leadingIcon={<RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />}
-              onClick={() => {
-                void fetchProjectSummaries({ force: true }).catch((fetchError) => {
-                  console.error('Gagal memuat ulang laporan proyek:', fetchError)
-                })
-              }}
+              fullWidth
+              leadingIcon={<SlidersHorizontal className="h-4 w-4" />}
+              onClick={() => setIsFilterSheetOpen(true)}
               type="button"
             >
-              Sinkronkan
+              Filter
             </AppButton>
-          }
-        />
-
-        <AppCard className="space-y-4 bg-[var(--app-accent-color)]/8">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 space-y-2">
-              <AppBadge tone="info" icon={Sparkles}>
-                Portfolio Overview
-              </AppBadge>
-              <div>
-                <p className="text-sm font-medium text-[var(--app-hint-color)]">
-                  Laba bersih seluruh proyek
-                </p>
-                <p className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-[var(--app-text-color)]">
-                  {formatCurrency(portfolioSummary.net_consolidated_profit)}
-                </p>
-              </div>
-            </div>
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] bg-white/85 text-[var(--app-accent-color)] shadow-sm">
-              <WalletCards className="h-5 w-5" />
-            </span>
+            <AppButton
+              fullWidth
+              disabled={!canDownloadPdf}
+              leadingIcon={<FileDown className={`h-4 w-4 ${isPdfGenerating ? 'animate-bounce' : ''}`} />}
+              onClick={handleDownloadPdf}
+              type="button"
+            >
+              {isPdfGenerating ? 'Membuat PDF...' : 'Unduh PDF'}
+            </AppButton>
           </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-              <p className="app-meta">Total Pemasukan</p>
-              <p className="text-lg font-semibold text-[var(--app-text-color)]">
-                {formatCurrency(portfolioSummary.total_income)}
-              </p>
-            </AppCard>
-            <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-              <p className="app-meta">Total Biaya</p>
-              <p className="text-lg font-semibold text-[var(--app-text-color)]">
-                {formatCurrency(portfolioSummary.total_expense)}
-              </p>
-            </AppCard>
-          </div>
-        </AppCard>
+        </div>
       </AppCardStrong>
 
-      {error ? (
-        <AppErrorState
-          title="Laporan proyek gagal dimuat"
-          description={error}
-        />
+      <AppSheet
+        description="Atur periode dan Unit Kerja yang ingin ditampilkan."
+        onClose={() => setIsFilterSheetOpen(false)}
+        open={isFilterSheetOpen}
+        title="Filter Laporan"
+      >
+        <div className="space-y-4">
+          <label className="space-y-2">
+            <span className="app-meta">Dari tanggal</span>
+            <AppInput
+              disabled={isReportLoading}
+              onChange={(event) => setReportPeriod({ dateFrom: event.target.value })}
+              type="date"
+              value={formatDateInputValue(reportPeriod.dateFrom)}
+            />
+          </label>
+
+          <label className="space-y-2">
+            <span className="app-meta">Sampai tanggal</span>
+            <AppInput
+              disabled={isReportLoading}
+              onChange={(event) => setReportPeriod({ dateTo: event.target.value })}
+              type="date"
+              value={formatDateInputValue(reportPeriod.dateTo)}
+            />
+          </label>
+
+          {reportKind === 'project_pl' ? (
+            <label className="space-y-2">
+              <span className="app-meta">Pilih Unit Kerja</span>
+              <AppSelect
+                disabled={isReportLoading || projectSummaries.length === 0}
+                onChange={(event) => setSelectedProjectId(event.target.value)}
+                value={selectedProjectId}
+              >
+                <option value="">Pilih Unit Kerja</option>
+                {projectSummaries.map((summary) => (
+                  <option key={summary.project_id} value={summary.project_id}>
+                    {getProjectLabel(summary)}
+                  </option>
+                ))}
+              </AppSelect>
+            </label>
+          ) : null}
+        </div>
+      </AppSheet>
+
+      {pdfSettingsError || pdfError ? (
+        <AppErrorState title="Pengaturan PDF gagal diproses" description={pdfSettingsError ?? pdfError} />
       ) : null}
 
-      {projectSummaries.length > 0 ? (
+      {error || reportError ? (
+        <AppErrorState title="Laporan gagal dimuat" description={error ?? reportError} />
+      ) : null}
+
+      <AppCardStrong className="space-y-4 p-4 sm:p-5">
+        <SectionHeader eyebrow="Ringkasan" title={selectedKindOption.label} description={periodLabel} />
+        {isReportLoading && !reportData ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="h-24 animate-pulse rounded-[24px] bg-[var(--app-surface-low-color)]" />
+            <div className="h-24 animate-pulse rounded-[24px] bg-[var(--app-surface-low-color)]" />
+            <div className="h-24 animate-pulse rounded-[24px] bg-[var(--app-surface-low-color)]" />
+            <div className="h-24 animate-pulse rounded-[24px] bg-[var(--app-surface-low-color)]" />
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {summaryCards.map((card) => (
+              <MetricCard key={card.label} label={card.label} value={card.value} icon={card.icon} />
+            ))}
+          </div>
+        )}
+      </AppCardStrong>
+
+      {reportKind === 'executive_finance' ? (
         <div className="space-y-4">
-          {projectSummaries.map((summary) => {
-            const profitStyles = getProfitStyles(summary.net_profit)
-            const isActive = expandedProjectId === summary.project_id
-            const summaryProjectName = getProjectName(summary)
+          <AppCardStrong className="space-y-4 p-4 sm:p-5">
+            <SectionHeader eyebrow="Portofolio" title="Unit Kerja Aktif" />
+            {projectSummaries.length > 0 ? (
+              <div className="space-y-2">
+                {projectSummaries.map((summary) => (
+                  <AppListCard key={summary.project_id} className="bg-[var(--app-surface-strong-color)]">
+                    <AppListRow
+                      title={getProjectLabel(summary)}
+                      description={summary.project_status ?? 'Status belum diisi'}
+                      trailing={
+                        <div className="text-right">
+                          <p className="text-xs font-medium text-[var(--app-hint-color)]">Net Profit</p>
+                          <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                            {formatCurrency(summary.net_profit_project ?? summary.net_profit)}
+                          </p>
+                        </div>
+                      }
+                    />
+                  </AppListCard>
+                ))}
+              </div>
+            ) : (
+              <AppEmptyState
+                icon={<BarChart3 className="h-5 w-5" />}
+                title="Belum ada Unit Kerja aktif"
+                description="Tambahkan pemasukan atau pengeluaran untuk memunculkan ringkasan lintas proyek."
+              />
+            )}
+          </AppCardStrong>
 
-            return (
-              <AppCardStrong
-                key={summary.project_id}
-                className="space-y-4 overflow-hidden p-4 sm:p-5"
-              >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] bg-[var(--app-accent-color)]/10 text-[var(--app-accent-color)]">
-                        <BarChart3 className="h-4 w-4" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-[var(--app-hint-color)]">
-                          {summary.project_status || 'Status belum diisi'}
-                        </p>
-                        <p className="truncate text-lg font-semibold tracking-[-0.02em] text-[var(--app-text-color)]">
-                          {summaryProjectName}
-                        </p>
+          <AppCardStrong className="space-y-4 p-4 sm:p-5">
+            <SectionHeader eyebrow="Mutasi Kas" title="Arus Kas Masuk dan Keluar" />
+            {Array.isArray(reportData?.cashMutations) && reportData.cashMutations.length > 0 ? (
+              <div className="space-y-2">
+                {reportData.cashMutations.slice(0, 8).map((mutation, index) => (
+                  <AppListCard key={`${mutation.transaction_date}-${mutation.description}-${index}`} className="bg-[var(--app-surface-strong-color)]">
+                    <AppListRow
+                      title={formatAppDateLabel(mutation.transaction_date)}
+                      description={`${String(mutation.type ?? '-').toUpperCase()} • ${getBusinessSourceLabel(mutation.source_table)}`}
+                      trailing={
+                        <div className="text-right">
+                          <p className="text-sm font-semibold text-[var(--app-text-color)]">{formatCurrency(mutation.amount)}</p>
+                          <p className="text-xs text-[var(--app-hint-color)]">{mutation.description ?? '-'}</p>
+                        </div>
+                      }
+                    />
+                  </AppListCard>
+                ))}
+              </div>
+            ) : (
+              <AppEmptyState
+                icon={<FileText className="h-5 w-5" />}
+                title="Belum ada mutasi kas"
+                description="Mutasi kas akan muncul ketika transaksi masuk atau keluar sudah tersimpan pada periode ini."
+              />
+            )}
+          </AppCardStrong>
+        </div>
+      ) : null}
+
+      {reportKind === 'cash_flow' ? (
+        <AppCardStrong className="space-y-4 p-4 sm:p-5">
+          <SectionHeader eyebrow="Mutasi" title="Rincian Arus Kas" />
+          {Array.isArray(reportData?.cashMutations) && reportData.cashMutations.length > 0 ? (
+            <div className="space-y-2">
+              {reportData.cashMutations.map((mutation, index) => (
+                <AppListCard key={`${mutation.transaction_date}-${mutation.description}-${index}`} className="bg-[var(--app-surface-strong-color)]">
+                <AppListRow
+                  title={formatAppDateLabel(mutation.transaction_date)}
+                  description={`${String(mutation.type ?? '-').toUpperCase()} • ${getBusinessSourceLabel(mutation.source_table)}`}
+                  trailing={
+                    <div className="text-right">
+                        <p className="text-sm font-semibold text-[var(--app-text-color)]">{formatCurrency(mutation.amount)}</p>
+                        <p className="text-xs text-[var(--app-hint-color)]">{mutation.description ?? '-'}</p>
                       </div>
-                    </div>
+                    }
+                  />
+                </AppListCard>
+              ))}
+            </div>
+          ) : (
+            <AppEmptyState
+              icon={<FileText className="h-5 w-5" />}
+              title="Belum ada mutasi kas"
+              description="Mutasi kas akan ditampilkan sesuai rentang tanggal yang dipilih."
+            />
+          )}
+        </AppCardStrong>
+      ) : null}
 
+      {reportKind === 'project_pl' ? (
+        <div className="space-y-4">
+          <AppCardStrong className="space-y-4 p-4 sm:p-5">
+            <SectionHeader eyebrow="Unit Kerja" title={selectedProjectSummary ? getProjectLabel(selectedProjectSummary) : 'Pilih Unit Kerja'} />
+            {selectedProjectSummary ? (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <MetricCard label="Pendapatan" value={formatCurrency(selectedProjectSummary.total_income)} icon={WalletCards} />
+                <MetricCard label="Biaya Material" value={formatCurrency(selectedProjectSummary.material_expense)} icon={Receipt} />
+                <MetricCard label="Biaya Gaji" value={formatCurrency(selectedProjectSummary.salary_expense)} icon={CreditCard} />
+                <MetricCard label="Net Profit" value={formatCurrency(selectedProjectSummary.net_profit_project ?? selectedProjectSummary.net_profit)} icon={Coins} />
+              </div>
+            ) : (
+              <AppEmptyState
+                icon={<BarChart3 className="h-5 w-5" />}
+                title="Pilih Unit Kerja"
+                description="Laporan laba rugi proyek membutuhkan satu Unit Kerja terpilih terlebih dahulu."
+              />
+            )}
+          </AppCardStrong>
+
+          <AppCardStrong className="space-y-4 p-4 sm:p-5">
+            <SectionHeader eyebrow="Rincian" title="Transaksi Proyek" />
+            {reportData?.projectDetail?.summary ? (
+              <div className="grid gap-3 lg:grid-cols-3">
+                <AppCard className="bg-[var(--app-surface-strong-color)]">
+                  <p className="app-meta">Pemasukan</p>
+                  <div className="mt-3 space-y-2">
+                    {reportData.projectDetail.incomes?.length > 0 ? (
+                      reportData.projectDetail.incomes.map((income) => (
+                        <AppListCard key={income.id} className="bg-white">
+                          <AppListRow
+                            title={formatAppDateLabel(income.transaction_date)}
+                            description={income.description ?? '-'}
+                            trailing={<span className="text-sm font-semibold text-[var(--app-text-color)]">{formatCurrency(income.amount)}</span>}
+                          />
+                        </AppListCard>
+                      ))
+                    ) : (
+                      <AppEmptyState title="Tidak ada pemasukan" />
+                    )}
                   </div>
+                </AppCard>
 
-                  <AppCard className={`${profitStyles.cardClassName} min-w-0 space-y-2 px-4 py-3 lg:min-w-[220px]`}>
-                    <p className="app-meta">Laba / Rugi Bersih</p>
-                    <p className={`text-2xl font-semibold tracking-[-0.03em] ${profitStyles.amountClassName}`}>
-                      {formatCurrency(summary.net_profit)}
-                    </p>
-                    <p className="text-sm leading-6 opacity-80">
-                      Gross profit {formatCurrency(summary.gross_profit)}
-                    </p>
-                  </AppCard>
-                </div>
+                <AppCard className="bg-[var(--app-surface-strong-color)]">
+                  <p className="app-meta">Biaya Material</p>
+                  <div className="mt-3 space-y-2">
+                    {reportData.projectDetail.expenses?.length > 0 ? (
+                      reportData.projectDetail.expenses.map((expense) => (
+                        <AppListCard key={expense.id} className="bg-white">
+                          <AppListRow
+                            title={formatAppDateLabel(expense.expense_date)}
+                            description={`${expense.expense_type ?? '-'} • ${expense.description ?? '-'}`}
+                            trailing={<span className="text-sm font-semibold text-[var(--app-text-color)]">{formatCurrency(expense.total_amount)}</span>}
+                          />
+                        </AppListCard>
+                      ))
+                    ) : (
+                      <AppEmptyState title="Tidak ada biaya material" />
+                    )}
+                  </div>
+                </AppCard>
 
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-                    <p className="app-meta">Pemasukan</p>
-                    <p className="text-base font-semibold text-[var(--app-text-color)]">
-                      {formatCurrency(summary.total_income)}
-                    </p>
-                  </AppCard>
-                  <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-                    <p className="app-meta">Biaya Material</p>
-                    <p className="text-base font-semibold text-[var(--app-text-color)]">
-                      {formatCurrency(summary.material_expense)}
-                    </p>
-                  </AppCard>
-                  <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-                    <p className="app-meta">Biaya Gaji</p>
-                    <p className="text-base font-semibold text-[var(--app-text-color)]">
-                      {formatCurrency(summary.salary_expense)}
-                    </p>
-                  </AppCard>
-                  <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-                    <p className="app-meta">Biaya Ops</p>
-                    <p className="text-base font-semibold text-[var(--app-text-color)]">
-                      {formatCurrency(summary.operating_expense)}
-                    </p>
-                  </AppCard>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <AppButton
-                    variant="secondary"
-                    leadingIcon={<FileText className="h-4 w-4" />}
-                    onClick={() => void handleToggleDetail(summary.project_id)}
-                    type="button"
-                  >
-                    {isActive ? 'Tutup Breakdown' : 'Lihat Breakdown'}
-                  </AppButton>
-                </div>
-
-                {isActive ? (
-                  <AppCard className="space-y-4 bg-[var(--app-surface-strong-color)]">
-                    {isDetailLoading ? (
-                      <AppCardDashed className="space-y-4">
-                        <div className="grid gap-3 sm:grid-cols-3">
-                          <div className="h-20 animate-pulse rounded-[20px] bg-[var(--app-border-color)]" />
-                          <div className="h-20 animate-pulse rounded-[20px] bg-[var(--app-border-color)]" />
-                          <div className="h-20 animate-pulse rounded-[20px] bg-[var(--app-border-color)]" />
-                        </div>
-                        <div className="h-36 animate-pulse rounded-[20px] bg-[var(--app-border-color)]" />
-                      </AppCardDashed>
-                    ) : detailError ? (
-                      <AppErrorState
-                        title="Breakdown proyek gagal dimuat"
-                        description={detailError}
-                      />
-                    ) : selectedProjectDetail?.summary ? (
-                      <>
-                        <div className="grid gap-3 sm:grid-cols-3">
-                          <AppCard className="space-y-2 bg-white">
-                            <p className="app-meta">Pemasukan Total</p>
-                            <p className="text-base font-semibold text-[var(--app-text-color)]">
-                              {formatCurrency(selectedProjectDetail.summary.total_income)}
-                            </p>
-                          </AppCard>
-                          <AppCard className="space-y-2 bg-white">
-                            <p className="app-meta">Gross Profit</p>
-                            <p className="text-base font-semibold text-[var(--app-text-color)]">
-                              {formatCurrency(selectedProjectDetail.summary.gross_profit)}
-                            </p>
-                          </AppCard>
-                          <AppCard className="space-y-2 bg-white">
-                            <p className="app-meta">Net Profit</p>
-                            <p className="text-base font-semibold text-[var(--app-text-color)]">
-                              {formatCurrency(selectedProjectDetail.summary.net_profit)}
-                            </p>
-                          </AppCard>
-                        </div>
-
-                        <div className="grid gap-4 lg:grid-cols-3">
-                          <div className="space-y-2">
-                            <p className="app-meta">Pemasukan</p>
-                            <div className="space-y-2">
-                              {selectedProjectDetail.incomes.length > 0 ? (
-                                selectedProjectDetail.incomes.map((income) => (
-                                  <AppCard
-                                    as={income?.id ? 'button' : 'section'}
-                                    key={income.id}
-                                    className={[
-                                      'space-y-1 bg-white px-4 py-3 text-sm',
-                                      income?.id ? 'w-full cursor-pointer text-left transition active:scale-[0.99]' : '',
-                                    ].filter(Boolean).join(' ')}
-                                    onClick={income?.id ? () => handleOpenSource(`/transactions/${income.id}`) : undefined}
-                                    type={income?.id ? 'button' : undefined}
-                                  >
-                                    <p className="font-medium text-[var(--app-text-color)]">
-                                      {formatDate(income.transaction_date)}
-                                    </p>
-                                    <p className="text-[var(--app-hint-color)]">
-                                      {income.description ?? '-'}
-                                    </p>
-                                    <p className="font-semibold text-emerald-700">
-                                      {formatCurrency(income.amount)}
-                                    </p>
-                                  </AppCard>
-                                ))
-                              ) : (
-                                <AppCardDashed className="px-4 py-3 text-sm text-[var(--app-hint-color)]">
-                                  Tidak ada pemasukan proyek.
-                                </AppCardDashed>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="space-y-2">
-                            <p className="app-meta">Biaya Material</p>
-                            <div className="space-y-2">
-                              {selectedProjectDetail.expenses.length > 0 ? (
-                                selectedProjectDetail.expenses.map((expense) => (
-                                  <AppCard
-                                    as={expense?.id ? 'button' : 'section'}
-                                    key={expense.id}
-                                    className={[
-                                      'space-y-1 bg-white px-4 py-3 text-sm',
-                                      expense?.id ? 'w-full cursor-pointer text-left transition active:scale-[0.99]' : '',
-                                    ].filter(Boolean).join(' ')}
-                                    onClick={expense?.id ? () => handleOpenSource(`/transactions/${expense.id}`) : undefined}
-                                    type={expense?.id ? 'button' : undefined}
-                                  >
-                                    <p className="font-medium text-[var(--app-text-color)]">
-                                      {formatDate(expense.expense_date)}
-                                    </p>
-                                    <p className="text-[var(--app-hint-color)]">
-                                      {expense.expense_type ?? '-'} - {expense.description ?? '-'}
-                                    </p>
-                                    <p className="font-semibold text-rose-700">
-                                      {formatCurrency(expense.total_amount)}
-                                    </p>
-                                  </AppCard>
-                                ))
-                              ) : (
-                                <AppCardDashed className="px-4 py-3 text-sm text-[var(--app-hint-color)]">
-                                  Tidak ada pengeluaran proyek.
-                                </AppCardDashed>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="space-y-2">
-                            <p className="app-meta">Biaya Gaji</p>
-                            <div className="space-y-2">
-                              {selectedProjectDetail.salaries.length > 0 ? (
-                                selectedProjectDetail.salaries.map((salary) => {
-                                  const salaryRoute = getSalarySourceRoute(salary)
-
-                                  return (
-                                  <AppCard
-                                    as={salaryRoute ? 'button' : 'section'}
-                                    key={salary.id}
-                                    className={[
-                                      'space-y-1 bg-white px-4 py-3 text-sm',
-                                      salaryRoute ? 'w-full cursor-pointer text-left transition active:scale-[0.99]' : '',
-                                    ].filter(Boolean).join(' ')}
-                                    onClick={salaryRoute ? () => handleOpenSource(salaryRoute) : undefined}
-                                    type={salaryRoute ? 'button' : undefined}
-                                  >
-                                    <p className="font-medium text-[var(--app-text-color)]">
-                                      {formatDate(salary.attendance_date)}
-                                    </p>
-                                    <p className="text-[var(--app-hint-color)]">
-                                      {salary.workers?.name ?? 'Pekerja'} - {salary.attendance_status ?? '-'}
-                                    </p>
-                                    <p className="font-semibold text-amber-700">
-                                      {formatCurrency(salary.total_pay)}
-                                    </p>
-                                  </AppCard>
-                                  )
-                                })
-                              ) : (
-                                <AppCardDashed className="px-4 py-3 text-sm text-[var(--app-hint-color)]">
-                                  Tidak ada biaya gaji yang sudah dibundel.
-                                </AppCardDashed>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </>
-                    ) : null}
-                  </AppCard>
-                ) : null}
-              </AppCardStrong>
-            )
-          })}
+                <AppCard className="bg-[var(--app-surface-strong-color)]">
+                  <p className="app-meta">Biaya Gaji</p>
+                  <div className="mt-3 space-y-2">
+                    {reportData.projectDetail.salaries?.length > 0 ? (
+                      reportData.projectDetail.salaries.map((salary) => (
+                        <AppListCard key={salary.id} className="bg-white">
+                          <AppListRow
+                            title={formatAppDateLabel(salary.attendance_date)}
+                            description={`${salary.workers?.name ?? salary.worker_name_snapshot ?? 'Pekerja'} • ${salary.attendance_status ?? '-'}`}
+                            trailing={<span className="text-sm font-semibold text-[var(--app-text-color)]">{formatCurrency(salary.total_pay)}</span>}
+                          />
+                        </AppListCard>
+                      ))
+                    ) : (
+                      <AppEmptyState title="Tidak ada biaya gaji" />
+                    )}
+                  </div>
+                </AppCard>
+              </div>
+            ) : (
+              <AppEmptyState
+                icon={<BarChart3 className="h-5 w-5" />}
+                title="Detail proyek belum tersedia"
+                description="Pilih Unit Kerja lalu tunggu data dimuat untuk melihat rincian transaksi."
+              />
+            )}
+          </AppCardStrong>
         </div>
-      ) : isLoading ? (
-        <div className="space-y-3">
-          <div className="h-32 w-full animate-pulse rounded-[28px] border border-[var(--app-border-color)] bg-[var(--app-surface-color)]/70" />
-          <div className="h-32 w-full animate-pulse rounded-[28px] border border-[var(--app-border-color)] bg-[var(--app-surface-color)]/70" />
-        </div>
-      ) : (
-        <AppEmptyState
-          icon={<BarChart3 className="h-5 w-5" />}
-          title="Belum ada laporan proyek"
-          description="Tambahkan pemasukan, pengeluaran, atau absensi gaji untuk memunculkan ringkasan."
-        />
-      )}
-    </section>
+      ) : null}
+    </PageShell>
   )
 }
 

@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { ArrowLeft, ChevronRight, FileText } from 'lucide-react'
+import {
+  ArrowLeft,
+  ChevronRight,
+  FileText,
+} from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   AppButton,
@@ -8,7 +12,14 @@ import {
   PageHeader,
   PageShell,
 } from '../components/ui/AppPrimitives'
-import { formatCurrency, formatTransactionDateTime } from '../lib/transaction-presentation'
+import {
+  formatCurrency,
+  getBillSummaryAmount,
+  getBillSummarySubtitle,
+  getBillSummaryTitle,
+  getTransactionPaymentRoute,
+  groupBillsByWorker,
+} from '../lib/transaction-presentation'
 import useAuthStore from '../store/useAuthStore'
 import useBillStore from '../store/useBillStore'
 
@@ -57,7 +68,68 @@ function saveTagihanListState(teamId, state) {
   }
 }
 
-function BillsPage() {
+function BillRowButton({ bill, onOpenBill }) {
+  const amount = getBillSummaryAmount(bill)
+
+  return (
+    <button
+      className="flex w-full items-center gap-3 rounded-2xl bg-[var(--app-surface-low-color)] px-3 py-3 text-left transition active:bg-[color-mix(in_srgb,var(--app-surface-low-color)_85%,var(--app-bg-color))]"
+      onClick={() => onOpenBill(bill)}
+      type="button"
+    >
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--app-tone-warning-bg)] text-[var(--app-tone-warning-text)]">
+        <FileText className="h-[18px] w-[18px]" />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
+          {getBillSummaryTitle(bill)}
+        </p>
+        <p className="mt-0.5 text-xs text-[var(--app-hint-color)]">
+          {getBillSummarySubtitle(bill)}
+        </p>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="text-sm font-semibold text-[var(--app-text-color)]">
+          {formatCurrency(amount)}
+        </span>
+        <ChevronRight className="h-4 w-4 text-[var(--app-hint-color)]" />
+      </div>
+    </button>
+  )
+}
+
+function PayrollBillGroupCard({ group, onOpenDetail }) {
+  return (
+    <AppCardStrong className="px-4 py-4">
+      <button
+        className="flex w-full items-center gap-3 text-left"
+        onClick={() => onOpenDetail(group.groupKey)}
+        type="button"
+      >
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--app-surface-low-color)] text-[var(--app-text-color)]">
+          <FileText className="h-[18px] w-[18px]" />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
+            {group.workerName}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-sm font-semibold text-[var(--app-text-color)]">
+            {formatCurrency(group.amount)}
+          </span>
+          <ChevronRight className="h-4 w-4 text-[var(--app-hint-color)]" />
+        </div>
+      </button>
+    </AppCardStrong>
+  )
+}
+
+function BillsPage({ embedded = false } = {}) {
   const navigate = useNavigate()
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
   const restoredTagihanState = useMemo(
@@ -123,36 +195,69 @@ function BillsPage() {
     })
   }, [bills])
 
-  const handleOpenBill = (bill) => {
-    persistTagihanListState()
+  const displayBills = useMemo(() => {
+    return groupBillsByWorker(sortedBills)
+  }, [sortedBills])
 
-    navigate(`/tagihan/${bill.id}`, {
-      state: {
-        surface: 'tagihan',
-        detailSurface: 'tagihan',
-      },
-    })
-  }
+  const handleOpenWorkerDetail = useCallback(
+    (groupKey) => {
+      if (!groupKey) {
+        return
+      }
+
+      persistTagihanListState()
+      navigate(`/pembayaran?group=${encodeURIComponent(groupKey)}`, {
+        state: {
+          returnTo: embedded ? '/transactions?tab=tagihan' : '/pembayaran',
+        },
+      })
+    },
+    [embedded, navigate, persistTagihanListState]
+  )
+
+  const handleOpenBill = useCallback(
+    (bill) => {
+      const paymentRoute = getTransactionPaymentRoute(bill)
+
+      if (!paymentRoute) {
+        return
+      }
+
+      persistTagihanListState()
+
+      navigate(paymentRoute, {
+        state: {
+          transaction: bill,
+          returnTo: embedded ? '/transactions?tab=tagihan' : '/pembayaran',
+        },
+      })
+    },
+    [embedded, navigate, persistTagihanListState]
+  )
+
+  const Shell = embedded ? 'div' : PageShell
 
   return (
-    <PageShell>
-      <PageHeader
-        title="Tagihan"
-        action={
-          <AppButton
-            onClick={() => {
-              persistTagihanListState()
-              navigate('/transactions')
-            }}
-            size="sm"
-            type="button"
-            variant="secondary"
-            leadingIcon={<ArrowLeft className="h-4 w-4" />}
-          >
-            Jurnal
-          </AppButton>
-        }
-      />
+    <Shell className={embedded ? 'space-y-4' : undefined}>
+      {embedded ? null : (
+        <PageHeader
+          title="Tagihan"
+          action={
+            <AppButton
+              onClick={() => {
+                persistTagihanListState()
+                navigate('/transactions')
+              }}
+              size="sm"
+              type="button"
+              variant="secondary"
+              leadingIcon={<ArrowLeft className="h-4 w-4" />}
+            >
+              Jurnal
+            </AppButton>
+          }
+        />
+      )}
 
       {error ? (
         <AppCardDashed>
@@ -183,7 +288,7 @@ function BillsPage() {
             </AppCardStrong>
           ))}
         </div>
-      ) : sortedBills.length === 0 ? (
+      ) : displayBills.length === 0 ? (
         <AppCardDashed className="px-4 py-5">
           <p className="text-sm font-semibold text-[var(--app-text-color)]">
             Belum Ada Tagihan
@@ -191,43 +296,26 @@ function BillsPage() {
         </AppCardDashed>
       ) : (
         <div className="space-y-3">
-          {sortedBills.map((bill) => {
-            const amount = Number(bill.remainingAmount ?? bill.amount ?? 0)
-            const label = bill.supplierName || bill.description || 'Tagihan'
+          {displayBills.map((item) => {
+            if (item.kind === 'worker-group') {
+              return (
+                <PayrollBillGroupCard
+                  key={item.groupKey}
+                  group={item}
+                  onOpenDetail={handleOpenWorkerDetail}
+                />
+              )
+            }
 
             return (
-              <AppCardStrong key={bill.id} className="px-4 py-4">
-                <button
-                  className="flex w-full items-center gap-3 text-left"
-                  onClick={() => handleOpenBill(bill)}
-                  type="button"
-                >
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--app-tone-warning-bg)] text-[var(--app-tone-warning-text)]">
-                    <FileText className="h-[18px] w-[18px]" />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
-                      {label}
-                    </p>
-                    <p className="mt-0.5 text-xs text-[var(--app-hint-color)]">
-                      {bill.projectName || formatTransactionDateTime(bill.dueDate ?? bill.created_at)}
-                    </p>
-                  </div>
-
-                  <div className="flex shrink-0 items-center gap-2">
-                    <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                      {formatCurrency(amount)}
-                    </span>
-                    <ChevronRight className="h-4 w-4 text-[var(--app-hint-color)]" />
-                  </div>
-                </button>
+              <AppCardStrong key={item.bill.id} className="px-4 py-4">
+                <BillRowButton bill={item.bill} onOpenBill={handleOpenBill} />
               </AppCardStrong>
             )
           })}
         </div>
       )}
-    </PageShell>
+    </Shell>
   )
 }
 

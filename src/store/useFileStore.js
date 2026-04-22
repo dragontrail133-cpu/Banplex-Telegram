@@ -466,7 +466,7 @@ async function restoreFileAsset(fileAssetId) {
   return normalizeFileAssetRow(data)
 }
 
-async function permanentDeleteFileAsset(fileAssetId) {
+async function purgeFileAsset(fileAssetId) {
   if (!supabase) {
     throw new Error('Client Supabase belum dikonfigurasi.')
   }
@@ -475,13 +475,6 @@ async function permanentDeleteFileAsset(fileAssetId) {
   await waitForSupabaseSession()
 
   const normalizedId = normalizeText(fileAssetId)
-  const currentRole = useAuthStore.getState().role
-
-  assertAttachmentAction(
-    currentRole,
-    'permanentDelete',
-    'Role Anda tidak diizinkan menghapus attachment secara permanen.'
-  )
 
   if (!normalizedId) {
     throw new Error('ID file asset wajib diisi.')
@@ -509,6 +502,24 @@ async function permanentDeleteFileAsset(fileAssetId) {
   }
 
   return true
+}
+
+async function permanentDeleteFileAsset(fileAssetId) {
+  const currentRole = useAuthStore.getState().role
+
+  assertAttachmentAction(
+    currentRole,
+    'permanentDelete',
+    'Role Anda tidak diizinkan menghapus attachment secara permanen.'
+  )
+
+  const existingFileAsset = await loadFileAssetById(fileAssetId, { includeDeleted: true })
+
+  if (!existingFileAsset?.deleted_at) {
+    throw new Error('File asset terhapus harus dipulihkan ke recycle bin terlebih dahulu.')
+  }
+
+  return await purgeFileAsset(fileAssetId)
 }
 
 async function deleteFileAsset(fileAssetId) {
@@ -767,6 +778,32 @@ const useFileStore = create((set, get) => ({
       throw normalizedError
     }
   },
+  purgeFileAsset: async (fileAssetId) => {
+    set({ isUploading: true, error: null })
+
+    try {
+      await purgeFileAsset(fileAssetId)
+
+      set((state) => ({
+        uploadedFileAssets: state.uploadedFileAssets.filter(
+          (item) => item.id !== fileAssetId
+        ),
+        isUploading: state.uploadQueue.some((task) => isUploadTaskActive(task)),
+        error: null,
+      }))
+
+      return true
+    } catch (error) {
+      const normalizedError = toError(error, 'Gagal menghapus file secara permanen.')
+
+      set((state) => ({
+        isUploading: state.uploadQueue.some((task) => isUploadTaskActive(task)),
+        error: normalizedError.message,
+      }))
+
+      throw normalizedError
+    }
+  },
   updateFileAssetMetadata: async (fileAssetId, metadata = {}) => {
     set({ isUploading: true, error: null })
 
@@ -852,6 +889,7 @@ export {
   deleteFileAsset,
   insertFileAssetRecord,
   loadFileAssetById,
+  purgeFileAsset,
   uploadAndRegisterFile,
   uploadFileToStorage,
   updateFileAssetMetadata,

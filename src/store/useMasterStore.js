@@ -1,11 +1,16 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 import { resolveTeamId, resolveTelegramUserId } from '../lib/auth-context'
+import { getAuthContext } from '../lib/auth-context'
+import {
+  assertCapabilityAccess,
+  capabilityContracts,
+} from '../lib/capabilities'
 
 const projectSelectColumns =
   'id, name, project_name, project_type, budget, is_wage_assignable, status, notes, deleted_at, is_active, team_id, created_at'
 const categorySelectColumns =
-  'id, name, category_group, notes, deleted_at, is_active, team_id, created_at'
+  'id, name, category_group, notes, deleted_at, team_id, created_at'
 const supplierSelectColumns =
   'id, name, supplier_name, supplier_type, notes, deleted_at, is_active, team_id, created_at'
 const professionSelectColumns =
@@ -21,6 +26,8 @@ const workerSelectColumns =
 const workerWageRateSelectColumns =
   'id, team_id, worker_id, project_id, role_name, wage_amount, is_default, deleted_at, created_at, workers:worker_id ( id, name, worker_name ), projects:project_id ( id, name, project_name )'
 
+const masterDataContract = capabilityContracts.master_data_admin
+
 function toError(error, fallbackMessage) {
   const message =
     typeof error?.message === 'string' && error.message.trim().length > 0
@@ -28,6 +35,16 @@ function toError(error, fallbackMessage) {
       : fallbackMessage
 
   return error instanceof Error ? error : new Error(message)
+}
+
+function assertMasterDataAccess() {
+  const { role } = getAuthContext()
+
+  return assertCapabilityAccess(
+    role,
+    masterDataContract.key,
+    masterDataContract.accessDeniedMessage
+  )
 }
 
 function normalizeText(value, fallback = null) {
@@ -456,6 +473,8 @@ function setFailure(set, error, fallbackMessage, patch = {}) {
 }
 
 async function insertRow(tableName, payload, columns) {
+  assertMasterDataAccess()
+
   const { data, error } = await supabase
     .from(tableName)
     .insert(payload)
@@ -470,6 +489,8 @@ async function insertRow(tableName, payload, columns) {
 }
 
 async function updateRow(tableName, recordId, payload, columns) {
+  assertMasterDataAccess()
+
   const { data, error } = await supabase
     .from(tableName)
     .update(payload)
@@ -486,6 +507,8 @@ async function updateRow(tableName, recordId, payload, columns) {
 }
 
 async function restoreRow(tableName, recordId, payload, columns) {
+  assertMasterDataAccess()
+
   const { data, error } = await supabase
     .from(tableName)
     .update(payload)
@@ -501,6 +524,8 @@ async function restoreRow(tableName, recordId, payload, columns) {
 }
 
 async function softDeleteRow(tableName, recordId, extraPatch = {}) {
+  assertMasterDataAccess()
+
   const { error } = await supabase
     .from(tableName)
     .update({
@@ -543,6 +568,8 @@ async function saveWorkerWithRates(workerData = {}, existingWorkerId = null) {
     throw new Error('Client Supabase belum dikonfigurasi.')
   }
 
+  assertMasterDataAccess()
+
   const teamId = resolveTeamId(workerData.team_id)
   const telegramUserId = resolveTelegramUserId(workerData.telegram_user_id)
   const workerName = normalizeText(workerData.worker_name ?? workerData.name)
@@ -582,6 +609,8 @@ async function softDeleteWorkerRecord(workerId) {
   if (!supabase) {
     throw new Error('Client Supabase belum dikonfigurasi.')
   }
+
+  assertMasterDataAccess()
 
   const { error } = await supabase.rpc('fn_soft_delete_worker', {
     p_worker_id: workerId,
@@ -904,7 +933,6 @@ const useMasterStore = create((set, get) => ({
           normalizedRecordId,
           {
             deleted_at: null,
-            is_active: true,
           },
           categorySelectColumns
         )
@@ -1107,7 +1135,6 @@ const useMasterStore = create((set, get) => ({
           name: categoryName,
           category_group: normalizeText(categoryData.category_group, 'operational'),
           notes: normalizeText(categoryData.notes, null),
-          is_active: categoryData.is_active ?? true,
           deleted_at: null,
         },
         categorySelectColumns
@@ -1160,7 +1187,7 @@ const useMasterStore = create((set, get) => ({
     set({ isLoading: true, error: null })
 
     try {
-      await softDeleteRow('expense_categories', categoryId, { is_active: false })
+      await softDeleteRow('expense_categories', categoryId)
 
       set((state) => ({
         categories: state.categories.filter((category) => category.id !== categoryId),

@@ -1,9 +1,11 @@
+import { Suspense } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 // eslint-disable-next-line no-unused-vars
 import { AnimatePresence, motion } from 'framer-motion'
 import BottomNav from '../ui/BottomNav'
+import GlobalToast from '../ui/GlobalToast'
 
-function MainLayout() {
+function MainLayout({ routeFallback = null }) {
   const location = useLocation()
   
   return (
@@ -18,11 +20,14 @@ function MainLayout() {
             transition={{ duration: 0.15, ease: 'easeOut' }}
             className="w-full min-h-full"
           >
-            <Outlet />
+            <Suspense fallback={routeFallback}>
+              <Outlet />
+            </Suspense>
           </motion.div>
         </AnimatePresence>
       </main>
       <BottomNav />
+      <GlobalToast />
     </div>
   )
 }

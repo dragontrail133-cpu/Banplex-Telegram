@@ -1,17 +1,21 @@
-import { createElement, useEffect, useMemo, useState } from 'react'
+import { createElement, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  CircleDollarSign,
   CalendarDays,
   CalendarRange,
   FilePenLine,
   Info,
   Loader2,
-  MoreVertical,
   UserRound,
 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { formatAppCalendarLabel, formatAppDateLabel, getAppTodayKey } from '../lib/date-time'
-import { fetchAttendanceHistoryFromApi } from '../lib/records-api'
+import {
+  fetchAttendanceHistoryFromApi,
+  fetchAttendanceHistorySummaryFromApi,
+} from '../lib/records-api'
 import useAuthStore from '../store/useAuthStore'
+import useToastStore from '../store/useToastStore'
 import {
   AppButton,
   AppCardDashed,
@@ -20,6 +24,7 @@ import {
   AppListRow,
   AppSheet,
 } from './ui/AppPrimitives'
+import ActionCard, { ActionCardSheet } from './ui/ActionCard'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -52,6 +57,10 @@ function getStatusLabel(status) {
 
   if (normalizedStatus === 'overtime') {
     return 'Lembur'
+  }
+
+  if (normalizedStatus === 'absent') {
+    return 'Tidak Hadir'
   }
 
   return 'Full Day'
@@ -101,7 +110,10 @@ function getUniqueWorkerIds(records = []) {
 
 function getEligibleRecapRecords(records = []) {
   return records.filter(
-    (record) => String(record?.billing_status ?? '').trim().toLowerCase() === 'unbilled'
+    (record) =>
+      String(record?.billing_status ?? '').trim().toLowerCase() === 'unbilled' &&
+      Number(record?.total_pay ?? 0) > 0 &&
+      !record?.salary_bill_id
   )
 }
 
@@ -131,7 +143,13 @@ function buildRecapContext(kind, group) {
 }
 
 function getRecapableRecordCount(kind, group) {
-  return buildRecapContext(kind, group)?.recapRecordCount ?? 0
+  const summaryCount = Number(group?.recapableCount ?? 0)
+
+  if (!Array.isArray(group?.records) || group.records.length === 0) {
+    return summaryCount
+  }
+
+  return buildRecapContext(kind, group)?.recapRecordCount ?? summaryCount
 }
 
 function buildDailyGroups(attendances = []) {
@@ -241,20 +259,11 @@ function buildWorkerGroups(attendances = []) {
     .sort((left, right) => compareText(left.workerName, right.workerName))
 }
 
-function getActionConfig(tab, group) {
+function getActionConfig(tab, group, paymentTarget = null) {
   const recapableRecordCount = getRecapableRecordCount(tab, group)
 
   if (tab === 'daily') {
     return [
-      ...(recapableRecordCount > 0
-        ? [
-            {
-              id: 'recap',
-              label: 'Rekap',
-              icon: CalendarRange,
-            },
-          ]
-        : []),
       {
         id: 'edit',
         label: 'Edit Absensi',
@@ -269,6 +278,15 @@ function getActionConfig(tab, group) {
   }
 
   return [
+    ...(paymentTarget
+      ? [
+          {
+            id: 'pay',
+            label: 'Bayar',
+            icon: CircleDollarSign,
+          },
+        ]
+      : []),
     ...(recapableRecordCount > 0
       ? [
           {
@@ -286,38 +304,19 @@ function getActionConfig(tab, group) {
   ]
 }
 
-function AttendanceSummaryRow({ icon, title, description, onOpenActions }) {
+function AttendanceSummaryRow({ icon, title, description, actions, onOpenActions }) {
   const leadingIcon = icon ? createElement(icon, { className: 'h-4 w-4' }) : null
 
   return (
-    <AppCardStrong padded={false}>
-      <div className="flex items-center gap-3 px-3 py-3">
-        <button
-          className="flex min-w-0 flex-1 items-center gap-3 text-left"
-          onClick={onOpenActions}
-          type="button"
-        >
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--app-surface-low-color)] text-[var(--app-text-color)]">
-            {leadingIcon}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">{title}</p>
-            {description ? (
-              <p className="mt-0.5 text-xs text-[var(--app-hint-color)]">{description}</p>
-            ) : null}
-          </div>
-        </button>
-
-        <button
-          aria-label={`Aksi ${title}`}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] text-[var(--app-text-color)]"
-          onClick={onOpenActions}
-          type="button"
-        >
-          <MoreVertical className="h-4 w-4" />
-        </button>
-      </div>
-    </AppCardStrong>
+    <ActionCard
+      title={title}
+      subtitle={description}
+      actions={actions}
+      menuMode="shared"
+      onOpenMenu={onOpenActions}
+      leadingIcon={leadingIcon}
+      className="app-card px-3 py-3"
+    />
   )
 }
 
@@ -335,10 +334,15 @@ function AttendanceDetailList({ group, mode, onEditRecord }) {
     return null
   }
 
+  const records = Array.isArray(group.records) ? group.records : []
+
   return (
     <AppListCard padded={false} className="overflow-hidden rounded-[24px]">
-      {group.records.map((record) => {
-        const showEditAction = mode === 'daily-edit'
+      {records.map((record) => {
+        const showEditAction =
+          mode === 'daily-edit' &&
+          String(record?.billing_status ?? '').trim().toLowerCase() !== 'billed' &&
+          !record?.salary_bill_id
 
         return (
           <AppListRow
@@ -380,12 +384,24 @@ function AttendanceDetailList({ group, mode, onEditRecord }) {
   )
 }
 
-function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
+function PayrollAttendanceHistory({
+  onRequestPay = null,
+  onRequestRecap = null,
+  refreshToken = 0,
+  resolveWorkerPaymentTarget = null,
+}) {
+  const location = useLocation()
   const navigate = useNavigate()
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
-  const [activeTab, setActiveTab] = useState('daily')
+  const requestedTab = useMemo(() => {
+    const nextTab = new URLSearchParams(location.search).get('tab')
+
+    return nextTab === 'worker' ? 'worker' : 'daily'
+  }, [location.search])
+  const [activeTab, setActiveTab] = useState(requestedTab)
   const [selectedMonth] = useState(() => formatMonthValue(''))
-  const [attendances, setAttendances] = useState([])
+  const [dailyGroups, setDailyGroups] = useState([])
+  const [workerGroups, setWorkerGroups] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
   const [sheetState, setSheetState] = useState({
@@ -393,34 +409,69 @@ function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
     mode: null,
     group: null,
   })
-  const [recapError, setRecapError] = useState(null)
+  const [activeActionCard, setActiveActionCard] = useState(null)
   const [isRecapSubmitting, setIsRecapSubmitting] = useState(false)
+  const loadRequestIdRef = useRef(0)
+  const showToast = useToastStore((state) => state.showToast)
+
+  useEffect(() => {
+    setActiveTab(requestedTab)
+  }, [requestedTab])
 
   useEffect(() => {
     if (!currentTeamId) {
-      setAttendances([])
+      setDailyGroups([])
+      setWorkerGroups([])
       setError(null)
+      setSheetState({
+        kind: null,
+        mode: null,
+        group: null,
+      })
+      setActiveActionCard(null)
       return
     }
 
     let isActive = true
+    loadRequestIdRef.current += 1
+    setIsRecapSubmitting(false)
+    setActiveActionCard(null)
+    setSheetState({
+      kind: null,
+      mode: null,
+      group: null,
+    })
 
     async function loadAttendanceHistory() {
       setIsLoading(true)
       setError(null)
 
       try {
-        const nextAttendances = await fetchAttendanceHistoryFromApi({
+        const nextSummary = await fetchAttendanceHistorySummaryFromApi({
           teamId: currentTeamId,
           month: selectedMonth,
         })
 
         if (isActive) {
-          setAttendances(nextAttendances)
+          setDailyGroups(
+            (nextSummary.dailyGroups ?? []).map((group) => ({
+              ...group,
+              title: formatAppCalendarLabel(group.dateKey) || group.title || group.dateKey,
+              description: group.description ?? `${group.recordCount ?? 0} terabsen`,
+            }))
+          )
+          setWorkerGroups(
+            (nextSummary.workerGroups ?? []).map((group) => ({
+              ...group,
+              title: group.title || group.workerName,
+              description: group.description ?? `${group.recordCount ?? 0} record`,
+            }))
+          )
         }
       } catch (loadError) {
         if (isActive) {
-          setAttendances([])
+          setDailyGroups([])
+          setWorkerGroups([])
           setError(loadError instanceof Error ? loadError.message : 'Gagal memuat data.')
         }
       } finally {
@@ -437,37 +488,37 @@ function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
     }
   }, [currentTeamId, refreshToken, selectedMonth])
 
-  const dailyGroups = useMemo(() => buildDailyGroups(attendances), [attendances])
-  const workerGroups = useMemo(() => buildWorkerGroups(attendances), [attendances])
   const activeGroups = activeTab === 'daily' ? dailyGroups : workerGroups
+  const activeRecapGroup = sheetState.mode === 'recap-confirm' ? sheetState.group : null
+  const activeDetailGroup =
+    sheetState.mode === 'detail' || sheetState.mode === 'daily-edit' ? sheetState.group : null
+  const activeDetailRecords = Array.isArray(activeDetailGroup?.records)
+    ? activeDetailGroup.records
+    : []
   const selectedRecapContext = useMemo(() => {
-    if (!sheetState.group || sheetState.mode !== 'recap-confirm') {
+    if (!activeRecapGroup) {
       return null
     }
 
-    return buildRecapContext(sheetState.kind, sheetState.group)
-  }, [sheetState.group, sheetState.kind, sheetState.mode])
+    return buildRecapContext(sheetState.kind, activeRecapGroup)
+  }, [activeRecapGroup, sheetState.kind])
   const activeSheetTitle =
-    sheetState.kind === 'daily'
-      ? sheetState.mode === 'daily-edit'
+    sheetState.mode === 'recap-confirm'
+      ? sheetState.kind === 'daily'
+        ? 'Konfirmasi Rekap Harian'
+        : 'Konfirmasi Rekap Pekerja'
+      : sheetState.mode === 'daily-edit'
         ? 'Edit Absensi'
-        : 'Detail Harian'
-      : sheetState.kind === 'worker'
-        ? 'Detail Pekerja'
-        : 'Detail'
-
-  const openActionSheet = (kind, group) => {
-    setRecapError(null)
-    setSheetState({
-      kind,
-      mode: 'actions',
-      group,
-    })
-  }
+        : sheetState.kind === 'daily'
+          ? 'Detail Harian'
+          : sheetState.kind === 'worker'
+            ? 'Detail Pekerja'
+            : 'Detail'
 
   const closeSheet = () => {
-    setRecapError(null)
+    loadRequestIdRef.current += 1
     setIsRecapSubmitting(false)
+    setActiveActionCard(null)
     setSheetState({
       kind: null,
       mode: null,
@@ -475,22 +526,123 @@ function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
     })
   }
 
-  const openDetailSheet = (kind, group, mode = 'detail') => {
-    setRecapError(null)
-    setSheetState({
-      kind,
-      mode,
-      group,
-    })
+  const handleOpenActionMenu = (menuState) => {
+    setActiveActionCard(menuState)
   }
 
-  const openRecapConfirmSheet = () => {
-    setRecapError(null)
+  const handleCloseActionMenu = () => {
+    setActiveActionCard(null)
+  }
+
+  const handleTabChange = (nextTab) => {
+    setActiveTab(nextTab)
+    handleCloseActionMenu()
+
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextTab === 'worker' ? '?tab=worker' : '',
+      },
+      { replace: true }
+    )
+  }
+
+  const hydrateAttendanceGroup = (kind, group, records = []) => {
+    const normalizedRecords = Array.isArray(records) ? records : []
+    const summaryGroup =
+      kind === 'daily'
+        ? buildDailyGroups(normalizedRecords).find((item) => item.dateKey === group?.dateKey) ??
+          null
+        : buildWorkerGroups(normalizedRecords).find(
+            (item) =>
+              item.workerId === group?.workerId || item.workerName === group?.workerName
+          ) ?? null
+    const fallbackRecords = Array.isArray(group?.records) ? group.records : []
+    const fallbackRecordCount = Number(group?.recordCount ?? fallbackRecords.length ?? 0)
+    const fallbackBilledCount = Number(group?.billedCount ?? 0)
+    const fallbackUnbilledCount = Number(group?.unbilledCount ?? 0)
+    const fallbackRecapableCount = Number(group?.recapableCount ?? 0)
+
+    return {
+      ...group,
+      ...(summaryGroup ?? {}),
+      records:
+        summaryGroup?.records ??
+        (normalizedRecords.length > 0 ? normalizedRecords : fallbackRecords),
+      recordCount:
+        summaryGroup?.records?.length ??
+        (normalizedRecords.length > 0 ? normalizedRecords.length : fallbackRecordCount),
+      billedCount:
+        summaryGroup?.billedCount ??
+        (normalizedRecords.length > 0
+          ? normalizedRecords.filter(
+              (record) => String(record?.billing_status ?? '').trim().toLowerCase() === 'billed'
+            ).length
+          : fallbackBilledCount),
+      unbilledCount:
+        summaryGroup?.unbilledCount ??
+        (normalizedRecords.length > 0
+          ? normalizedRecords.filter(
+              (record) => String(record?.billing_status ?? '').trim().toLowerCase() !== 'billed'
+            ).length
+          : fallbackUnbilledCount),
+      recapableCount:
+        summaryGroup?.recapableCount ??
+        (normalizedRecords.length > 0
+          ? normalizedRecords.filter(
+              (record) =>
+                String(record?.billing_status ?? '').trim().toLowerCase() === 'unbilled' &&
+                Number(record?.total_pay ?? 0) > 0 &&
+                !record?.salary_bill_id
+            ).length
+          : fallbackRecapableCount),
+    }
+  }
+
+  const loadGroupDetail = async (kind, group, mode) => {
+    if (!currentTeamId || !group) {
+      return
+    }
+
+    const requestId = ++loadRequestIdRef.current
+    const detailMode = mode ?? 'detail'
+
     setSheetState({
-      kind: sheetState.kind,
-      mode: 'recap-confirm',
-      group: sheetState.group,
+      kind,
+      mode: 'loading',
+      group: null,
     })
+
+    try {
+      const nextGroup = await fetchAttendanceHistoryFromApi({
+        teamId: currentTeamId,
+        month: selectedMonth,
+        workerId: kind === 'worker' ? group.workerId ?? '' : '',
+        workerName: kind === 'worker' ? group.workerName ?? '' : '',
+        date: kind === 'daily' ? group.dateKey ?? '' : '',
+      })
+
+      if (requestId !== loadRequestIdRef.current) {
+        return
+      }
+
+      setSheetState({
+        kind,
+        mode: detailMode,
+        group: hydrateAttendanceGroup(kind, group, nextGroup),
+      })
+    } catch (loadError) {
+      if (requestId !== loadRequestIdRef.current) {
+        return
+      }
+
+      closeSheet()
+      showToast({
+        tone: 'error',
+        title: 'Gagal memuat detail',
+        message: loadError instanceof Error ? loadError.message : 'Gagal memuat detail.',
+      })
+    }
   }
 
   const handleConfirmRecap = async () => {
@@ -501,22 +653,27 @@ function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
     const nextContext = buildRecapContext(sheetState.kind, sheetState.group)
 
     setIsRecapSubmitting(true)
-    setRecapError(null)
 
     try {
       await onRequestRecap?.(nextContext)
       closeSheet()
     } catch (confirmError) {
-      setRecapError(
-        confirmError instanceof Error ? confirmError.message : 'Rekap gagal.'
-      )
+      showToast({
+        tone: 'error',
+        title: 'Rekap gagal',
+        message: confirmError instanceof Error ? confirmError.message : 'Rekap gagal.',
+      })
     } finally {
       setIsRecapSubmitting(false)
     }
   }
 
   const handleEditRecord = (record) => {
-    if (!record?.id) {
+    if (
+      !record?.id ||
+      String(record?.billing_status ?? '').trim().toLowerCase() === 'billed' ||
+      Boolean(record?.salary_bill_id)
+    ) {
       return
     }
 
@@ -524,27 +681,56 @@ function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
     navigate(`/edit/attendance/${record.id}`, {
       state: {
         item: record,
+        returnTo: '/payroll?tab=worker',
       },
     })
   }
 
-  const handleSelectAction = (actionId) => {
-    if (!sheetState.group) {
+  const handleSelectAction = (kind, group, actionId) => {
+    if (!group) {
+      return
+    }
+
+    if (actionId === 'pay') {
+      try {
+        onRequestPay?.(group)
+      } catch (payError) {
+        showToast({
+          tone: 'error',
+          title: 'Tagihan pekerja tidak tersedia',
+          message: payError instanceof Error ? payError.message : 'Gagal membuka pembayaran.',
+        })
+      }
       return
     }
 
     if (actionId === 'recap') {
-      openRecapConfirmSheet()
+      void loadGroupDetail(kind, group, 'recap-confirm')
       return
     }
 
     if (actionId === 'edit') {
-      openDetailSheet('daily', sheetState.group, 'daily-edit')
+      void loadGroupDetail('daily', group, 'daily-edit')
       return
     }
 
     if (actionId === 'detail') {
-      openDetailSheet(sheetState.kind, sheetState.group, 'detail')
+      if (kind === 'worker') {
+        const workerKey = encodeURIComponent(group.workerId ?? group.workerName ?? '')
+
+        navigate(`/payroll/worker/${workerKey}?month=${selectedMonth}&workerName=${encodeURIComponent(group.workerName ?? '')}`, {
+          state: {
+            workerId: group.workerId ?? null,
+            workerName: group.workerName ?? null,
+            month: selectedMonth,
+            returnTo: '/payroll?tab=worker',
+          },
+        })
+
+        return
+      }
+
+      void loadGroupDetail(kind, group, 'detail')
     }
   }
 
@@ -553,7 +739,7 @@ function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
       <div className="grid grid-cols-2 gap-2 rounded-[24px] bg-[var(--app-surface-low-color)] p-1">
         <AppButton
           fullWidth
-          onClick={() => setActiveTab('daily')}
+          onClick={() => handleTabChange('daily')}
           size="sm"
           type="button"
           variant={activeTab === 'daily' ? 'primary' : 'secondary'}
@@ -562,7 +748,7 @@ function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
         </AppButton>
         <AppButton
           fullWidth
-          onClick={() => setActiveTab('worker')}
+          onClick={() => handleTabChange('worker')}
           size="sm"
           type="button"
           variant={activeTab === 'worker' ? 'primary' : 'secondary'}
@@ -593,15 +779,28 @@ function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
         </div>
       ) : activeGroups.length > 0 ? (
         <div className="space-y-3">
-          {activeGroups.map((group) => (
-            <AttendanceSummaryRow
-              key={group.dateKey ?? group.workerId ?? group.workerName}
-              icon={activeTab === 'daily' ? CalendarDays : UserRound}
-              title={group.title}
-              description={group.description}
-              onOpenActions={() => openActionSheet(activeTab, group)}
-            />
-          ))}
+          {activeGroups.map((group) => {
+            const paymentTarget =
+              activeTab === 'worker' && typeof resolveWorkerPaymentTarget === 'function'
+                ? resolveWorkerPaymentTarget(group)
+                : null
+
+            return (
+              <AttendanceSummaryRow
+                key={group.dateKey ?? group.workerId ?? group.workerName}
+                icon={activeTab === 'daily' ? CalendarDays : UserRound}
+                title={group.title}
+                description={group.description}
+                actions={getActionConfig(activeTab, group, paymentTarget).map((action) => ({
+                  id: action.id,
+                  label: action.label,
+                  icon: createElement(action.icon, { className: 'h-4 w-4' }),
+                  onClick: () => handleSelectAction(activeTab, group, action.id),
+                }))}
+                onOpenActions={handleOpenActionMenu}
+              />
+            )
+          })}
         </div>
       ) : (
         <AppCardDashed className="px-4 py-5 text-sm text-[var(--app-hint-color)]">
@@ -609,24 +808,22 @@ function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
         </AppCardDashed>
       )}
 
+      <ActionCardSheet
+        open={Boolean(activeActionCard)}
+        onClose={handleCloseActionMenu}
+        title={activeActionCard?.title ?? (activeTab === 'daily' ? 'Aksi Harian' : 'Aksi Pekerja')}
+        description={activeActionCard?.description ?? null}
+        actions={activeActionCard?.actions ?? []}
+      />
+
       <AppSheet
-        open={sheetState.mode === 'actions'}
+        open={sheetState.mode === 'loading'}
         onClose={closeSheet}
-        title={sheetState.kind === 'daily' ? 'Aksi Harian' : 'Aksi Pekerja'}
+        title={sheetState.kind === 'daily' ? 'Memuat Detail Harian' : 'Memuat Detail Pekerja'}
       >
-        <div className="space-y-2">
-          {getActionConfig(sheetState.kind, sheetState.group).map((action) => (
-            <AppButton
-              key={action.id}
-              fullWidth
-              leadingIcon={<action.icon className="h-4 w-4" />}
-              onClick={() => handleSelectAction(action.id)}
-              type="button"
-              variant="secondary"
-            >
-              {action.label}
-            </AppButton>
-          ))}
+        <div className="flex items-center gap-3 text-sm text-[var(--app-hint-color)]">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>Memuat detail ringkasan...</span>
         </div>
       </AppSheet>
 
@@ -635,12 +832,12 @@ function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
         onClose={closeSheet}
         title={sheetState.kind === 'daily' ? 'Konfirmasi Rekap Harian' : 'Konfirmasi Rekap Pekerja'}
       >
-        {sheetState.group ? (
+        {activeRecapGroup ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-2">
               {sheetState.kind === 'daily' ? (
                 <>
-                  <DetailSummaryCard label="Hari" value={sheetState.group.title} />
+                  <DetailSummaryCard label="Hari" value={activeRecapGroup.title} />
                   <DetailSummaryCard
                     label="Pekerja"
                     value={String(selectedRecapContext?.workerIds?.length ?? 0)}
@@ -651,14 +848,14 @@ function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
                   />
                   <DetailSummaryCard
                     label="Billed"
-                    value={String(sheetState.group.billedCount ?? 0)}
+                    value={String(activeRecapGroup.billedCount ?? 0)}
                   />
                 </>
               ) : (
                 <>
-                  <DetailSummaryCard label="Pekerja" value={sheetState.group.workerName} />
-                  <DetailSummaryCard label="Dari" value={formatAppDateLabel(sheetState.group.firstDate)} />
-                  <DetailSummaryCard label="Sampai" value={formatAppDateLabel(sheetState.group.lastDate)} />
+                  <DetailSummaryCard label="Pekerja" value={activeRecapGroup.workerName} />
+                  <DetailSummaryCard label="Dari" value={formatAppDateLabel(activeRecapGroup.firstDate)} />
+                  <DetailSummaryCard label="Sampai" value={formatAppDateLabel(activeRecapGroup.lastDate)} />
                   <DetailSummaryCard
                     label="Record"
                     value={String(selectedRecapContext?.recapRecordCount ?? 0)}
@@ -666,12 +863,6 @@ function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
                 </>
               )}
             </div>
-
-            {recapError ? (
-              <AppCardDashed className="app-tone-danger text-sm leading-6 text-rose-700">
-                {recapError}
-              </AppCardDashed>
-            ) : null}
 
             <div className="flex gap-2">
               <AppButton fullWidth onClick={closeSheet} type="button" variant="secondary">
@@ -696,53 +887,47 @@ function PayrollAttendanceHistory({ onRequestRecap = null, refreshToken = 0 }) {
         onClose={closeSheet}
         title={activeSheetTitle}
       >
-        {sheetState.group ? (
+        {activeDetailGroup ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-2">
               {sheetState.kind === 'daily' ? (
                 <>
-                  <DetailSummaryCard label="Hari" value={sheetState.group.title} />
-                  <DetailSummaryCard
-                    label="Record"
-                    value={String(sheetState.group.records.length)}
-                  />
+                  <DetailSummaryCard label="Hari" value={activeDetailGroup.title} />
+                  <DetailSummaryCard label="Record" value={String(activeDetailRecords.length)} />
                   <DetailSummaryCard
                     label="Billed"
-                    value={String(sheetState.group.billedCount ?? 0)}
+                    value={String(activeDetailGroup.billedCount ?? 0)}
                   />
                   <DetailSummaryCard
                     label="Unbilled"
-                    value={String(sheetState.group.unbilledCount ?? 0)}
+                    value={String(activeDetailGroup.unbilledCount ?? 0)}
                   />
                 </>
               ) : (
                 <>
-                  <DetailSummaryCard label="Pekerja" value={sheetState.group.workerName} />
-                  <DetailSummaryCard
-                    label="Record"
-                    value={String(sheetState.group.records.length)}
-                  />
+                  <DetailSummaryCard label="Pekerja" value={activeDetailGroup.workerName} />
+                  <DetailSummaryCard label="Record" value={String(activeDetailRecords.length)} />
                   <DetailSummaryCard
                     label="Billed"
-                    value={String(sheetState.group.billedCount ?? 0)}
+                    value={String(activeDetailGroup.billedCount ?? 0)}
                   />
                   <DetailSummaryCard
                     label="Unbilled"
-                    value={String(sheetState.group.unbilledCount ?? 0)}
+                    value={String(activeDetailGroup.unbilledCount ?? 0)}
                   />
                 </>
               )}
             </div>
 
-            {sheetState.kind === 'worker' && sheetState.group.firstDate && sheetState.group.lastDate ? (
+            {sheetState.kind === 'worker' && activeDetailGroup.firstDate && activeDetailGroup.lastDate ? (
               <div className="grid grid-cols-2 gap-2">
-                <DetailSummaryCard label="Dari" value={formatAppDateLabel(sheetState.group.firstDate)} />
-                <DetailSummaryCard label="Sampai" value={formatAppDateLabel(sheetState.group.lastDate)} />
+                <DetailSummaryCard label="Dari" value={formatAppDateLabel(activeDetailGroup.firstDate)} />
+                <DetailSummaryCard label="Sampai" value={formatAppDateLabel(activeDetailGroup.lastDate)} />
               </div>
             ) : null}
 
             <AttendanceDetailList
-              group={sheetState.group}
+              group={activeDetailGroup}
               mode={sheetState.kind === 'daily' && sheetState.mode === 'daily-edit' ? 'daily-edit' : sheetState.kind}
               onEditRecord={handleEditRecord}
             />

@@ -6,11 +6,8 @@
   --app-font-sans: 'Manrope', 'Segoe UI', system-ui, sans-serif;
   --app-bg-color: var(--tg-theme-bg-color, #f3f4f5);
   --app-surface-low-color: #f3f4f5;
-  --app-surface-color: var(
-    --tg-theme-secondary-bg-color,
-    rgba(255, 255, 255, 0.82)
-  );
-  --app-surface-strong-color: rgba(255, 255, 255, 0.96);
+  --app-surface-color: var(--tg-theme-secondary-bg-color, #ffffff);
+  --app-surface-strong-color: #ffffff;
   --app-surface-high-color: #e7e8e9;
   --app-border-color: rgba(190, 201, 194, 0.42);
   --app-outline-soft: rgba(111, 121, 115, 0.16);
@@ -19,7 +16,7 @@
   --app-link-color: var(--tg-theme-link-color, #00513b);
   --app-brand-accent: #065f46;
   --app-brand-accent-contrast: #ffffff;
-  --app-brand-accent-muted: rgba(6, 95, 70, 0.12);
+  --app-brand-accent-muted: #d9eee4;
   --app-brand-accent-soft: #c8e7d7;
   --app-radius-card: 24px;
   --app-radius-panel: 28px;
@@ -35,38 +32,38 @@
   --app-success-color: #065f46;
   --app-warning-color: #a16207;
   --app-info-color: #0f766e;
-  --app-nav-bg: rgba(255, 255, 255, 0.84);
+  --app-nav-bg: #ffffff;
   --app-nav-border: rgba(190, 201, 194, 0.38);
   --app-nav-shadow: 0 4px 20px rgba(25, 28, 29, 0.04), 0 20px 50px rgba(25, 28, 29, 0.12);
-  --app-nav-active-bg: rgba(6, 95, 70, 0.1);
+  --app-nav-active-bg: #d9eee4;
   --app-fab-shadow: 0 10px 24px rgba(25, 28, 29, 0.08), 0 24px 40px rgba(25, 28, 29, 0.16);
-  --app-tone-neutral-bg: rgba(73, 100, 88, 0.12);
+  --app-tone-neutral-bg: #e4ece7;
   --app-tone-neutral-border: rgba(73, 100, 88, 0.16);
   --app-tone-neutral-text: #324c41;
-  --app-tone-info-bg: rgba(15, 118, 110, 0.12);
+  --app-tone-info-bg: #dff5f4;
   --app-tone-info-border: rgba(15, 118, 110, 0.18);
   --app-tone-info-text: #115e59;
-  --app-tone-success-bg: rgba(6, 95, 70, 0.12);
+  --app-tone-success-bg: #e0f2ea;
   --app-tone-success-border: rgba(6, 95, 70, 0.16);
   --app-tone-success-text: #065f46;
-  --app-tone-warning-bg: rgba(245, 158, 11, 0.14);
+  --app-tone-warning-bg: #fff1d6;
   --app-tone-warning-border: rgba(217, 119, 6, 0.18);
   --app-tone-warning-text: #92400e;
-  --app-tone-danger-bg: rgba(186, 26, 26, 0.1);
+  --app-tone-danger-bg: #fde2e1;
   --app-tone-danger-border: rgba(186, 26, 26, 0.16);
   --app-tone-danger-text: #93000a;
+  --app-toast-border-color: rgba(190, 201, 194, 0.56);
+  --app-toast-shadow: 0 12px 30px rgba(25, 28, 29, 0.12);
+  --app-toast-icon-bg: #f3f4f5;
   --app-card-shadow: 0 4px 20px rgba(25, 28, 29, 0.04);
   --app-card-shadow-strong: 0 4px 20px rgba(25, 28, 29, 0.04), 0 12px 40px rgba(25, 28, 29, 0.08);
   --app-input-bg: #f3f4f5;
-  --app-input-bg-strong: #edeeef;
+  --app-input-bg-strong: #eceeef;
   --app-input-border: rgba(111, 121, 115, 0.18);
   --app-input-border-focus: #004532;
   --app-input-placeholder: rgba(95, 105, 100, 0.82);
   --app-backdrop-color: rgba(25, 28, 29, 0.24);
-  --app-body-gradient:
-    radial-gradient(circle at top right, rgba(200, 231, 215, 0.78), transparent 28%),
-    radial-gradient(circle at top left, rgba(166, 242, 209, 0.3), transparent 22%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.76), transparent 28%);
+  --app-body-gradient: none;
   color-scheme: light dark;
   font-family: var(--app-font-sans);
   font-synthesis: none;
@@ -79,8 +76,8 @@
 :root[data-color-scheme='dark'] {
   --app-bg-color: var(--tg-theme-bg-color, #0f1513);
   --app-surface-low-color: #16201d;
-  --app-surface-color: var(--tg-theme-secondary-bg-color, rgba(19, 29, 25, 0.84));
-  --app-surface-strong-color: rgba(23, 33, 29, 0.94);
+  --app-surface-color: var(--tg-theme-secondary-bg-color, #16201d);
+  --app-surface-strong-color: #1a2622;
   --app-surface-high-color: #23312c;
   --app-border-color: rgba(148, 173, 161, 0.2);
   --app-outline-soft: rgba(190, 201, 194, 0.14);
@@ -89,50 +86,44 @@
   --app-link-color: var(--tg-theme-link-color, #8bd6b6);
   --app-brand-accent: #8bd6b6;
   --app-brand-accent-contrast: #0f1513;
-  --app-brand-accent-muted: rgba(139, 214, 182, 0.14);
-  --app-brand-accent-soft: rgba(139, 214, 182, 0.18);
-  --app-nav-bg: rgba(18, 27, 24, 0.88);
+  --app-brand-accent-muted: #23382f;
+  --app-brand-accent-soft: #21352d;
+  --app-nav-bg: #17221e;
   --app-nav-border: rgba(148, 173, 161, 0.18);
   --app-nav-shadow: 0 20px 42px rgba(0, 0, 0, 0.34);
-  --app-nav-active-bg: rgba(139, 214, 182, 0.14);
+  --app-nav-active-bg: #22372e;
   --app-fab-shadow: 0 14px 28px rgba(0, 0, 0, 0.24), 0 24px 48px rgba(0, 0, 0, 0.34);
-  --app-tone-neutral-bg: rgba(175, 205, 190, 0.12);
+  --app-tone-neutral-bg: #24322d;
   --app-tone-neutral-border: rgba(175, 205, 190, 0.18);
   --app-tone-neutral-text: #dbe3dd;
-  --app-tone-info-bg: rgba(110, 231, 235, 0.12);
+  --app-tone-info-bg: #173a39;
   --app-tone-info-border: rgba(110, 231, 235, 0.18);
   --app-tone-info-text: #b9f4f6;
-  --app-tone-success-bg: rgba(139, 214, 182, 0.12);
+  --app-tone-success-bg: #1a352d;
   --app-tone-success-border: rgba(139, 214, 182, 0.18);
   --app-tone-success-text: #b7f0d4;
-  --app-tone-warning-bg: rgba(245, 158, 11, 0.14);
+  --app-tone-warning-bg: #3a2b10;
   --app-tone-warning-border: rgba(245, 158, 11, 0.2);
   --app-tone-warning-text: #fde68a;
-  --app-tone-danger-bg: rgba(255, 180, 173, 0.12);
+  --app-tone-danger-bg: #3a1a18;
   --app-tone-danger-border: rgba(255, 180, 173, 0.16);
   --app-tone-danger-text: #ffdad6;
+  --app-toast-border-color: rgba(148, 173, 161, 0.18);
+  --app-toast-shadow: 0 16px 40px rgba(0, 0, 0, 0.34);
+  --app-toast-icon-bg: rgba(33, 46, 41, 0.92);
   --app-card-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
   --app-card-shadow-strong: 0 10px 28px rgba(0, 0, 0, 0.22), 0 20px 42px rgba(0, 0, 0, 0.3);
-  --app-input-bg: rgba(33, 46, 41, 0.86);
-  --app-input-bg-strong: rgba(40, 57, 50, 0.92);
+  --app-input-bg: #21302b;
+  --app-input-bg-strong: #263730;
   --app-input-border: rgba(148, 173, 161, 0.2);
   --app-input-border-focus: #8bd6b6;
   --app-input-placeholder: rgba(219, 227, 221, 0.58);
   --app-backdrop-color: rgba(7, 11, 9, 0.62);
-  --app-body-gradient:
-    radial-gradient(circle at top left, rgba(139, 214, 182, 0.14), transparent 28%),
-    radial-gradient(circle at top right, rgba(73, 100, 88, 0.28), transparent 38%),
-    linear-gradient(180deg, rgba(7, 11, 9, 0.6), transparent 55%);
+  --app-body-gradient: none;
   color-scheme: dark;
 }
 
-:root[data-color-scheme='dark'] .bg-white,
-:root[data-color-scheme='dark'] .bg-white\/70,
-:root[data-color-scheme='dark'] .bg-white\/75,
-:root[data-color-scheme='dark'] .bg-white\/80,
-:root[data-color-scheme='dark'] .bg-white\/85,
-:root[data-color-scheme='dark'] .bg-white\/90,
-:root[data-color-scheme='dark'] .bg-white\/95 {
+:root[data-color-scheme='dark'] .bg-white {
   background-color: var(--app-surface-strong-color) !important;
 }
 
@@ -348,38 +339,11 @@
     color: var(--tg-theme-text-color, var(--app-text-color));
   }
 
-  .app-shell::before,
-  .app-shell::after {
-    content: '';
-    position: absolute;
-    z-index: -1;
-    border-radius: 9999px;
-    filter: blur(70px);
-    pointer-events: none;
-  }
-
-  .app-shell::before {
-    top: -96px;
-    right: -88px;
-    height: 220px;
-    width: 220px;
-    background: rgba(200, 231, 215, 0.72);
-  }
-
-  .app-shell::after {
-    bottom: 12%;
-    left: -72px;
-    height: 180px;
-    width: 180px;
-    background: rgba(166, 242, 209, 0.28);
-  }
-
   .app-page-surface {
     border: 1px solid var(--app-outline-soft);
     background: var(--app-surface-strong-color);
     border-radius: var(--app-radius-panel);
     box-shadow: var(--app-card-shadow-strong);
-    backdrop-filter: blur(24px);
   }
 
   .app-section-surface {
@@ -394,7 +358,6 @@
     background: var(--app-surface-strong-color);
     border-radius: var(--app-radius-card);
     box-shadow: var(--app-card-shadow);
-    backdrop-filter: blur(24px);
   }
 
   .app-card-strong {
@@ -402,7 +365,6 @@
     background: var(--app-surface-strong-color);
     border-radius: var(--app-radius-panel);
     box-shadow: var(--app-card-shadow-strong);
-    backdrop-filter: blur(24px);
   }
 
   .app-card-dashed {
@@ -545,6 +507,22 @@
   .app-page-lead {
     margin-top: 0.25rem;
     font-size: 0.95rem;
+    line-height: 1.55;
+    color: var(--app-hint-color);
+  }
+
+  .app-form-page-title {
+    font-size: clamp(1.4rem, 5vw, 1.9rem);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.04em;
+    color: var(--app-text-color);
+  }
+
+  .app-form-page-lead {
+    margin-top: 0.25rem;
+    max-width: 28rem;
+    font-size: 0.875rem;
     line-height: 1.55;
     color: var(--app-hint-color);
   }

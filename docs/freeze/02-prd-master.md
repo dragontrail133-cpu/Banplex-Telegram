@@ -1,6 +1,7 @@
 # PRD — Banplex Greenfield
 
-Freeze date: `2026-04-19`  
+Freeze date: `2026-04-19`
+Runtime reconciliation: `2026-04-23`
 Status: `official concise master PRD`
 
 ## 1. Overview
@@ -21,6 +22,7 @@ Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu menc
 | Boundary | domain inti memakai `read direct/read model server` dan `write API/RPC only` |
 | Integrity | parent-child lifecycle, payment, restore, dan history harus konsisten |
 | Supporting output | `Payment Receipt PDF` adalah capability awal resmi dari flow `Pembayaran`, regenerate-able, dan bukan source of truth |
+| Supporting config | `pdf_settings` adalah boundary konfigurasi PDF bisnis user-facing; ia terpisah dari `Payment Receipt PDF` dan tidak menjadi source of truth settlement |
 | Mobile-first | form routed, list ringan, searchable picker, dan aman di Telegram mobile |
 
 ## 3. Core Features
@@ -36,7 +38,7 @@ Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu menc
 - `Halaman Absensi` sebagai workspace input absensi harian.
 - `Catatan Absensi` sebagai halaman histori absensi, filter, dan rekap payroll.
 - `Tagihan Upah` sebagai derived payable payroll per worker.
-- `Referensi`.
+- `Referensi` sebagai master/reference core release yang menjadi fondasi semua form inti.
 - `Riwayat`.
 - `Recycle Bin`.
 - `Tim` sebagai capability support/admin.
@@ -54,6 +56,8 @@ Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu menc
 ## 5. Architecture
 
 - Frontend: `Vite + React + react-router-dom + Zustand`.
+- Routing saat ini sudah memakai route-level code splitting di `src/App.jsx` melalui `React.lazy()` / dynamic import; warning chunk Vite `> 500 kB` bukan lagi baseline runtime.
+- `Referensi` / `Master` adalah jantung logika bisnis app ini; secara product scope ia termasuk core release walau boundary runtime untuk beberapa store masih transitional.
 - Styling: `Tailwind + CSS variables + Telegram theme fallback`.
 - Backend: Vercel serverless functions di `api/`.
 - Database: Supabase PostgreSQL relasional dengan RLS, views, trigger, RPC, dan storage.
@@ -69,7 +73,7 @@ Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu menc
 | Payroll | `attendance_records`, `workers`, generated `bills` untuk `Tagihan Upah` per worker |
 | Reference | `projects`, `suppliers`, `expense_categories`, `funding_creditors`, `materials`, `workers`, `staff`, `professions` |
 | Files | `file_assets`, `expense_attachments` |
-| Reports | `vw_transaction_summary`, `vw_cash_mutation`, `vw_project_financial_summary` |
+| Reports | `/api/transactions?view=summary`, `vw_cash_mutation`, `vw_project_financial_summary`, dengan `vw_transaction_summary` tinggal compatibility view legacy |
 
 ## 7. Design & Technical Constraints
 
@@ -81,21 +85,25 @@ Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu menc
 - Worker adalah parent operasional payroll; `Tagihan Upah` adalah hasil rekap per worker.
 - `Tagihan Upah` boleh muncul di `Jurnal` dan `Riwayat`, dan row payroll di ledger harus terbaca per worker.
 - `Riwayat` adalah completed/history surface dan dipisah dari `Recycle Bin`.
+- Dashboard summary aktif dibaca dari `/api/transactions?view=summary`; `vw_transaction_summary` masih boleh hidup sebagai compatibility/report layer, tetapi bukan authority utama.
 - `transactions` adalah compatibility layer legacy, bukan target flow baru.
+- `Pembayaran` pada runtime saat ini sudah memakai wrapper API di `src/store/usePaymentStore.js`; direct insert store adalah wording historis, bukan baseline aktif.
 - `Tagihan` memegang status settlement `unpaid / partial / paid` hanya ketika parent memang masih memiliki kewajiban pembayaran hidup; status tersebut tidak mengubah identitas domain parent.
 - cancellation payment adalah soft-delete log, bukan hard delete.
 - `Surat Jalan Barang` dan `Faktur Barang` sama-sama dapat mencatat stok masuk; `Faktur Barang` tetap menggerakkan nilai finansial.
-- `Stok Barang` adalah planned/supporting module untuk kontrol stok keluar manual, bukan workspace otomatis dari dokumen barang pada fase inti.
+- `Stok Barang` adalah supporting module dengan route aktif `/stock` untuk monitoring stok dan manual stock-out terbatas; ia bukan workspace otomatis dari dokumen barang pada fase inti.
+- `Referensi` / `Master` adalah domain fondasional yang dipakai semua form inti; boundary implementasinya boleh transitional sementara, tetapi status produknya tetap core release.
 - `Payment Receipt PDF` adalah output turunan dari settlement resmi, bukan source of truth.
 - AI tidak boleh membuat source data baru di luar contract map freeze.
 
 ## 8. Supporting / Planned Modules
 
-- `Stok Barang`: planned/supporting, top-level route sendiri, read/monitoring first, dan nanti menjadi surface manual stock-out.
+- `Stok Barang`: supporting/non-core, route aktif `/stock`, read/monitoring first, dan saat ini sudah membuka manual stock-out terbatas.
 - `HRD`: supporting module, bukan gate release inti.
 - `Penerima Manfaat`: supporting module, bukan gate release inti.
 - `Payment Receipt PDF`: supporting capability resmi fase awal dari `Pembayaran` atau detail terkait, boleh diregenerate, bukan full PDF suite, dan bukan source of truth.
 - Telegram notification dan PDF bot: side effect support surface, bukan source of truth.
+- `Referensi` / `Master`: core release, bukan supporting module; ia fondasi form inti meski beberapa boundary runtime masih transitional.
 
 ## 9. Release Scope
 
@@ -106,11 +114,12 @@ Release inti menekankan:
 - `Payment Receipt PDF` sederhana sebagai supporting capability resmi flow `Pembayaran`,
 - kalkulasi dan status settlement yang konsisten,
 - master/reference yang dipakai form inti,
+- `Referensi` / `Master` sebagai fondasi logika bisnis core release untuk seluruh form inti,
 - data integrity, delete/restore tree, dan history,
 - `Tim` sebagai capability support/admin,
 - mode resmi `Telegram Mini Web`.
 
-`HRD`, `Penerima Manfaat`, dan `Stok Barang` tidak memblokir release inti; `Stok Barang` tetap planned/supporting sampai flow manual stock-out dibuka secara khusus.
+`HRD`, `Penerima Manfaat`, dan `Stok Barang` tidak memblokir release inti; `Stok Barang` tetap supporting/non-core walau route monitoring dan manual stock-out terbatas sudah aktif.
 
 ## 10. Anti-Scope
 

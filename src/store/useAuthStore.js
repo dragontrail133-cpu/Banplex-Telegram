@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
-import { normalizeRole } from '../lib/rbac'
+import { isDevAuthBypassEnabled } from '../lib/dev-auth-bypass'
+import { allRoles, normalizeRole } from '../lib/rbac'
 
 function normalizeText(value, fallback = null) {
   const normalizedValue = String(value ?? '').trim()
@@ -23,28 +24,9 @@ function getMembershipPriority(membership) {
   }
 
   const role = normalizeRole(membership?.role)
+  const rolePriority = allRoles.indexOf(role)
 
-  if (role === 'Owner') {
-    return 1
-  }
-
-  if (role === 'Admin') {
-    return 2
-  }
-
-  if (role === 'Payroll') {
-    return 3
-  }
-
-  if (role === 'Logistik') {
-    return 4
-  }
-
-  if (role === 'Administrasi') {
-    return 5
-  }
-
-  return 6
+  return rolePriority >= 0 ? rolePriority + 1 : allRoles.length + 1
 }
 
 function getMembershipStatusLabel(status) {
@@ -177,7 +159,11 @@ const useAuthStore = create((set, get) => ({
       typeof authPayload === 'string'
         ? null
         : normalizeStartParam(authPayload?.startParam)
-    const authKey = `${normalizedInitData ?? ''}::${startParam ?? ''}`
+    const shouldUseDevBypass =
+      !normalizedInitData && isDevAuthBypassEnabled()
+    const authKey = `${normalizedInitData ?? ''}::${startParam ?? ''}::${
+      shouldUseDevBypass ? 'dev-bypass' : 'telegram'
+    }`
 
     if (activeTelegramAuthPromise && activeTelegramAuthKey === authKey) {
       return activeTelegramAuthPromise
@@ -195,7 +181,7 @@ const useAuthStore = create((set, get) => ({
           throw new Error('Client Supabase belum dikonfigurasi.')
         }
 
-        if (!normalizedInitData) {
+        if (!normalizedInitData && !shouldUseDevBypass) {
           throw new Error('Aplikasi ini hanya bisa diakses dari Telegram Mini App.')
         }
 
@@ -206,6 +192,7 @@ const useAuthStore = create((set, get) => ({
           },
           body: JSON.stringify({
             initData: normalizedInitData,
+            devBypass: shouldUseDevBypass,
           }),
         })
 

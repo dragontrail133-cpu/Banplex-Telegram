@@ -3,18 +3,30 @@ import {
   ATTACHMENT_ROLE_MATRIX,
   getAttachmentPermissions,
 } from '../src/lib/attachment-permissions.js'
-import { canUseCapability } from '../src/lib/capabilities.js'
+import { assertCapabilityAccess } from '../src/lib/capabilities.js'
 import { nowMs } from '../src/lib/timing.js'
 
 const attendanceSelectColumns =
+  'id, telegram_user_id, team_id, worker_id, project_id, attendance_date, attendance_status, total_pay, overtime_fee, entry_mode, billing_status, salary_bill_id, notes, worker_name_snapshot, project_name_snapshot, created_at, updated_at, deleted_at, workers:worker_id ( id, name ), projects:project_id ( id, name )'
+const attendanceSelectColumnsWithoutOvertimeFee =
   'id, telegram_user_id, team_id, worker_id, project_id, attendance_date, attendance_status, total_pay, entry_mode, billing_status, salary_bill_id, notes, worker_name_snapshot, project_name_snapshot, created_at, updated_at, deleted_at, workers:worker_id ( id, name ), projects:project_id ( id, name )'
+const attendanceHistorySummaryColumns =
+  'id, team_id, worker_id, project_id, attendance_date, attendance_status, total_pay, overtime_fee, billing_status, salary_bill_id, worker_name_snapshot, project_name_snapshot, created_at'
+const attendanceHistorySummaryColumnsWithoutOvertimeFee =
+  'id, team_id, worker_id, project_id, attendance_date, attendance_status, total_pay, billing_status, salary_bill_id, worker_name_snapshot, project_name_snapshot, created_at'
 const attendanceDetailSelectColumns =
+  'id, telegram_user_id, team_id, worker_id, project_id, attendance_date, attendance_status, total_pay, overtime_fee, entry_mode, billing_status, salary_bill_id, notes, worker_name_snapshot, project_name_snapshot, created_at, updated_at, deleted_at, workers:worker_id ( id, name ), projects:project_id ( id, name ), salary_bill:salary_bill_id ( id, bill_type, amount, paid_amount, due_date, status, paid_at, description, deleted_at )'
+const attendanceDetailSelectColumnsWithoutOvertimeFee =
   'id, telegram_user_id, team_id, worker_id, project_id, attendance_date, attendance_status, total_pay, entry_mode, billing_status, salary_bill_id, notes, worker_name_snapshot, project_name_snapshot, created_at, updated_at, deleted_at, workers:worker_id ( id, name ), projects:project_id ( id, name ), salary_bill:salary_bill_id ( id, bill_type, amount, paid_amount, due_date, status, paid_at, description, deleted_at )'
+const attendanceRowsByIdsColumns =
+  'id, telegram_user_id, team_id, worker_id, project_id, attendance_date, attendance_status, total_pay, overtime_fee, notes, billing_status, salary_bill_id, deleted_at, created_at'
+const attendanceRowsByIdsColumnsWithoutOvertimeFee =
+  'id, telegram_user_id, team_id, worker_id, project_id, attendance_date, attendance_status, total_pay, notes, billing_status, salary_bill_id, deleted_at, created_at'
 const expenseSelectColumns =
   'id, telegram_user_id, created_by_user_id, team_id, project_id, category_id, supplier_id, supplier_name, expense_type, document_type, status, expense_date, amount, total_amount, description, notes, project_name_snapshot, supplier_name_snapshot, created_at, updated_at, deleted_at'
 const materialInvoiceExpenseTypes = new Set(['material', 'material_invoice'])
 const materialInvoiceLineItemColumns =
-  'id, expense_id, team_id, material_id, item_name, qty, unit_price, line_total, sort_order, created_at, updated_at, deleted_at'
+  'id, expense_id, team_id, material_id, item_name, qty, unit_price, line_total, sort_order, created_at, updated_at, deleted_at, materials:material_id ( id, name, material_name, unit, current_stock )'
 const expenseAttachmentColumns =
   'id, expense_id, team_id, file_asset_id, sort_order, created_at, updated_at, deleted_at, file_assets:file_asset_id ( id, team_id, storage_bucket, bucket_name, storage_path, original_name, file_name, public_url, mime_type, size_bytes, file_size, uploaded_by_user_id, uploaded_by, created_at, updated_at, deleted_at )'
 const stockMaterialColumns =
@@ -22,21 +34,203 @@ const stockMaterialColumns =
 const stockTransactionColumns =
   'id, team_id, material_id, project_id, expense_id, expense_line_item_id, quantity, direction, source_type, transaction_date, price_per_unit, notes, created_at, updated_at, materials:material_id ( id, name, material_name, unit ), projects:project_id ( id, name, project_name )'
 
-function getMaterialInvoiceExpenseType(documentType) {
-  return normalizeText(documentType, 'faktur') === 'surat_jalan'
-    ? 'material'
-    : 'material_invoice'
+function isMissingAttendanceOvertimeFeeColumnError(error) {
+  const normalizedCode = normalizeText(error?.code, null)
+  const normalizedMessage = normalizeText(error?.message, '').toLowerCase()
+  const normalizedDetails = normalizeText(error?.details, '').toLowerCase()
+
+  if (normalizedCode === 'PGRST204' || normalizedCode === '42703') {
+    return (
+      normalizedMessage.includes('overtime_fee') ||
+      normalizedDetails.includes('overtime_fee') ||
+      normalizedMessage.includes('attendance_records.overtime_fee') ||
+      normalizedDetails.includes('attendance_records.overtime_fee')
+    )
+  }
+
+  return (
+    normalizedMessage.includes('overtime_fee') &&
+    (normalizedMessage.includes('attendance_records') ||
+      normalizedDetails.includes('attendance_records'))
+  )
+}
+
+async function runAttendanceQueryWithFallback(buildQuery) {
+  const primaryResult = await buildQuery(true)
+
+  if (!primaryResult.error) {
+    return primaryResult.data
+  }
+
+  if (!isMissingAttendanceOvertimeFeeColumnError(primaryResult.error)) {
+    throw primaryResult.error
+  }
+
+  const legacyResult = await buildQuery(false)
+
+  if (legacyResult.error) {
+    throw legacyResult.error
+  }
+
+  return legacyResult.data
+}
+
+async function runAttendanceMutationWithFallback(buildMutation) {
+  const primaryResult = await buildMutation(true)
+
+  if (!primaryResult.error) {
+    return primaryResult.data
+  }
+
+  if (!isMissingAttendanceOvertimeFeeColumnError(primaryResult.error)) {
+    throw primaryResult.error
+  }
+
+  const legacyResult = await buildMutation(false)
+
+  if (legacyResult.error) {
+    throw legacyResult.error
+  }
+
+  return legacyResult.data
+}
+
+function getAttendanceDayWeight(attendanceStatus) {
+  const normalizedStatus = normalizeText(attendanceStatus, '').toLowerCase()
+
+  if (normalizedStatus === 'full_day') {
+    return 1
+  }
+
+  if (normalizedStatus === 'half_day') {
+    return 0.5
+  }
+
+  return 0
+}
+
+async function loadAttendanceRowsForWorkerDay(adminClient, teamId, attendanceDate, workerIds = []) {
+  const normalizedTeamId = normalizeText(teamId)
+  const normalizedDate = normalizeText(attendanceDate)
+  const normalizedWorkerIds = [...new Set(workerIds.map((value) => normalizeText(value))).values()].filter(Boolean)
+
+  if (!normalizedTeamId || !normalizedDate || normalizedWorkerIds.length === 0) {
+    return new Map()
+  }
+
+  const { data, error } = await adminClient
+    .from('attendance_records')
+    .select('id, worker_id, project_id, attendance_date, attendance_status, billing_status, salary_bill_id, deleted_at')
+    .eq('team_id', normalizedTeamId)
+    .eq('attendance_date', normalizedDate)
+    .is('deleted_at', null)
+    .in('worker_id', normalizedWorkerIds)
+
+  if (error) {
+    throw error
+  }
+
+  return (data ?? []).reduce((groupedRows, row) => {
+    const workerId = normalizeText(row?.worker_id, null)
+
+    if (!workerId) {
+      return groupedRows
+    }
+
+    const nextRows = groupedRows.get(workerId) ?? []
+    nextRows.push(row)
+    groupedRows.set(workerId, nextRows)
+    return groupedRows
+  }, new Map())
+}
+
+function assertAttendanceDayWeightWithinLimit({ workerRows = [], currentSourceId = null, nextAttendanceStatus = null, workerName = 'Pekerja', attendanceDate = null } = {}) {
+  const normalizedCurrentSourceId = normalizeText(currentSourceId, null)
+  const normalizedNextAttendanceStatus = normalizeText(nextAttendanceStatus, null)
+  const totalOtherWeight = workerRows.reduce((totalWeight, row) => {
+    if (normalizeText(row?.id, null) === normalizedCurrentSourceId) {
+      return totalWeight
+    }
+
+    return totalWeight + getAttendanceDayWeight(row?.attendance_status)
+  }, 0)
+
+  const nextWeight = getAttendanceDayWeight(normalizedNextAttendanceStatus)
+
+  if (totalOtherWeight + nextWeight > 1) {
+    throw createHttpError(
+      400,
+      `Absensi ${workerName} pada ${attendanceDate ?? 'tanggal ini'} sudah mencapai batas satu hari. Gunakan half_day atau overtime sesuai sisa jatah harian.`
+    )
+  }
+}
+
+function buildAttendanceSheetRowPayload(
+  row,
+  {
+    includeOvertimeFee = true,
+    telegramUserId = null,
+    teamId = null,
+    normalizedDate = null,
+    normalizedProjectId = null,
+    timestamp = null,
+  } = {}
+) {
+  const payload = {
+    telegram_user_id: telegramUserId,
+    team_id: teamId,
+    worker_id: row.worker_id,
+    project_id: normalizedProjectId,
+    worker_name_snapshot: row.worker_name,
+    project_name_snapshot: row.project_name,
+    attendance_date: normalizedDate,
+    attendance_status: row.attendance_status,
+    total_pay: row.total_pay,
+    entry_mode: 'manual',
+    billing_status: 'unbilled',
+    notes: row.notes,
+    updated_at: timestamp,
+  }
+
+  if (includeOvertimeFee) {
+    payload.overtime_fee = row.attendance_status === 'overtime' ? row.overtime_fee : null
+  }
+
+  return payload
+}
+
+function buildAttendanceUpdatePayload(
+  { attendanceStatus, overtimeFee, totalPay, notes, timestamp },
+  { includeOvertimeFee = true } = {}
+) {
+  const payload = {
+    attendance_status: attendanceStatus,
+    total_pay: totalPay,
+    notes,
+    updated_at: timestamp,
+  }
+
+  if (includeOvertimeFee) {
+    payload.overtime_fee = attendanceStatus === 'overtime' ? overtimeFee : null
+  }
+
+  return payload
+}
+
+function getMaterialInvoiceExpenseType() {
+  return 'material'
 }
 
 function addNumericMapValue(map, key, value) {
   const normalizedKey = normalizeText(key, null)
+  const numericValue = toNumber(value)
 
-  if (!normalizedKey) {
+  if (!normalizedKey || !Number.isFinite(numericValue)) {
     return
   }
 
   const currentValue = toNumber(map.get(normalizedKey))
-  map.set(normalizedKey, (Number.isFinite(currentValue) ? currentValue : 0) + toNumber(value))
+  map.set(normalizedKey, (Number.isFinite(currentValue) ? currentValue : 0) + numericValue)
 }
 
 function isMaterialInvoiceStockDocument(documentType) {
@@ -44,7 +238,9 @@ function isMaterialInvoiceStockDocument(documentType) {
 }
 
 function getMaterialInvoiceStockQuantity(quantity) {
-  return toNumber(quantity)
+  const numericQuantity = toNumber(quantity)
+
+  return Number.isFinite(numericQuantity) ? numericQuantity : 0
 }
 
 function buildMaterialInvoiceStockDeltaMaps(
@@ -93,9 +289,15 @@ function buildMaterialInvoiceStockDeltaMaps(
   ])
 
   for (const materialId of materialIds) {
-    const desiredQuantity = toNumber(nextQuantityByMaterialId.get(materialId))
-    const previousQuantity = toNumber(previousQuantityByMaterialId.get(materialId))
-    const triggerQuantity = toNumber(triggerDeltaByMaterialId.get(materialId))
+    const desiredQuantity = Number.isFinite(toNumber(nextQuantityByMaterialId.get(materialId)))
+      ? toNumber(nextQuantityByMaterialId.get(materialId))
+      : 0
+    const previousQuantity = Number.isFinite(toNumber(previousQuantityByMaterialId.get(materialId)))
+      ? toNumber(previousQuantityByMaterialId.get(materialId))
+      : 0
+    const triggerQuantity = Number.isFinite(toNumber(triggerDeltaByMaterialId.get(materialId)))
+      ? toNumber(triggerDeltaByMaterialId.get(materialId))
+      : 0
     const correctionQuantity = desiredQuantity - previousQuantity - triggerQuantity
 
     if (correctionQuantity !== 0) {
@@ -144,15 +346,19 @@ async function assertMaterialStockAvailability(adminClient, deltaByMaterialId = 
   const materialStocks = await loadMaterialStocksByIds(adminClient, [...deltaByMaterialId.keys()])
 
   for (const [materialId, delta] of deltaByMaterialId.entries()) {
+    const numericDelta = toNumber(delta)
     const material = materialStocks.get(materialId) ?? {
       id: materialId,
       name: materialId,
       current_stock: 0,
     }
+    if (!Number.isFinite(numericDelta)) {
+      throw createHttpError(500, 'Delta stok material tidak valid.')
+    }
     const currentStock = Number.isFinite(toNumber(material.current_stock))
       ? toNumber(material.current_stock)
       : 0
-    const nextStock = currentStock + toNumber(delta)
+    const nextStock = currentStock + numericDelta
 
     if (nextStock < 0) {
       throw createHttpError(
@@ -169,14 +375,18 @@ async function applyMaterialStockDelta(adminClient, deltaByMaterialId = new Map(
 
   await Promise.all(
     [...deltaByMaterialId.entries()].map(async ([materialId, delta]) => {
+      const numericDelta = toNumber(delta)
       const currentMaterial = materialStocks.get(materialId) ?? {
         id: materialId,
         current_stock: 0,
       }
+      if (!Number.isFinite(numericDelta)) {
+        throw createHttpError(500, 'Delta stok material tidak valid.')
+      }
       const currentStock = Number.isFinite(toNumber(currentMaterial.current_stock))
         ? toNumber(currentMaterial.current_stock)
         : 0
-      const nextStock = currentStock + toNumber(delta)
+      const nextStock = currentStock + numericDelta
 
       const { error } = await adminClient
         .from('materials')
@@ -191,6 +401,49 @@ async function applyMaterialStockDelta(adminClient, deltaByMaterialId = new Map(
       }
     })
   )
+}
+
+async function assertMaterialInvoiceDeleteStockAvailability(
+  adminClient,
+  items = [],
+  documentType = 'faktur'
+) {
+  if (!isMaterialInvoiceStockDocument(documentType) || items.length === 0) {
+    return
+  }
+
+  const normalizedDocumentType = normalizeText(documentType, 'faktur')
+  const deltaByMaterialId = new Map()
+
+  for (const item of items) {
+    const rollbackQuantity =
+      normalizedDocumentType === 'surat_jalan'
+        ? getMaterialInvoiceStockQuantity(item?.qty)
+        : -getMaterialInvoiceStockQuantity(item?.qty)
+
+    addNumericMapValue(deltaByMaterialId, item?.material_id, rollbackQuantity)
+  }
+
+  const materialStocks = await loadMaterialStocksByIds(adminClient, [...deltaByMaterialId.keys()])
+
+  for (const [materialId, delta] of deltaByMaterialId.entries()) {
+    const material = materialStocks.get(materialId) ?? {
+      id: materialId,
+      name: materialId,
+      current_stock: 0,
+    }
+    const currentStock = Number.isFinite(toNumber(material.current_stock))
+      ? toNumber(material.current_stock)
+      : 0
+    const nextStock = currentStock + toNumber(delta)
+
+    if (nextStock < 0) {
+      throw createHttpError(
+        400,
+        `Dokumen barang ini tidak bisa dihapus karena stok material ${material.name ?? material.id} sudah terpakai di mutasi lain. Koreksi mutasi stok turunannya lebih dulu.`
+      )
+    }
+  }
 }
 
 async function syncMaterialInvoiceStockMovement(
@@ -210,8 +463,28 @@ async function syncMaterialInvoiceStockMovement(
     return
   }
 
+  const normalizedMode = normalizeText(mode, 'update')
+
+  if (normalizedMode === 'create') {
+    return
+  }
+
+  if (normalizedMode === 'delete') {
+    const { error } = await adminClient.rpc('fn_reverse_material_invoice_stock_movement', {
+      p_expense_id: expenseId,
+      p_team_id: teamId,
+      p_document_type: documentType,
+    })
+
+    if (error) {
+      throw error
+    }
+
+    return
+  }
+
   const { correctionByMaterialId } = buildMaterialInvoiceStockDeltaMaps(previousItems, nextItems, {
-    mode,
+    mode: normalizedMode,
     documentType,
   })
 
@@ -295,6 +568,19 @@ function createHttpError(status, message) {
   return error
 }
 
+function getBearerToken(req) {
+  const authorizationHeader = String(req.headers?.authorization ?? '').trim()
+  const bearerToken = authorizationHeader.toLowerCase().startsWith('bearer ')
+    ? authorizationHeader.slice(7).trim()
+    : null
+
+  if (!bearerToken) {
+    throw createHttpError(401, 'Authorization token tidak ditemukan.')
+  }
+
+  return bearerToken
+}
+
 async function parseRequestBody(req) {
   if (typeof req.body === 'string' && req.body.trim().length > 0) {
     return JSON.parse(req.body)
@@ -359,6 +645,12 @@ function toNumber(value) {
   return Number.isFinite(parsedValue) ? parsedValue : NaN
 }
 
+function compareText(left, right) {
+  return String(left ?? '').localeCompare(String(right ?? ''), 'id', {
+    sensitivity: 'base',
+  })
+}
+
 function normalizeVersion(value) {
   const normalizedValue = String(value ?? '').trim()
 
@@ -400,14 +692,7 @@ function createDatabaseClient(url, apiKey, bearerToken) {
 }
 
 async function getAuthorizedContext(req, supabaseUrl, publishableKey) {
-  const authorizationHeader = String(req.headers?.authorization ?? '').trim()
-  const bearerToken = authorizationHeader.toLowerCase().startsWith('bearer ')
-    ? authorizationHeader.slice(7).trim()
-    : null
-
-  if (!bearerToken) {
-    throw createHttpError(401, 'Authorization token tidak ditemukan.')
-  }
+  const bearerToken = getBearerToken(req)
 
   const authResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
     headers: {
@@ -430,6 +715,43 @@ async function getAuthorizedContext(req, supabaseUrl, publishableKey) {
     authUser,
     bearerToken,
   }
+}
+
+async function loadSessionProfile(sessionClient) {
+  const { data, error } = await sessionClient
+    .from('profiles')
+    .select('id, telegram_user_id')
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  return data ?? null
+}
+
+async function assertSessionTeamAccess(sessionClient, teamId) {
+  const normalizedTeamId = normalizeText(teamId)
+
+  if (!normalizedTeamId) {
+    throw createHttpError(400, 'Team ID wajib diisi.')
+  }
+
+  const { data: team, error } = await sessionClient
+    .from('teams')
+    .select('id')
+    .eq('id', normalizedTeamId)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  if (!team?.id) {
+    throw createHttpError(403, 'Akses workspace tidak ditemukan.')
+  }
+
+  return normalizedTeamId
 }
 
 async function assertTeamAccess(adminClient, telegramUserId, teamId) {
@@ -473,9 +795,11 @@ async function assertManualStockOutAccess(adminClient, telegramUserId, teamId) {
     throw error
   }
 
-  if (!data?.id || !canUseCapability(data.role, 'manual_stock_out')) {
+  if (!data?.id) {
     throw createHttpError(403, 'Role Anda tidak diizinkan untuk stock-out manual.')
   }
+
+  assertCapabilityAccess(data.role, 'manual_stock_out', null, 403)
 
   return normalizedTeamId
 }
@@ -489,10 +813,18 @@ function unwrapRelation(relation) {
 }
 
 function mapBillRow(bill) {
+  const worker = unwrapRelation(bill?.workers)
   const supplier = unwrapRelation(bill?.suppliers)
   const project = unwrapRelation(bill?.projects)
   const amount = toNumber(bill?.amount)
   const paidAmount = toNumber(bill?.paid_amount)
+  const workerName = normalizeText(
+    bill?.worker_name_snapshot ??
+      worker?.name ??
+      supplier?.name ??
+      bill?.supplier_name_snapshot,
+    null
+  )
 
   return {
     id: bill?.id ?? null,
@@ -500,6 +832,7 @@ function mapBillRow(bill) {
     projectIncomeId: bill?.project_income_id ?? null,
     telegramUserId: bill?.telegram_user_id ?? null,
     teamId: bill?.team_id ?? null,
+    workerId: bill?.worker_id ?? null,
     supplierId: bill?.supplier_id ?? null,
     staffId: bill?.staff_id ?? null,
     billType: bill?.bill_type ?? null,
@@ -512,8 +845,11 @@ function mapBillRow(bill) {
     paidAt: bill?.paid_at ?? null,
     updatedAt: bill?.updated_at ?? null,
     updated_at: bill?.updated_at ?? null,
+    workerName,
+    worker_name_snapshot: workerName,
     supplierName:
       supplier?.name ??
+      worker?.name ??
       bill?.worker_name_snapshot ??
       bill?.supplier_name_snapshot ??
       'Supplier belum terhubung',
@@ -536,6 +872,9 @@ function mapBillPaymentRow(row) {
     createdAt: row?.created_at ?? null,
     updatedAt: row?.updated_at ?? null,
     updated_at: row?.updated_at ?? null,
+    deleted_at: row?.deleted_at ?? null,
+    canRestore: Boolean(row?.deleted_at),
+    canPermanentDelete: Boolean(row?.deleted_at),
   }
 }
 
@@ -655,7 +994,7 @@ async function recalculateBillPaymentSummary(adminClient, billId) {
 
   const { data: payments, error: paymentsError } = await adminClient
     .from('bill_payments')
-    .select('amount')
+    .select('amount, payment_date')
     .eq('bill_id', normalizedBillId)
     .is('deleted_at', null)
 
@@ -665,7 +1004,23 @@ async function recalculateBillPaymentSummary(adminClient, billId) {
 
   const paidAmount = (payments ?? []).reduce((sum, payment) => sum + toNumber(payment.amount), 0)
   const totalAmount = toNumber(bill.amount)
-  const nextBillState = getBillPaymentStatus(totalAmount, paidAmount, bill.paid_at)
+  const latestPaymentDate = (payments ?? []).reduce((latest, payment) => {
+    const paymentDate = normalizeText(payment?.payment_date, null)
+
+    if (!paymentDate) {
+      return latest
+    }
+
+    if (!latest) {
+      return paymentDate
+    }
+
+    return new Date(paymentDate).getTime() > new Date(latest).getTime()
+      ? paymentDate
+      : latest
+  }, null)
+  const paidAtSource = latestPaymentDate ?? bill.paid_at ?? null
+  const nextBillState = getBillPaymentStatus(totalAmount, paidAmount, paidAtSource)
   const timestamp = new Date().toISOString()
 
   const { data: updatedBill, error: updateError } = await adminClient
@@ -677,7 +1032,9 @@ async function recalculateBillPaymentSummary(adminClient, billId) {
       updated_at: timestamp,
     })
     .eq('id', normalizedBillId)
-    .select('id, expense_id, amount, paid_amount, due_date, status, paid_at, deleted_at')
+    .select(
+      'id, expense_id, amount, paid_amount, due_date, status, paid_at, deleted_at, supplier_name_snapshot, project_name_snapshot, worker_name_snapshot'
+    )
     .single()
 
   if (updateError) {
@@ -685,6 +1042,12 @@ async function recalculateBillPaymentSummary(adminClient, billId) {
   }
 
   return updatedBill
+}
+
+function assertPaymentDoesNotOverpayParent(nextPaidAmount, targetAmount, message) {
+  if (targetAmount > 0 && nextPaidAmount > targetAmount) {
+    throw createHttpError(400, message)
+  }
 }
 
 async function restoreBillPayment(adminClient, body = {}, telegramUserId) {
@@ -738,6 +1101,26 @@ async function restoreBillPayment(adminClient, body = {}, telegramUserId) {
     }
   }
 
+  const { data: siblingPayments, error: siblingError } = await adminClient
+    .from('bill_payments')
+    .select('id, amount')
+    .eq('bill_id', payment.billId)
+    .is('deleted_at', null)
+
+  if (siblingError) {
+    throw siblingError
+  }
+
+  const nextPaidAmount =
+    (siblingPayments ?? []).reduce((sum, row) => sum + Number(row?.amount ?? 0), 0) +
+    Number(payment.amount ?? 0)
+
+  assertPaymentDoesNotOverpayParent(
+    nextPaidAmount,
+    Number(bill.amount),
+    'Nominal pembayaran melebihi total tagihan.'
+  )
+
   const timestamp = new Date().toISOString()
   const { data: restoredPayment, error } = await adminClient
     .from('bill_payments')
@@ -775,6 +1158,7 @@ function normalizeAttendanceRow(attendance) {
   return {
     ...attendance,
     total_pay: toNumber(attendance?.total_pay),
+    overtime_fee: attendance?.overtime_fee ?? null,
     worker_name: normalizeText(
       worker?.name ?? attendance?.worker_name_snapshot,
       'Pekerja belum terhubung'
@@ -837,12 +1221,27 @@ function normalizeExpenseRow(row) {
 }
 
 function normalizeMaterialInvoiceLineItem(row) {
+  const material = unwrapRelation(row?.materials)
+
   return {
     ...row,
     team_id: row?.team_id ?? null,
     qty: toNumber(row?.qty),
     unit_price: toNumber(row?.unit_price),
     line_total: toNumber(row?.line_total),
+    material_name: normalizeText(
+      row?.item_name,
+      normalizeText(material?.name ?? material?.material_name, null)
+    ),
+    materials: material
+      ? {
+          id: material?.id ?? null,
+          name: normalizeText(material?.name ?? material?.material_name, material?.id ?? null),
+          material_name: normalizeText(material?.material_name ?? material?.name, material?.id ?? null),
+          unit: normalizeText(material?.unit, null),
+          current_stock: toNumber(material?.current_stock),
+        }
+      : null,
     sort_order: Number.isFinite(Number(row?.sort_order)) ? Number(row.sort_order) : 1,
     created_at: row?.created_at ?? null,
     updated_at: row?.updated_at ?? null,
@@ -884,6 +1283,8 @@ function normalizeExpenseAttachmentRow(row) {
     updated_at: row?.updated_at ?? null,
     deleted_at: row?.deleted_at ?? null,
     file_assets: fileAsset ? normalizeFileAssetRow(fileAsset) : null,
+    canRestore: Boolean(row?.deleted_at),
+    canPermanentDelete: Boolean(row?.deleted_at),
   }
 }
 
@@ -984,6 +1385,34 @@ function normalizeSalaryRow(row) {
   }
 }
 
+function normalizePdfSettingsRow(row) {
+  if (!row) {
+    return null
+  }
+
+  const headerLogoFileAsset = unwrapRelation(row?.header_logo_file_asset)
+  const footerLogoFileAsset = unwrapRelation(row?.footer_logo_file_asset)
+
+  return {
+    team_id: row?.team_id ?? null,
+    header_color: normalizeText(row?.header_color, null),
+    header_logo_file_id: row?.header_logo_file_id ?? null,
+    footer_logo_file_id: row?.footer_logo_file_id ?? null,
+    header_logo_file_asset: headerLogoFileAsset
+      ? normalizeFileAssetRow(headerLogoFileAsset)
+      : null,
+    footer_logo_file_asset: footerLogoFileAsset
+      ? normalizeFileAssetRow(footerLogoFileAsset)
+      : null,
+    company_name: normalizeText(row?.company_name, null),
+    address: normalizeText(row?.address, null),
+    phone: normalizeText(row?.phone, null),
+    extra: row?.extra ?? null,
+    updated_by_user_id: row?.updated_by_user_id ?? null,
+    updated_at: row?.updated_at ?? null,
+  }
+}
+
 function createPortfolioSummary(rows = []) {
   const totalProjectProfit = rows.reduce(
     (sum, row) => sum + toNumber(row.net_profit_project ?? row.net_profit),
@@ -1010,6 +1439,83 @@ function createPortfolioSummary(rows = []) {
   }
 }
 
+function normalizeBillingStatsRow(row) {
+  return {
+    team_id: row?.team_id ?? null,
+    total_outstanding: toNumber(row?.total_outstanding),
+    total_paid: toNumber(row?.total_paid),
+    total_bill_count: toNumber(row?.total_bill_count),
+    total_outstanding_salary: toNumber(row?.total_outstanding_salary),
+  }
+}
+
+function normalizeCashMutationRow(row) {
+  return {
+    transaction_date: row?.transaction_date ?? null,
+    type: normalizeText(row?.type, 'out'),
+    amount: toNumber(row?.amount),
+    description: normalizeText(row?.description, '-'),
+    source_table: normalizeText(row?.source_table, '-'),
+    team_id: row?.team_id ?? null,
+  }
+}
+
+function createBillingStatsSummary(rows = []) {
+  return rows.reduce(
+    (summary, row) => ({
+      total_outstanding: summary.total_outstanding + toNumber(row?.total_outstanding),
+      total_paid: summary.total_paid + toNumber(row?.total_paid),
+      total_bill_count: summary.total_bill_count + toNumber(row?.total_bill_count),
+      total_outstanding_salary:
+        summary.total_outstanding_salary + toNumber(row?.total_outstanding_salary),
+    }),
+    {
+      total_outstanding: 0,
+      total_paid: 0,
+      total_bill_count: 0,
+      total_outstanding_salary: 0,
+    }
+  )
+}
+
+function createCashMutationSummary(rows = []) {
+  return rows.reduce(
+    (summary, row) => {
+      const amount = toNumber(row?.amount)
+
+      if (row?.type === 'in') {
+        summary.total_inflow += amount
+      } else {
+        summary.total_outflow += amount
+      }
+
+      summary.total_mutation += 1
+
+      return summary
+    },
+    {
+      total_inflow: 0,
+      total_outflow: 0,
+      total_net_cash_flow: 0,
+      total_mutation: 0,
+    }
+  )
+}
+
+function applyDateRangeToQuery(query, columnName, dateFrom = null, dateTo = null) {
+  let nextQuery = query
+
+  if (dateFrom) {
+    nextQuery = nextQuery.gte(columnName, dateFrom)
+  }
+
+  if (dateTo) {
+    nextQuery = nextQuery.lte(columnName, dateTo)
+  }
+
+  return nextQuery
+}
+
 async function loadBillById(adminClient, billId) {
   const normalizedBillId = normalizeText(billId)
 
@@ -1020,7 +1526,7 @@ async function loadBillById(adminClient, billId) {
   const { data, error } = await adminClient
     .from('bills')
     .select(
-      'id, expense_id, project_income_id, telegram_user_id, team_id, supplier_id, staff_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, updated_at, worker_name_snapshot, supplier_name_snapshot, project_name_snapshot, suppliers:supplier_id ( id, name ), projects:project_id ( id, name )'
+      'id, expense_id, project_income_id, telegram_user_id, team_id, worker_id, supplier_id, staff_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, updated_at, worker_name_snapshot, supplier_name_snapshot, project_name_snapshot, workers:worker_id ( id, name ), suppliers:supplier_id ( id, name ), projects:project_id ( id, name )'
     )
     .eq('id', normalizedBillId)
     .is('deleted_at', null)
@@ -1193,14 +1699,14 @@ async function updateBillPayment(adminClient, body = {}, telegramUserId) {
       return sum
     }
 
-    return sum + toNumber(row.amount)
+    return sum + Number(row?.amount ?? 0)
   }, 0) + normalizedAmount
 
-  const totalBillAmount = toNumber(bill.amount)
-
-  if (totalBillAmount > 0 && nextPaidAmount > totalBillAmount) {
-    throw createHttpError(400, 'Nominal pembayaran melebihi total tagihan.')
-  }
+  assertPaymentDoesNotOverpayParent(
+    nextPaidAmount,
+    Number(bill.amount),
+    'Nominal pembayaran melebihi total tagihan.'
+  )
 
   const timestamp = new Date().toISOString()
 
@@ -1347,7 +1853,7 @@ async function loadUnpaidBills(adminClient, teamId) {
   const { data, error } = await adminClient
     .from('bills')
     .select(
-      'id, expense_id, project_income_id, telegram_user_id, team_id, supplier_id, staff_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, worker_name_snapshot, supplier_name_snapshot, project_name_snapshot, suppliers:supplier_id ( id, name ), projects:project_id ( id, name )'
+      'id, expense_id, project_income_id, telegram_user_id, team_id, worker_id, supplier_id, staff_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, worker_name_snapshot, supplier_name_snapshot, project_name_snapshot, workers:worker_id ( id, name ), suppliers:supplier_id ( id, name ), projects:project_id ( id, name )'
     )
     .is('deleted_at', null)
     .in('status', ['unpaid', 'partial'])
@@ -1904,6 +2410,10 @@ async function permanentDeleteExpenseAttachment(adminClient, body, telegramUserI
 
   if (!attachment?.id) {
     return true
+  }
+
+  if (!attachment.deleted_at) {
+    throw createHttpError(400, 'Lampiran harus ada di recycle bin sebelum dihapus permanen.')
   }
 
   const expense = await loadExpenseContextById(adminClient, attachment.expense_id, {
@@ -2947,19 +3457,21 @@ async function loadAttendanceEntries(adminClient, teamId, date, projectId) {
     throw createHttpError(400, 'Proyek absensi wajib dipilih.')
   }
 
-  const { data, error } = await adminClient
-    .from('attendance_records')
-    .select(attendanceSelectColumns)
-    .eq('team_id', normalizedTeamId)
-    .eq('attendance_date', normalizedDate)
-    .eq('project_id', normalizedProjectId)
-    .is('deleted_at', null)
-    .order('worker_name_snapshot', { ascending: true })
-    .order('created_at', { ascending: true })
+  const data = await runAttendanceQueryWithFallback(async (includeOvertimeFee) => {
+    const { data: nextData, error } = await adminClient
+      .from('attendance_records')
+      .select(
+        includeOvertimeFee ? attendanceSelectColumns : attendanceSelectColumnsWithoutOvertimeFee
+      )
+      .eq('team_id', normalizedTeamId)
+      .eq('attendance_date', normalizedDate)
+      .eq('project_id', normalizedProjectId)
+      .is('deleted_at', null)
+      .order('worker_name_snapshot', { ascending: true })
+      .order('created_at', { ascending: true })
 
-  if (error) {
-    throw error
-  }
+    return { data: nextData, error }
+  })
 
   return (data ?? []).map(normalizeAttendanceRow)
 }
@@ -2989,39 +3501,219 @@ function resolveAttendanceMonthRange(monthValue) {
   }
 }
 
-async function loadAttendanceHistory(adminClient, teamId, { month = null, workerId = null } = {}) {
+function buildAttendanceHistorySummary(rows = []) {
+  const dailyGroups = new Map()
+  const workerGroups = new Map()
+
+  for (const row of rows) {
+    const dateKey = normalizeText(row?.attendance_date, null)
+    const workerId = normalizeText(row?.worker_id, null)
+    const workerName = normalizeText(row?.worker_name_snapshot, 'Pekerja')
+    const projectName = normalizeText(row?.project_name_snapshot, 'Proyek')
+    const billingStatus = normalizeText(row?.billing_status, 'unbilled').toLowerCase()
+    const hasSalaryBill = Boolean(normalizeText(row?.salary_bill_id, null))
+    const totalPay = toNumber(row?.total_pay)
+    const isRecapable = billingStatus === 'unbilled' && totalPay > 0 && !hasSalaryBill
+
+    if (dateKey) {
+      const nextDailyGroup =
+        dailyGroups.get(dateKey) ?? {
+          dateKey,
+          recordCount: 0,
+          billedCount: 0,
+          unbilledCount: 0,
+          totalPay: 0,
+          workerIds: new Set(),
+        }
+
+      nextDailyGroup.recordCount += 1
+      nextDailyGroup.totalPay += Number.isFinite(totalPay) ? totalPay : 0
+
+      if (workerId) {
+        nextDailyGroup.workerIds.add(workerId)
+      }
+
+      if (billingStatus === 'billed') {
+        nextDailyGroup.billedCount += 1
+      } else {
+        nextDailyGroup.unbilledCount += 1
+      }
+
+      if (isRecapable) {
+        nextDailyGroup.recapableCount = (nextDailyGroup.recapableCount ?? 0) + 1
+      }
+
+      dailyGroups.set(dateKey, nextDailyGroup)
+    }
+
+    const workerKey = workerId || workerName
+
+    if (workerKey) {
+      const nextWorkerGroup =
+        workerGroups.get(workerKey) ?? {
+          workerId: workerId || null,
+          workerName,
+          recordCount: 0,
+          billedCount: 0,
+          unbilledCount: 0,
+          recapableCount: 0,
+          totalPay: 0,
+          firstDate: null,
+          lastDate: null,
+          projectNames: new Set(),
+        }
+
+      nextWorkerGroup.recordCount += 1
+      nextWorkerGroup.totalPay += Number.isFinite(totalPay) ? totalPay : 0
+
+      if (projectName) {
+        nextWorkerGroup.projectNames.add(projectName)
+      }
+
+      if (!nextWorkerGroup.firstDate || compareText(dateKey, nextWorkerGroup.firstDate) < 0) {
+        nextWorkerGroup.firstDate = dateKey
+      }
+
+      if (!nextWorkerGroup.lastDate || compareText(dateKey, nextWorkerGroup.lastDate) > 0) {
+        nextWorkerGroup.lastDate = dateKey
+      }
+
+      if (billingStatus === 'billed') {
+        nextWorkerGroup.billedCount += 1
+      } else {
+        nextWorkerGroup.unbilledCount += 1
+      }
+
+      if (isRecapable) {
+        nextWorkerGroup.recapableCount += 1
+      }
+
+      workerGroups.set(workerKey, nextWorkerGroup)
+    }
+  }
+
+  return {
+    dailyGroups: [...dailyGroups.values()]
+      .map((group) => ({
+        dateKey: group.dateKey,
+        title: group.dateKey,
+        description: `${group.recordCount} terabsen`,
+        recordCount: group.recordCount,
+        billedCount: group.billedCount,
+        unbilledCount: group.unbilledCount,
+        totalPay: group.totalPay,
+        workerIds: [...group.workerIds],
+        recapableCount: group.recapableCount ?? 0,
+      }))
+      .sort((left, right) => compareText(right.dateKey, left.dateKey)),
+    workerGroups: [...workerGroups.values()]
+      .map((group) => ({
+        workerId: group.workerId,
+        workerName: group.workerName,
+        title: group.workerName,
+        description: `${group.recordCount} record`,
+        recordCount: group.recordCount,
+        billedCount: group.billedCount,
+        unbilledCount: group.unbilledCount,
+        totalPay: group.totalPay,
+        firstDate: group.firstDate,
+        lastDate: group.lastDate,
+        projectNames: [...group.projectNames],
+        recapableCount: group.recapableCount ?? 0,
+      }))
+      .sort((left, right) => compareText(left.workerName, right.workerName)),
+  }
+}
+
+async function loadAttendanceHistorySummary(adminClient, teamId, { month = null } = {}) {
   const normalizedTeamId = normalizeText(teamId)
-  const normalizedWorkerId = normalizeText(workerId, null)
   const monthRange = resolveAttendanceMonthRange(month)
 
   if (!normalizedTeamId) {
     throw createHttpError(400, 'Akses workspace tidak ditemukan.')
   }
 
-  let query = adminClient
-    .from('attendance_records')
-    .select(attendanceDetailSelectColumns)
-    .eq('team_id', normalizedTeamId)
-    .is('deleted_at', null)
-    .order('worker_name_snapshot', { ascending: true })
-    .order('attendance_date', { ascending: false })
-    .order('created_at', { ascending: false })
+  const data = await runAttendanceQueryWithFallback(async (includeOvertimeFee) => {
+    let query = adminClient
+      .from('attendance_records')
+      .select(
+        includeOvertimeFee
+          ? attendanceHistorySummaryColumns
+          : attendanceHistorySummaryColumnsWithoutOvertimeFee
+      )
+      .eq('team_id', normalizedTeamId)
+      .is('deleted_at', null)
 
-  if (monthRange) {
-    query = query
-      .gte('attendance_date', monthRange.startDate)
-      .lt('attendance_date', monthRange.endDate)
+    if (monthRange) {
+      query = query
+        .gte('attendance_date', monthRange.startDate)
+        .lt('attendance_date', monthRange.endDate)
+    }
+
+    const { data: nextData, error } = await query
+
+    return { data: nextData, error }
+  })
+
+  const summaries = buildAttendanceHistorySummary(data ?? [])
+
+  return {
+    month: normalizeText(month, null),
+    attendanceCount: (data ?? []).length,
+    dailyGroups: summaries.dailyGroups,
+    workerGroups: summaries.workerGroups,
+  }
+}
+
+async function loadAttendanceHistory(
+  adminClient,
+  teamId,
+  { month = null, workerId = null, workerName = null, date = null } = {}
+) {
+  const normalizedTeamId = normalizeText(teamId)
+  const normalizedWorkerId = normalizeText(workerId, null)
+  const normalizedWorkerName = normalizeText(workerName, null)
+  const normalizedDate = normalizeText(date, null)
+  const monthRange = resolveAttendanceMonthRange(month)
+
+  if (!normalizedTeamId) {
+    throw createHttpError(400, 'Akses workspace tidak ditemukan.')
   }
 
-  if (normalizedWorkerId) {
-    query = query.eq('worker_id', normalizedWorkerId)
-  }
+  const data = await runAttendanceQueryWithFallback(async (includeOvertimeFee) => {
+    let query = adminClient
+      .from('attendance_records')
+      .select(
+        includeOvertimeFee ? attendanceDetailSelectColumns : attendanceDetailSelectColumnsWithoutOvertimeFee
+      )
+      .eq('team_id', normalizedTeamId)
+      .is('deleted_at', null)
+      .order('worker_name_snapshot', { ascending: true })
+      .order('attendance_date', { ascending: false })
+      .order('created_at', { ascending: false })
 
-  const { data, error } = await query
+    if (monthRange) {
+      query = query
+        .gte('attendance_date', monthRange.startDate)
+        .lt('attendance_date', monthRange.endDate)
+    }
 
-  if (error) {
-    throw error
-  }
+    if (normalizedWorkerId) {
+      query = query.eq('worker_id', normalizedWorkerId)
+    }
+
+    if (normalizedWorkerName) {
+      query = query.eq('worker_name_snapshot', normalizedWorkerName)
+    }
+
+    if (normalizedDate) {
+      query = query.eq('attendance_date', normalizedDate)
+    }
+
+    const { data: nextData, error } = await query
+
+    return { data: nextData, error }
+  })
 
   return (data ?? []).map(normalizeAttendanceDetailRow)
 }
@@ -3033,14 +3725,16 @@ async function loadAttendanceRowsByIds(adminClient, attendanceIds = []) {
     return new Map()
   }
 
-  const { data, error } = await adminClient
-    .from('attendance_records')
-    .select('id, telegram_user_id, team_id, worker_id, project_id, attendance_date, attendance_status, total_pay, notes, billing_status, salary_bill_id, deleted_at, created_at')
-    .in('id', normalizedAttendanceIds)
+  const data = await runAttendanceQueryWithFallback(async (includeOvertimeFee) => {
+    const { data: nextData, error } = await adminClient
+      .from('attendance_records')
+      .select(
+        includeOvertimeFee ? attendanceRowsByIdsColumns : attendanceRowsByIdsColumnsWithoutOvertimeFee
+      )
+      .in('id', normalizedAttendanceIds)
 
-  if (error) {
-    throw error
-  }
+    return { data: nextData, error }
+  })
 
   return new Map((data ?? []).map((row) => [row.id, row]))
 }
@@ -3049,7 +3743,6 @@ async function createAttendanceRecap(adminClient, body, telegramUserId) {
   const teamId = normalizeText(body.teamId ?? body.team_id, null)
   const workerId = normalizeText(body.workerId ?? body.worker_id, null)
   const dueDate = normalizeText(body.dueDate ?? body.due_date, null)
-  const description = normalizeText(body.description, null)
   const recordIds = [
     ...new Set(
       (Array.isArray(body.recordIds) ? body.recordIds : body.record_ids ?? [])
@@ -3108,6 +3801,12 @@ async function createAttendanceRecap(adminClient, body, telegramUserId) {
   }
 
   const totalAmount = eligibleRows.reduce((sum, row) => sum + toNumber(row.total_pay), 0)
+  const attendanceCount = eligibleRows.length
+  const workerName = normalizeText(
+    eligibleRows[0]?.worker_name_snapshot ?? orderedRows[0]?.worker_name_snapshot,
+    'Pekerja'
+  )
+  const finalDescription = `Tagihan gaji untuk ${workerName} (${attendanceCount} absensi)`
 
   if (totalAmount <= 0) {
     throw createHttpError(400, 'Total rekap tidak valid.')
@@ -3118,7 +3817,7 @@ async function createAttendanceRecap(adminClient, body, telegramUserId) {
     p_record_ids: eligibleRows.map((row) => row.id),
     p_total_amount: totalAmount,
     p_due_date: dueDate ?? new Date().toISOString().slice(0, 10),
-    p_description: description ?? 'Tagihan gaji',
+    p_description: finalDescription,
   })
 
   if (error) {
@@ -3127,8 +3826,9 @@ async function createAttendanceRecap(adminClient, body, telegramUserId) {
 
   return {
     billId: Array.isArray(data) ? data[0] : data ?? null,
-    attendanceCount: eligibleRows.length,
+    attendanceCount,
     totalAmount,
+    description: finalDescription,
   }
 }
 
@@ -3139,20 +3839,22 @@ async function loadAttendanceById(adminClient, attendanceId, { includeDeleted = 
     throw createHttpError(400, 'Attendance ID wajib diisi.')
   }
 
-  let query = adminClient
-    .from('attendance_records')
-    .select(attendanceDetailSelectColumns)
-    .eq('id', normalizedAttendanceId)
+  const data = await runAttendanceQueryWithFallback(async (includeOvertimeFee) => {
+    let query = adminClient
+      .from('attendance_records')
+      .select(
+        includeOvertimeFee ? attendanceDetailSelectColumns : attendanceDetailSelectColumnsWithoutOvertimeFee
+      )
+      .eq('id', normalizedAttendanceId)
 
-  if (!includeDeleted) {
-    query = query.is('deleted_at', null)
-  }
+    if (!includeDeleted) {
+      query = query.is('deleted_at', null)
+    }
 
-  const { data, error } = await query.maybeSingle()
+    const { data: nextData, error } = await query.maybeSingle()
 
-  if (error) {
-    throw error
-  }
+    return { data: nextData, error }
+  })
 
   return data ? normalizeAttendanceDetailRow(data) : null
 }
@@ -3164,18 +3866,20 @@ async function loadUnbilledAttendances(adminClient, teamId) {
     throw createHttpError(400, 'Akses workspace tidak ditemukan.')
   }
 
-  const { data, error } = await adminClient
-    .from('attendance_records')
-    .select(attendanceSelectColumns)
-    .is('deleted_at', null)
-    .eq('billing_status', 'unbilled')
-    .eq('team_id', normalizedTeamId)
-    .order('attendance_date', { ascending: true })
-    .order('created_at', { ascending: true })
+  const data = await runAttendanceQueryWithFallback(async (includeOvertimeFee) => {
+    const { data: nextData, error } = await adminClient
+      .from('attendance_records')
+      .select(
+        includeOvertimeFee ? attendanceSelectColumns : attendanceSelectColumnsWithoutOvertimeFee
+      )
+      .is('deleted_at', null)
+      .eq('billing_status', 'unbilled')
+      .eq('team_id', normalizedTeamId)
+      .order('attendance_date', { ascending: true })
+      .order('created_at', { ascending: true })
 
-  if (error) {
-    throw error
-  }
+    return { data: nextData, error }
+  })
 
   return (data ?? []).map(normalizeAttendanceRow)
 }
@@ -3195,6 +3899,12 @@ async function persistAttendanceSheet(adminClient, body, telegramUserId, teamId)
         row?.attendance_status ?? row?.attendanceStatus,
         null
       ),
+      overtime_fee:
+        normalizeText(row?.attendance_status ?? row?.attendanceStatus, null) === 'overtime'
+          ? Number.isFinite(toNumber(row?.overtime_fee ?? row?.overtimeFee))
+            ? toNumber(row?.overtime_fee ?? row?.overtimeFee)
+            : 0
+          : null,
       total_pay: toNumber(row?.total_pay ?? row?.totalPay),
       notes: normalizeText(row?.notes, null),
     }))
@@ -3238,6 +3948,30 @@ async function persistAttendanceSheet(adminClient, body, telegramUserId, teamId)
     )
   }
 
+  const workerDayRowsByWorkerId = await loadAttendanceRowsForWorkerDay(
+    adminClient,
+    teamId,
+    normalizedDate,
+    rowsToPersist.map((row) => row.worker_id)
+  )
+
+  for (const row of rowsToPersist) {
+    const workerRows = workerDayRowsByWorkerId.get(row.worker_id) ?? []
+    const existingRow = row.sourceId ? existingRowsById.get(row.sourceId) ?? null : null
+    const workerName =
+      normalizeText(row.worker_name, null) ??
+      normalizeText(existingRow?.worker_name_snapshot, null) ??
+      'Pekerja'
+
+    assertAttendanceDayWeightWithinLimit({
+      workerRows,
+      currentSourceId: row.sourceId,
+      nextAttendanceStatus: row.attendance_status,
+      workerName,
+      attendanceDate: normalizedDate,
+    })
+  }
+
   const deletes = rowsToPersist.filter((row) => row.sourceId && !row.attendance_status)
   const saves = rowsToPersist.filter((row) => row.attendance_status)
   const updates = saves.filter((row) => row.sourceId)
@@ -3261,59 +3995,65 @@ async function persistAttendanceSheet(adminClient, body, telegramUserId, teamId)
     })
   )
 
-  await Promise.all(
-    updates.map(async (row) => {
-      const { error } = await adminClient
-        .from('attendance_records')
-        .update({
-          telegram_user_id: telegramUserId,
-          team_id: teamId,
-          worker_id: row.worker_id,
-          project_id: normalizedProjectId,
-          worker_name_snapshot: row.worker_name,
-          project_name_snapshot: row.project_name,
-          attendance_date: normalizedDate,
-          attendance_status: row.attendance_status,
-          total_pay: row.total_pay,
-          entry_mode: 'manual',
-          billing_status: 'unbilled',
-          notes: row.notes,
-          updated_at: timestamp,
-          deleted_at: null,
-        })
-        .eq('id', row.sourceId)
-        .select(attendanceSelectColumns)
-        .single()
+  await runAttendanceMutationWithFallback(async (includeOvertimeFee) => {
+    const updateResults = await Promise.all(
+      updates.map(async (row) => {
+        const { data, error } = await adminClient
+          .from('attendance_records')
+          .update(
+            buildAttendanceSheetRowPayload(row, {
+              includeOvertimeFee,
+              telegramUserId,
+              teamId,
+              normalizedDate,
+              normalizedProjectId,
+              timestamp,
+            })
+          )
+          .eq('id', row.sourceId)
+          .select(
+            includeOvertimeFee
+              ? attendanceSelectColumns
+              : attendanceSelectColumnsWithoutOvertimeFee
+          )
+          .single()
 
-      if (error) {
-        throw error
-      }
-    })
-  )
-
-  if (inserts.length > 0) {
-    const { error } = await adminClient.from('attendance_records').insert(
-      inserts.map((row) => ({
-        telegram_user_id: telegramUserId,
-        team_id: teamId,
-        worker_id: row.worker_id,
-        project_id: normalizedProjectId,
-        worker_name_snapshot: row.worker_name,
-        project_name_snapshot: row.project_name,
-        attendance_date: normalizedDate,
-        attendance_status: row.attendance_status,
-        total_pay: row.total_pay,
-        entry_mode: 'manual',
-        billing_status: 'unbilled',
-        notes: row.notes,
-        updated_at: timestamp,
-      }))
+        return { data, error }
+      })
     )
 
+    const insertRows = inserts.map((row) =>
+      buildAttendanceSheetRowPayload(row, {
+        includeOvertimeFee,
+        telegramUserId,
+        teamId,
+        normalizedDate,
+        normalizedProjectId,
+        timestamp,
+      })
+    )
+
+    const { data, error } =
+      insertRows.length > 0
+        ? await adminClient.from('attendance_records').insert(insertRows).select(
+            includeOvertimeFee
+              ? attendanceSelectColumns
+              : attendanceSelectColumnsWithoutOvertimeFee
+          )
+        : { data: [], error: null }
+
     if (error) {
-      throw error
+      return { data: null, error }
     }
-  }
+
+    const updateError = updateResults.find((result) => result.error)?.error ?? null
+
+    if (updateError) {
+      return { data: null, error: updateError }
+    }
+
+    return { data, error: null }
+  })
 
   return loadAttendanceEntries(adminClient, teamId, normalizedDate, normalizedProjectId)
 }
@@ -3344,22 +4084,138 @@ async function softDeleteAttendance(adminClient, body, telegramUserId) {
   }
 
   const timestamp = new Date().toISOString()
-  const { data: deletedAttendance, error } = await adminClient
-    .from('attendance_records')
-    .update({
-      deleted_at: timestamp,
-      updated_at: timestamp,
-    })
-    .eq('id', normalizedAttendanceId)
-    .is('deleted_at', null)
-    .select(attendanceDetailSelectColumns)
-    .single()
+  const deletedAttendance = await runAttendanceQueryWithFallback(async (includeOvertimeFee) => {
+    const { data, error } = await adminClient
+      .from('attendance_records')
+      .update({
+        deleted_at: timestamp,
+        updated_at: timestamp,
+      })
+      .eq('id', normalizedAttendanceId)
+      .is('deleted_at', null)
+      .select(
+        includeOvertimeFee ? attendanceDetailSelectColumns : attendanceDetailSelectColumnsWithoutOvertimeFee
+      )
+      .single()
 
-  if (error) {
-    throw error
-  }
+    return { data, error }
+  })
 
   return normalizeAttendanceDetailRow(deletedAttendance)
+}
+
+async function updateAttendance(adminClient, body, telegramUserId) {
+  const normalizedAttendanceId = normalizeText(body.attendanceId ?? body.id, null)
+  const normalizedTeamId = normalizeText(body.teamId ?? body.team_id, null)
+  const normalizedAttendanceStatus = normalizeText(
+    body.attendanceStatus ?? body.attendance_status,
+    null
+  ).toLowerCase()
+  const rawOvertimeFee = body.overtimeFee ?? body.overtime_fee
+  const normalizedNotes = normalizeText(body.notes, null)
+  const expectedUpdatedAt = normalizeText(
+    body.expectedUpdatedAt ?? body.expected_updated_at,
+    null
+  )
+  const normalizedTotalPay = Number(body.totalPay ?? body.total_pay)
+
+  if (!normalizedAttendanceId) {
+    throw createHttpError(400, 'Attendance ID wajib diisi.')
+  }
+
+  const attendance = await loadAttendanceById(adminClient, normalizedAttendanceId, {
+    includeDeleted: true,
+  })
+
+  if (!attendance) {
+    throw createHttpError(404, 'Absensi tidak ditemukan.')
+  }
+
+  await assertTeamAccess(adminClient, telegramUserId, normalizedTeamId ?? attendance.team_id)
+
+  if (attendance.deleted_at) {
+    throw createHttpError(
+      400,
+      'Absensi yang terhapus harus dipulihkan lebih dulu sebelum diedit.'
+    )
+  }
+
+  if (attendance.billing_status === 'billed' || attendance.salary_bill_id) {
+    throw createHttpError(
+      400,
+      'Absensi yang sudah ditagihkan hanya bisa dilihat. Ubah status dari record unbilled.'
+    )
+  }
+
+  if (normalizeVersion(expectedUpdatedAt)) {
+    assertOptimisticConcurrency(expectedUpdatedAt, attendance.updated_at, 'Absensi')
+  }
+
+  if (!normalizedAttendanceStatus) {
+    throw createHttpError(400, 'Status absensi wajib diisi.')
+  }
+
+  if (!['full_day', 'half_day', 'overtime', 'absent'].includes(normalizedAttendanceStatus)) {
+    throw createHttpError(400, 'Status absensi tidak valid.')
+  }
+
+  const normalizedOvertimeFee =
+    normalizedAttendanceStatus === 'overtime'
+      ? Number.isFinite(toNumber(rawOvertimeFee))
+        ? toNumber(rawOvertimeFee)
+        : 0
+      : null
+  const nextTotalPay = Number.isFinite(normalizedTotalPay)
+    ? normalizedTotalPay
+    : toNumber(attendance.total_pay)
+
+  if (!Number.isFinite(nextTotalPay) || nextTotalPay < 0) {
+    throw createHttpError(400, 'Total upah tidak valid.')
+  }
+
+  const workerDayRowsByWorkerId = await loadAttendanceRowsForWorkerDay(
+    adminClient,
+    normalizedTeamId ?? attendance.team_id,
+    attendance.attendance_date,
+    [attendance.worker_id]
+  )
+
+  assertAttendanceDayWeightWithinLimit({
+    workerRows: workerDayRowsByWorkerId.get(attendance.worker_id) ?? [],
+    currentSourceId: attendance.id,
+    nextAttendanceStatus: normalizedAttendanceStatus,
+    workerName:
+      normalizeText(attendance.worker_name_snapshot ?? attendance.worker_name, null) ?? 'Pekerja',
+    attendanceDate: attendance.attendance_date,
+  })
+
+  const timestamp = new Date().toISOString()
+  const updatedAttendance = await runAttendanceMutationWithFallback(async (includeOvertimeFee) => {
+    const { data, error } = await adminClient
+      .from('attendance_records')
+      .update(
+        buildAttendanceUpdatePayload(
+          {
+            attendanceStatus: normalizedAttendanceStatus,
+            overtimeFee: normalizedOvertimeFee,
+            totalPay: nextTotalPay,
+            notes: normalizedNotes,
+            timestamp,
+          },
+          { includeOvertimeFee }
+        )
+      )
+      .eq('id', normalizedAttendanceId)
+      .is('deleted_at', null)
+      .select(
+        includeOvertimeFee ? attendanceDetailSelectColumns : attendanceDetailSelectColumnsWithoutOvertimeFee
+      )
+      .single()
+
+    return { data, error }
+  })
+
+  return normalizeAttendanceDetailRow(updatedAttendance)
 }
 
 async function restoreAttendance(adminClient, body, telegramUserId) {
@@ -3387,20 +4243,38 @@ async function restoreAttendance(adminClient, body, telegramUserId) {
     )
   }
 
-  const { data: restoredAttendance, error } = await adminClient
-    .from('attendance_records')
-    .update({
-      deleted_at: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', normalizedAttendanceId)
-    .not('deleted_at', 'is', null)
-    .select(attendanceDetailSelectColumns)
-    .single()
+  const workerDayRowsByWorkerId = await loadAttendanceRowsForWorkerDay(
+    adminClient,
+    normalizedTeamId ?? attendance.team_id,
+    attendance.attendance_date,
+    [attendance.worker_id]
+  )
 
-  if (error) {
-    throw error
-  }
+  assertAttendanceDayWeightWithinLimit({
+    workerRows: workerDayRowsByWorkerId.get(attendance.worker_id) ?? [],
+    currentSourceId: attendance.id,
+    nextAttendanceStatus: attendance.attendance_status,
+    workerName:
+      normalizeText(attendance.worker_name_snapshot ?? attendance.worker_name, null) ?? 'Pekerja',
+    attendanceDate: attendance.attendance_date,
+  })
+
+  const restoredAttendance = await runAttendanceQueryWithFallback(async (includeOvertimeFee) => {
+    const { data, error } = await adminClient
+      .from('attendance_records')
+      .update({
+        deleted_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', normalizedAttendanceId)
+      .not('deleted_at', 'is', null)
+      .select(
+        includeOvertimeFee ? attendanceDetailSelectColumns : attendanceDetailSelectColumnsWithoutOvertimeFee
+      )
+      .single()
+
+    return { data, error }
+  })
 
   return normalizeAttendanceDetailRow(restoredAttendance)
 }
@@ -3431,8 +4305,14 @@ async function loadProjectSummaries(readClient, { debugTiming = false } = {}) {
   }
 }
 
-async function loadProjectDetail(readClient, projectId) {
+async function loadProjectDetail(
+  readClient,
+  projectId,
+  { dateFrom = null, dateTo = null, includeUnbilledSalaries = false } = {}
+) {
   const normalizedProjectId = normalizeText(projectId)
+  const normalizedDateFrom = normalizeText(dateFrom, null)
+  const normalizedDateTo = normalizeText(dateTo, null)
 
   if (!normalizedProjectId) {
     throw createHttpError(400, 'Project ID wajib diisi.')
@@ -3446,29 +4326,53 @@ async function loadProjectDetail(readClient, projectId) {
           'project_id, team_id, project_name, project_type, project_status, total_income, material_expense, operating_expense, salary_expense, gross_profit, net_profit, net_profit_project, company_overhead'
         )
         .eq('project_id', normalizedProjectId),
-      readClient
-        .from('project_incomes')
-        .select('id, project_id, team_id, transaction_date, amount, description, created_at')
-        .eq('project_id', normalizedProjectId)
-        .is('deleted_at', null)
-        .order('transaction_date', { ascending: false }),
-      readClient
-        .from('expenses')
-        .select(
-          'id, project_id, team_id, expense_date, expense_type, status, total_amount, description, created_at'
-        )
-        .eq('project_id', normalizedProjectId)
-        .is('deleted_at', null)
-        .order('expense_date', { ascending: false }),
-      readClient
-        .from('attendance_records')
-        .select(
-          'id, project_id, team_id, worker_id, attendance_date, attendance_status, total_pay, billing_status, salary_bill_id, notes, created_at, workers:worker_id ( id, name ), bills:salary_bill_id ( id, bill_type, amount, due_date, status, description )'
-        )
-        .eq('project_id', normalizedProjectId)
-        .is('deleted_at', null)
-        .eq('billing_status', 'billed')
-        .order('attendance_date', { ascending: false }),
+      applyDateRangeToQuery(
+        readClient
+          .from('project_incomes')
+          .select('id, project_id, team_id, transaction_date, amount, description, created_at')
+          .eq('project_id', normalizedProjectId)
+          .is('deleted_at', null)
+          .order('transaction_date', { ascending: false }),
+        'transaction_date',
+        normalizedDateFrom,
+        normalizedDateTo
+      ),
+      applyDateRangeToQuery(
+        readClient
+          .from('expenses')
+          .select(
+            'id, project_id, team_id, expense_date, expense_type, document_type, status, total_amount, description, supplier_name_snapshot, created_at'
+          )
+          .eq('project_id', normalizedProjectId)
+          .is('deleted_at', null)
+          .order('expense_date', { ascending: false }),
+        'expense_date',
+        normalizedDateFrom,
+        normalizedDateTo
+      ),
+      applyDateRangeToQuery(
+        includeUnbilledSalaries
+          ? readClient
+              .from('attendance_records')
+              .select(
+                'id, project_id, team_id, worker_id, attendance_date, attendance_status, total_pay, billing_status, salary_bill_id, notes, created_at, workers:worker_id ( id, name ), bills:salary_bill_id ( id, bill_type, amount, due_date, status, description )'
+              )
+              .eq('project_id', normalizedProjectId)
+              .is('deleted_at', null)
+              .order('attendance_date', { ascending: false })
+          : readClient
+              .from('attendance_records')
+              .select(
+                'id, project_id, team_id, worker_id, attendance_date, attendance_status, total_pay, billing_status, salary_bill_id, notes, created_at, workers:worker_id ( id, name ), bills:salary_bill_id ( id, bill_type, amount, due_date, status, description )'
+              )
+              .eq('project_id', normalizedProjectId)
+              .is('deleted_at', null)
+              .eq('billing_status', 'billed')
+              .order('attendance_date', { ascending: false }),
+        'attendance_date',
+        normalizedDateFrom,
+        normalizedDateTo
+      ),
     ])
 
   const [summaries, incomes, expenses, salaries] = [
@@ -3484,17 +4388,80 @@ async function loadProjectDetail(readClient, projectId) {
     return result.data ?? []
   })
 
-  const summary = summaries.length > 0 ? normalizeSummaryRow({
-    ...summaries[0],
-    total_income: summaries.reduce((sum, row) => sum + toNumber(row.total_income), 0),
-    material_expense: summaries.reduce((sum, row) => sum + toNumber(row.material_expense), 0),
-    operating_expense: summaries.reduce((sum, row) => sum + toNumber(row.operating_expense), 0),
-    salary_expense: summaries.reduce((sum, row) => sum + toNumber(row.salary_expense), 0),
-    gross_profit: summaries.reduce((sum, row) => sum + toNumber(row.gross_profit), 0),
-    net_profit: summaries.reduce((sum, row) => sum + toNumber(row.net_profit), 0),
-    net_profit_project: summaries.reduce((sum, row) => sum + toNumber(row.net_profit_project ?? row.net_profit), 0),
-    company_overhead: summaries.reduce((sum, row) => sum + toNumber(row.company_overhead), 0),
-  }) : null
+  const summaryBaseRow = summaries.length > 0 ? summaries[0] : null
+  const summary = summaryBaseRow
+    ? normalizeSummaryRow({
+        ...summaryBaseRow,
+        total_income: incomes.reduce((sum, row) => sum + toNumber(row.amount), 0),
+        material_expense: expenses.reduce((sum, row) => {
+          const expenseType = normalizeText(row?.expense_type, '').toLowerCase()
+
+          if (expenseType === 'material' || expenseType === 'material_invoice') {
+            return sum + toNumber(row.total_amount)
+          }
+
+          return sum
+        }, 0),
+        operating_expense: expenses.reduce((sum, row) => {
+          const expenseType = normalizeText(row?.expense_type, '').toLowerCase()
+
+          if (
+            expenseType === 'operasional' ||
+            expenseType === 'operational' ||
+            expenseType === 'lainnya' ||
+            expenseType === 'other'
+          ) {
+            return sum + toNumber(row.total_amount)
+          }
+
+          return sum
+        }, 0),
+        salary_expense: salaries.reduce((sum, row) => sum + toNumber(row.total_pay), 0),
+        gross_profit:
+          incomes.reduce((sum, row) => sum + toNumber(row.amount), 0) -
+          expenses.reduce((sum, row) => {
+            const expenseType = normalizeText(row?.expense_type, '').toLowerCase()
+
+            if (expenseType === 'material' || expenseType === 'material_invoice') {
+              return sum + toNumber(row.total_amount)
+            }
+
+            if (
+              expenseType === 'operasional' ||
+              expenseType === 'operational' ||
+              expenseType === 'lainnya' ||
+              expenseType === 'other'
+            ) {
+              return sum + toNumber(row.total_amount)
+            }
+
+            return sum
+          }, 0) -
+          salaries.reduce((sum, row) => sum + toNumber(row.total_pay), 0),
+        net_profit_project:
+          incomes.reduce((sum, row) => sum + toNumber(row.amount), 0) -
+          expenses.reduce((sum, row) => {
+            const expenseType = normalizeText(row?.expense_type, '').toLowerCase()
+
+            if (expenseType === 'material' || expenseType === 'material_invoice') {
+              return sum + toNumber(row.total_amount)
+            }
+
+            if (
+              expenseType === 'operasional' ||
+              expenseType === 'operational' ||
+              expenseType === 'lainnya' ||
+              expenseType === 'other'
+            ) {
+              return sum + toNumber(row.total_amount)
+            }
+
+            return sum
+          }, 0) -
+          salaries.reduce((sum, row) => sum + toNumber(row.total_pay), 0),
+        company_overhead: toNumber(summaryBaseRow.company_overhead),
+      })
+    : null
 
   return {
     summary,
@@ -3502,6 +4469,164 @@ async function loadProjectDetail(readClient, projectId) {
     expenses: expenses.map(normalizeExpenseRow),
     salaries: salaries.map(normalizeSalaryRow),
   }
+}
+
+async function loadCashMutationRows(readClient, { dateFrom = null, dateTo = null } = {}) {
+  let query = readClient
+    .from('vw_cash_mutation')
+    .select('transaction_date, type, amount, description, source_table, team_id')
+    .order('transaction_date', { ascending: false })
+    .order('amount', { ascending: false })
+
+  const normalizedDateFrom = normalizeText(dateFrom, null)
+  const normalizedDateTo = normalizeText(dateTo, null)
+
+  if (normalizedDateFrom) {
+    query = query.gte('transaction_date', normalizedDateFrom)
+  }
+
+  if (normalizedDateTo) {
+    query = query.lte('transaction_date', normalizedDateTo)
+  }
+
+  const { data, error } = await query
+
+  if (error) {
+    throw error
+  }
+
+  return (data ?? []).map(normalizeCashMutationRow)
+}
+
+async function loadBillingStatsSummary(readClient) {
+  const { data, error } = await readClient
+    .from('vw_billing_stats')
+    .select('team_id, total_outstanding, total_paid, total_bill_count, total_outstanding_salary')
+
+  if (error) {
+    throw error
+  }
+
+  return createBillingStatsSummary((data ?? []).map(normalizeBillingStatsRow))
+}
+
+function buildCashMutationSummaryRows(cashRows = []) {
+  const summary = createCashMutationSummary(cashRows)
+
+  return {
+    ...summary,
+    total_net_cash_flow: summary.total_inflow - summary.total_outflow,
+  }
+}
+
+function buildBusinessReportPeriod(dateFrom = null, dateTo = null) {
+  return {
+    dateFrom: normalizeText(dateFrom, null),
+    dateTo: normalizeText(dateTo, null),
+  }
+}
+
+function createBusinessReportBase({
+  reportKind,
+  title,
+  period,
+  generatedAt = new Date().toISOString(),
+  summary = {},
+  projectSummaries = [],
+  projectDetail = null,
+  cashMutations = [],
+  billingStats = null,
+} = {}) {
+  return {
+    reportKind,
+    title,
+    period: buildBusinessReportPeriod(period?.dateFrom, period?.dateTo),
+    generatedAt,
+    summary,
+    projectSummaries,
+    projectDetail,
+    cashMutations,
+    billingStats,
+  }
+}
+
+async function buildExecutiveFinanceReportData(readClient, { dateFrom = null, dateTo = null } = {}) {
+  const [projectSummariesResult, cashRows, billingStats] = await Promise.all([
+    loadProjectSummaries(readClient),
+    loadCashMutationRows(readClient, { dateFrom, dateTo }),
+    loadBillingStatsSummary(readClient),
+  ])
+
+  const projectSummaries = projectSummariesResult?.rows ?? []
+  const portfolioSummary = createPortfolioSummary(projectSummaries)
+  const cashSummary = buildCashMutationSummaryRows(cashRows)
+
+  return createBusinessReportBase({
+    reportKind: 'executive_finance',
+    title: 'LAPORAN KEUANGAN EKSEKUTIF',
+    period: { dateFrom, dateTo },
+    summary: {
+      total_income: portfolioSummary.total_income,
+      total_expense: portfolioSummary.total_expense,
+      total_project_profit: portfolioSummary.total_project_profit,
+      total_company_overhead: portfolioSummary.total_company_overhead,
+      net_consolidated_profit: portfolioSummary.net_consolidated_profit,
+      total_cash_in: cashSummary.total_inflow,
+      total_cash_out: cashSummary.total_outflow,
+      total_net_cash_flow: cashSummary.total_net_cash_flow,
+      total_bill_count: billingStats.total_bill_count,
+      total_outstanding_bill: billingStats.total_outstanding,
+      total_paid_bill: billingStats.total_paid,
+      total_outstanding_salary: billingStats.total_outstanding_salary,
+    },
+    projectSummaries,
+    cashMutations: cashRows,
+    billingStats,
+  })
+}
+
+async function buildCashFlowReportData(readClient, { dateFrom = null, dateTo = null } = {}) {
+  const cashRows = await loadCashMutationRows(readClient, { dateFrom, dateTo })
+  const summary = buildCashMutationSummaryRows(cashRows)
+
+  return createBusinessReportBase({
+    reportKind: 'cash_flow',
+    title: 'LAPORAN ARUS KAS',
+    period: { dateFrom, dateTo },
+    summary,
+    cashMutations: cashRows,
+  })
+}
+
+async function buildProjectPlReportData(
+  readClient,
+  projectId,
+  { dateFrom = null, dateTo = null } = {}
+) {
+  const projectDetail = await loadProjectDetail(readClient, projectId, {
+    dateFrom,
+    dateTo,
+    includeUnbilledSalaries: false,
+  })
+
+  return createBusinessReportBase({
+    reportKind: 'project_pl',
+    title: 'LAPORAN LABA RUGI PROYEK',
+    period: { dateFrom, dateTo },
+    summary: projectDetail?.summary
+      ? {
+          total_income: projectDetail.summary.total_income,
+          material_expense: projectDetail.summary.material_expense,
+          operating_expense: projectDetail.summary.operating_expense,
+          salary_expense: projectDetail.summary.salary_expense,
+          gross_profit: projectDetail.summary.gross_profit,
+          net_profit: projectDetail.summary.net_profit,
+          net_profit_project: projectDetail.summary.net_profit_project,
+          company_overhead: projectDetail.summary.company_overhead,
+        }
+      : {},
+    projectDetail,
+  })
 }
 
 async function loadAttachmentPolicyRole(adminClient, telegramUserId) {
@@ -3529,6 +4654,94 @@ async function loadAttachmentPolicyRole(adminClient, telegramUserId) {
   return data?.role ?? null
 }
 
+async function loadPdfSettings(adminClient, teamId) {
+  const normalizedTeamId = normalizeText(teamId, null)
+
+  if (!normalizedTeamId) {
+    throw createHttpError(400, 'Team ID wajib diisi.')
+  }
+
+  const { data, error } = await adminClient
+    .from('pdf_settings')
+    .select(
+      'team_id, header_color, header_logo_file_id, footer_logo_file_id, company_name, address, phone, extra, updated_by_user_id, updated_at, header_logo_file_asset:file_assets!header_logo_file_id ( id, team_id, storage_bucket, bucket_name, storage_path, original_name, file_name, public_url, mime_type, size_bytes, file_size, uploaded_by_user_id, uploaded_by, created_at, updated_at, deleted_at ), footer_logo_file_asset:file_assets!footer_logo_file_id ( id, team_id, storage_bucket, bucket_name, storage_path, original_name, file_name, public_url, mime_type, size_bytes, file_size, uploaded_by_user_id, uploaded_by, created_at, updated_at, deleted_at )'
+    )
+    .eq('team_id', normalizedTeamId)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  return normalizePdfSettingsRow(data)
+}
+
+function readPdfSettingValue(body, keys, fallback = null) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) {
+      return normalizeText(body[key], null)
+    }
+  }
+
+  return fallback
+}
+
+async function savePdfSettings(adminClient, body = {}, telegramUserId, updatedByUserId) {
+  const teamId = normalizeText(body.teamId ?? body.team_id, null)
+
+  if (!teamId) {
+    throw createHttpError(400, 'Team ID wajib diisi.')
+  }
+
+  const effectiveTeamId = await assertTeamAccess(adminClient, telegramUserId, teamId)
+  const existingSettings = await loadPdfSettings(adminClient, effectiveTeamId)
+  const timestamp = new Date().toISOString()
+  const nextSettings = {
+    team_id: effectiveTeamId,
+    header_color: readPdfSettingValue(
+      body,
+      ['header_color', 'headerColor'],
+      existingSettings?.header_color ?? null
+    ),
+    header_logo_file_id: readPdfSettingValue(
+      body,
+      ['header_logo_file_id', 'headerLogoFileId'],
+      existingSettings?.header_logo_file_id ?? null
+    ),
+    footer_logo_file_id: readPdfSettingValue(
+      body,
+      ['footer_logo_file_id', 'footerLogoFileId'],
+      existingSettings?.footer_logo_file_id ?? null
+    ),
+    company_name: readPdfSettingValue(
+      body,
+      ['company_name', 'companyName'],
+      existingSettings?.company_name ?? null
+    ),
+    address: readPdfSettingValue(body, ['address'], existingSettings?.address ?? null),
+    phone: readPdfSettingValue(body, ['phone'], existingSettings?.phone ?? null),
+    extra: Object.prototype.hasOwnProperty.call(body, 'extra')
+      ? body.extra ?? null
+      : existingSettings?.extra ?? null,
+    updated_by_user_id: updatedByUserId,
+    updated_at: timestamp,
+  }
+
+  const { data, error } = await adminClient
+    .from('pdf_settings')
+    .upsert(nextSettings, { onConflict: 'team_id' })
+    .select(
+      'team_id, header_color, header_logo_file_id, footer_logo_file_id, company_name, address, phone, extra, updated_by_user_id, updated_at, header_logo_file_asset:file_assets!header_logo_file_id ( id, team_id, storage_bucket, bucket_name, storage_path, original_name, file_name, public_url, mime_type, size_bytes, file_size, uploaded_by_user_id, uploaded_by, created_at, updated_at, deleted_at ), footer_logo_file_asset:file_assets!footer_logo_file_id ( id, team_id, storage_bucket, bucket_name, storage_path, original_name, file_name, public_url, mime_type, size_bytes, file_size, uploaded_by_user_id, uploaded_by, created_at, updated_at, deleted_at )'
+    )
+    .single()
+
+  if (error) {
+    throw error
+  }
+
+  return normalizePdfSettingsRow(data)
+}
+
 export default async function handler(req, res) {
   const supabaseUrl = getEnv('SUPABASE_URL', getEnv('VITE_SUPABASE_URL'))
   const publishableKey = getEnv(
@@ -3550,6 +4763,82 @@ export default async function handler(req, res) {
 
     if (!resource) {
       throw createHttpError(400, 'Resource tidak valid.')
+    }
+
+    if (
+      method === 'GET' &&
+      ['attendance-history', 'stock-project-options', 'stock-overview'].includes(resource)
+    ) {
+      const bearerToken = getBearerToken(req)
+      const accessClient = createDatabaseClient(
+        supabaseUrl,
+        publishableKey,
+        bearerToken
+      )
+      const readClient = createDatabaseClient(supabaseUrl, databaseKey)
+
+      if (resource === 'attendance-history') {
+        const queryTeamId = normalizeText(req.query?.teamId, null)
+        const effectiveTeamId = await assertSessionTeamAccess(accessClient, queryTeamId)
+        const view = normalizeText(req.query?.view, 'detail')
+
+        if (view === 'summary') {
+          const summary = await loadAttendanceHistorySummary(readClient, effectiveTeamId, {
+            month: req.query?.month ?? null,
+          })
+
+          return res.status(200).json({
+            success: true,
+            summary,
+          })
+        }
+
+        const attendances = await loadAttendanceHistory(readClient, effectiveTeamId, {
+          month: req.query?.month ?? null,
+          workerId: req.query?.workerId ?? null,
+          workerName: req.query?.workerName ?? null,
+          date: req.query?.date ?? null,
+        })
+
+        return res.status(200).json({
+          success: true,
+          attendances,
+        })
+      }
+
+      if (resource === 'stock-project-options') {
+        const teamId = normalizeText(req.query?.teamId, null)
+        const profile = await loadSessionProfile(accessClient)
+        const telegramUserId = normalizeText(profile?.telegram_user_id, null)
+
+        if (!telegramUserId) {
+          throw createHttpError(403, 'Profile Telegram tidak ditemukan.')
+        }
+
+        const effectiveTeamId = await assertManualStockOutAccess(
+          accessClient,
+          telegramUserId,
+          teamId
+        )
+        const projects = await loadActiveProjectsForTeam(readClient, effectiveTeamId)
+
+        return res.status(200).json({
+          success: true,
+          projects,
+        })
+      }
+
+      const teamId = normalizeText(req.query?.teamId, null)
+      const limit = Number.isFinite(Number(req.query?.limit))
+        ? Number(req.query.limit)
+        : 8
+      const effectiveTeamId = await assertSessionTeamAccess(accessClient, teamId)
+      const overview = await loadStockOverview(readClient, effectiveTeamId, limit)
+
+      return res.status(200).json({
+        success: true,
+        ...overview,
+      })
     }
 
     const context = await getAuthorizedContext(req, supabaseUrl, publishableKey)
@@ -4263,6 +5552,11 @@ export default async function handler(req, res) {
           await guardExpenseBillPayments(adminClient, invoice.bill.id)
         }
         assertOptimisticConcurrency(expectedUpdatedAt, invoice.updated_at, 'Faktur material')
+        await assertMaterialInvoiceDeleteStockAvailability(
+          adminClient,
+          Array.isArray(invoice.items) ? invoice.items : [],
+          invoice.document_type
+        )
 
         await syncMaterialInvoiceStockMovement(adminClient, {
           expenseId,
@@ -4400,6 +5694,13 @@ export default async function handler(req, res) {
             attendance,
           })
         }
+
+        const attendance = await updateAttendance(adminClient, body, telegramUserId)
+
+        return res.status(200).json({
+          success: true,
+          attendance,
+        })
       }
     }
 
@@ -4410,10 +5711,24 @@ export default async function handler(req, res) {
         telegramUserId,
         queryTeamId
       )
+      const view = normalizeText(req.query?.view, 'detail')
+
+      if (view === 'summary') {
+        const summary = await loadAttendanceHistorySummary(adminClient, effectiveTeamId, {
+          month: req.query?.month ?? null,
+        })
+
+        return res.status(200).json({
+          success: true,
+          summary,
+        })
+      }
 
       const attendances = await loadAttendanceHistory(adminClient, effectiveTeamId, {
         month: req.query?.month ?? null,
         workerId: req.query?.workerId ?? null,
+        workerName: req.query?.workerName ?? null,
+        date: req.query?.date ?? null,
       })
 
       return res.status(200).json({
@@ -4455,15 +5770,72 @@ export default async function handler(req, res) {
         publishableKey,
         context.bearerToken
       )
+      const hasReportKindQuery = Object.prototype.hasOwnProperty.call(req.query ?? {}, 'reportKind')
+      const reportKind = normalizeText(req.query?.reportKind, 'executive_finance')
+      const dateFrom = normalizeText(req.query?.dateFrom, null)
+      const dateTo = normalizeText(req.query?.dateTo, null)
       const projectId = normalizeText(req.query?.projectId, null)
       const debugTimingEnabled = normalizeText(req.query?.debugTiming, '') === '1'
 
-      if (projectId) {
-        const projectDetail = await loadProjectDetail(readClient, projectId)
+      if (!hasReportKindQuery) {
+        if (projectId) {
+          const projectDetail = await loadProjectDetail(readClient, projectId)
+
+          return res.status(200).json({
+            success: true,
+            projectDetail,
+          })
+        }
+
+        const { rows: projectSummaries, timing } = await loadProjectSummaries(readClient, {
+          debugTiming: debugTimingEnabled,
+        })
 
         return res.status(200).json({
           success: true,
-          projectDetail,
+          projectSummaries,
+          portfolioSummary: createPortfolioSummary(projectSummaries),
+          ...(debugTimingEnabled ? { timing } : {}),
+        })
+      }
+
+      if (reportKind === 'project_pl') {
+        if (!projectId) {
+          throw createHttpError(400, 'Project ID wajib diisi untuk laporan proyek.')
+        }
+
+        const reportData = await buildProjectPlReportData(readClient, projectId, {
+          dateFrom,
+          dateTo,
+        })
+
+        return res.status(200).json({
+          success: true,
+          reportData,
+        })
+      }
+
+      if (reportKind === 'cash_flow') {
+        const reportData = await buildCashFlowReportData(readClient, {
+          dateFrom,
+          dateTo,
+        })
+
+        return res.status(200).json({
+          success: true,
+          reportData,
+        })
+      }
+
+      if (reportKind === 'executive_finance') {
+        const reportData = await buildExecutiveFinanceReportData(readClient, {
+          dateFrom,
+          dateTo,
+        })
+
+        return res.status(200).json({
+          success: true,
+          reportData,
         })
       }
 
@@ -4477,6 +5849,36 @@ export default async function handler(req, res) {
         portfolioSummary: createPortfolioSummary(projectSummaries),
         ...(debugTimingEnabled ? { timing } : {}),
       })
+    }
+
+    if (resource === 'pdf-settings') {
+      if (method === 'GET') {
+        const teamId = normalizeText(req.query?.teamId, null)
+        const effectiveTeamId = await assertTeamAccess(adminClient, telegramUserId, teamId)
+        const pdfSettings = await loadPdfSettings(adminClient, effectiveTeamId)
+
+        return res.status(200).json({
+          success: true,
+          pdfSettings,
+        })
+      }
+
+      if (method === 'PATCH') {
+        const body = await parseRequestBody(req)
+        const pdfSettings = await savePdfSettings(
+          adminClient,
+          body,
+          telegramUserId,
+          profile?.id ?? context.authUser.id
+        )
+
+        return res.status(200).json({
+          success: true,
+          pdfSettings,
+        })
+      }
+
+      throw createHttpError(405, 'Method tidak didukung.')
     }
 
     throw createHttpError(405, 'Resource atau method tidak didukung.')

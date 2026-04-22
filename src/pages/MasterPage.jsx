@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import ProtectedRoute from '../components/ProtectedRoute'
 import MasterDataManager from '../components/MasterDataManager'
 import { AppButton, PageHeader, PageShell } from '../components/ui/AppPrimitives'
+import { capabilityContracts } from '../lib/capabilities'
 
 function MasterPage() {
   const navigate = useNavigate()
@@ -24,7 +25,7 @@ function MasterPage() {
           </AppButton>
         }
       />
-      <ProtectedRoute requiredCapability="master_data_admin">
+      <ProtectedRoute requiredCapability={capabilityContracts.master_data_admin.key}>
         <MasterDataManager />
       </ProtectedRoute>
     </PageShell>

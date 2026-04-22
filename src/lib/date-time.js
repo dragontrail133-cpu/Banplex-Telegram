@@ -12,7 +12,6 @@ const syncLabelFormatter = new Intl.DateTimeFormat('id-ID', {
   month: 'short',
   hour: '2-digit',
   minute: '2-digit',
-  timeZone: APP_TIME_ZONE,
 })
 
 const dateTimeFormatter = new Intl.DateTimeFormat('id-ID', {
@@ -21,7 +20,6 @@ const dateTimeFormatter = new Intl.DateTimeFormat('id-ID', {
   year: 'numeric',
   hour: '2-digit',
   minute: '2-digit',
-  timeZone: APP_TIME_ZONE,
 })
 
 const calendarLabelFormatter = new Intl.DateTimeFormat('id-ID', {

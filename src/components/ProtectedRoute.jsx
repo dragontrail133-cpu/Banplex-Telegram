@@ -1,23 +1,30 @@
 import useAuthStore from '../store/useAuthStore'
 import { hasRequiredRole } from '../lib/rbac'
-import { canUseCapability } from '../lib/capabilities'
+import { canUseCapability, getCapabilityContract } from '../lib/capabilities'
 
 function ProtectedRoute({
   allowedRoles = [],
   requiredCapability = null,
   title = 'Akses Ditolak',
-  description = 'Anda tidak memiliki akses ke halaman ini.',
+  description = null,
   children,
 }) {
   const role = useAuthStore((state) => state.role)
   const isRegistered = useAuthStore((state) => state.isRegistered)
+  const capabilityContract = requiredCapability
+    ? getCapabilityContract(requiredCapability)
+    : null
   const hasAccess = requiredCapability
-    ? canUseCapability(role, requiredCapability)
+    ? canUseCapability(role, capabilityContract?.key ?? requiredCapability)
     : hasRequiredRole(role, allowedRoles)
+  const resolvedDescription =
+    description ??
+    capabilityContract?.accessDeniedMessage ??
+    'Anda tidak memiliki akses ke halaman ini.'
 
   if (!isRegistered || !hasAccess) {
     return (
-      <section className="rounded-[26px] border border-rose-200 bg-rose-50/85 px-5 py-5 text-rose-900">
+      <section className="rounded-[26px] border border-rose-200 bg-rose-50 px-5 py-5 text-rose-900">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-rose-700">
           {title}
         </p>
@@ -25,7 +32,7 @@ function ProtectedRoute({
           Anda tidak memiliki akses ke halaman ini.
         </h2>
         <p className="mt-3 text-sm leading-6 text-rose-800/80">
-          {description}
+          {resolvedDescription}
         </p>
       </section>
     )
