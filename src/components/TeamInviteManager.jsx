@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Copy, Link2, RefreshCcw, Shield, UserX } from 'lucide-react'
 import ActionCard from './ui/ActionCard'
+import MasterPickerField from './ui/MasterPickerField'
 import {
   AppButton,
   AppCard,
   AppCardDashed,
   AppCardStrong,
-  AppWrapToggleGroup,
   PageSection,
 } from './ui/AppPrimitives'
 import { formatAppDateTime } from '../lib/date-time'
@@ -44,7 +44,6 @@ function getInviteStatusChipClassName(status) {
 
 function TeamInviteManagerContent() {
   const [selectedRole, setSelectedRole] = useState(allRoles[allRoles.length - 1])
-  const [copyState, setCopyState] = useState('')
   const activeTeam = useTeamStore((state) => state.activeTeam)
   const latestInvite = useTeamStore((state) => state.latestInvite)
   const isLoading = useTeamStore((state) => state.isLoading)
@@ -54,11 +53,6 @@ function TeamInviteManagerContent() {
   const updateTeamMemberRole = useTeamStore((state) => state.updateTeamMemberRole)
   const suspendTeamMember = useTeamStore((state) => state.suspendTeamMember)
   const authUser = useAuthStore((state) => state.user)
-  const activeTeamCount = activeTeam.length
-  const activeTeamDescription =
-    activeTeamCount > 0
-      ? `${activeTeamCount} anggota aktif tersinkron. Ubah role atau suspend langsung dari list.`
-      : 'Belum ada anggota aktif di workspace ini.'
 
   useEffect(() => {
     fetchActiveTeam().catch((teamError) => {
@@ -68,7 +62,6 @@ function TeamInviteManagerContent() {
 
   const handleGenerateInvite = async () => {
     try {
-      setCopyState('')
       await generateInviteLink(selectedRole)
       await fetchActiveTeam()
     } catch (inviteError) {
@@ -83,10 +76,8 @@ function TeamInviteManagerContent() {
 
     try {
       await navigator.clipboard.writeText(latestInvite.invite_link)
-      setCopyState('Link berhasil disalin.')
     } catch (copyError) {
       console.error('Gagal menyalin invite link:', copyError)
-      setCopyState('Clipboard tidak tersedia di perangkat ini.')
     }
   }
 
@@ -110,47 +101,33 @@ function TeamInviteManagerContent() {
 
   return (
     <div className="space-y-5">
-      <PageSection
-        eyebrow="Magic Invite Link"
-        title="Buat link undangan"
-        description="Pilih role lalu generate link yang aktif 24 jam."
-      >
+      <PageSection title="Undangan">
         <AppCardStrong className="space-y-4 px-4 py-4 sm:px-5 sm:py-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 space-y-1">
-              <p className="app-meta">Invite control</p>
-              <p className="text-sm leading-6 text-[var(--app-hint-color)]">
-                Link terbaru akan muncul di kartu bawah dan bisa langsung disalin.
-              </p>
-            </div>
-            <span className="app-chip shrink-0">Aktif 24 jam</span>
-          </div>
+          <MasterPickerField
+            label="Role undangan"
+            name="inviteRole"
+            onChange={setSelectedRole}
+            options={inviteRoleOptions.map((role) => ({
+              value: role,
+              label: role,
+            }))}
+            placeholder="Pilih role"
+            searchable={false}
+            title="Pilih Role"
+            value={selectedRole}
+          />
 
-          <div className="grid gap-3">
-            <AppWrapToggleGroup
-              buttonSize="sm"
-              label="Role undangan"
-              description="Role ini dipakai oleh link yang baru dibuat."
-              onChange={setSelectedRole}
-              options={inviteRoleOptions.map((role) => ({
-                value: role,
-                label: role,
-              }))}
-              value={selectedRole}
-            />
-
-            <AppButton
-              disabled={isLoading}
-              fullWidth
-              onClick={() => {
-                void handleGenerateInvite()
-              }}
-              leadingIcon={<Link2 className="h-4 w-4" />}
-              type="button"
-            >
-              Buat Link Undangan
-            </AppButton>
-          </div>
+          <AppButton
+            disabled={isLoading}
+            fullWidth
+            onClick={() => {
+              void handleGenerateInvite()
+            }}
+            leadingIcon={<Link2 className="h-4 w-4" />}
+            type="button"
+          >
+            Buat Link Undangan
+          </AppButton>
 
           {latestInvite?.invite_link ? (
             <AppCard className="app-tone-info space-y-4">
@@ -189,18 +166,8 @@ function TeamInviteManagerContent() {
                   Copy Link
                 </AppButton>
               </div>
-
-              {copyState ? (
-                <p className="text-sm leading-6 text-[var(--app-tone-info-text)]">
-                  {copyState}
-                </p>
-              ) : null}
             </AppCard>
-          ) : (
-            <AppCardDashed className="px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
-              Belum ada link undangan aktif. Buat link baru untuk mulai onboarding.
-            </AppCardDashed>
-          )}
+          ) : null}
 
           {error ? (
             <AppCardDashed className="app-tone-danger mt-0 text-sm leading-6">
@@ -211,9 +178,6 @@ function TeamInviteManagerContent() {
       </PageSection>
 
       <PageSection
-        eyebrow="Active Team"
-        title="Anggota aktif di workspace"
-        description={activeTeamDescription}
         action={
           <AppButton
             disabled={isLoading}
@@ -229,8 +193,10 @@ function TeamInviteManagerContent() {
             Refresh
           </AppButton>
         }
+        title="Anggota aktif"
       >
         <div className="space-y-3">
+
           {activeTeam.length > 0 ? (
             <AppCardStrong padded={false} className="overflow-hidden">
               {activeTeam.map((member) => {
@@ -249,11 +215,6 @@ function TeamInviteManagerContent() {
                       member.is_default ? 'Workspace utama' : '',
                       isCurrentOwner ? 'Owner aktif' : '',
                     ].filter(Boolean)}
-                    details={[
-                      `Role saat ini: ${member.role || 'Viewer'}`,
-                      `Status anggota: ${member.status_label || member.status || 'Aktif'}`,
-                      `Telegram: ${member.telegram_user_id || '-'}`,
-                    ]}
                     leadingIcon={
                       <span
                         className={`flex h-10 w-10 items-center justify-center rounded-2xl ${
@@ -297,11 +258,7 @@ function TeamInviteManagerContent() {
                 )
               })}
             </AppCardStrong>
-          ) : (
-            <AppCardDashed className="px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
-              Belum ada anggota aktif di workspace ini.
-            </AppCardDashed>
-          )}
+          ) : null}
         </div>
       </PageSection>
     </div>

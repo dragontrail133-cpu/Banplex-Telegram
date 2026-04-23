@@ -37,7 +37,9 @@ function MasterPickerField({
   emptyMessage = 'Data belum tersedia.',
   helperText = null,
   title = null,
+  sheetDescription = null,
   name = null,
+  searchable = true,
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
@@ -53,6 +55,10 @@ function MasterPickerField({
   )
 
   const filteredOptions = useMemo(() => {
+    if (!searchable) {
+      return normalizedOptions
+    }
+
     const normalizedSearchTerm = normalizeText(searchTerm, '').toLowerCase()
 
     if (!normalizedSearchTerm) {
@@ -64,7 +70,7 @@ function MasterPickerField({
         .filter(Boolean)
         .some((item) => item.toLowerCase().includes(normalizedSearchTerm))
     )
-  }, [normalizedOptions, searchTerm])
+  }, [normalizedOptions, searchTerm, searchable])
 
   const handleSelect = (nextValue) => {
     if (disabled) {
@@ -132,7 +138,7 @@ function MasterPickerField({
       ) : null}
 
       <AppSheet
-        description={title ?? label}
+        description={sheetDescription ?? (searchable ? title ?? label : null)}
         open={isOpen}
         onClose={() => {
           setIsOpen(false)
@@ -141,11 +147,13 @@ function MasterPickerField({
         title={title ?? label}
       >
         <div className="space-y-4">
-          <AppInput
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder={searchPlaceholder}
-            value={searchTerm}
-          />
+          {searchable ? (
+            <AppInput
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder={searchPlaceholder}
+              value={searchTerm}
+            />
+          ) : null}
 
           <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
             {filteredOptions.length > 0 ? (

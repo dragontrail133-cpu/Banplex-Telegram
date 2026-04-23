@@ -284,12 +284,12 @@ async function verifyExpenseBill(client, artifact) {
   )
 }
 
-async function verifyBillPayment(client, artifact) {
-  const record = artifact.records?.bill_payment
+async function verifyBillPayment(client, artifact, recordKey = 'bill_payment') {
+  const record = artifact.records?.[recordKey]
 
   if (!record?.id) {
-    return createCheckResult('bill_payment', false, {
-      reason: 'Artifact bill_payment.id tidak ditemukan.',
+    return createCheckResult(recordKey, false, {
+      reason: `Artifact ${recordKey}.id tidak ditemukan.`,
     })
   }
 
@@ -300,14 +300,14 @@ async function verifyBillPayment(client, artifact) {
     .maybeSingle()
 
   if (error) {
-    return createCheckResult('bill_payment', false, {
+    return createCheckResult(recordKey, false, {
       reason: error.message,
       record_id: record.id,
     })
   }
 
   if (!data) {
-    return createCheckResult('bill_payment', false, {
+    return createCheckResult(recordKey, false, {
       reason: 'Row bill_payments tidak ditemukan.',
       record_id: record.id,
     })
@@ -319,7 +319,7 @@ async function verifyBillPayment(client, artifact) {
   const notesMatches = normalizeText(data.notes, '') === normalizeText(record.notes, '')
 
   return createCheckResult(
-    'bill_payment',
+    recordKey,
     Boolean(billMatches && amountMatches && paymentDateMatches && notesMatches && !data.deleted_at),
     {
       record_id: data.id,
@@ -328,6 +328,144 @@ async function verifyBillPayment(client, artifact) {
       actual_amount: data.amount,
       actual_payment_date: data.payment_date,
       actual_notes: data.notes,
+    }
+  )
+}
+
+async function verifyAttendanceRecord(client, artifact) {
+  const record = artifact.records?.attendance_record
+
+  if (!record?.id) {
+    return createCheckResult('attendance_record', false, {
+      reason: 'Artifact attendance_record.id tidak ditemukan.',
+    })
+  }
+
+  const { data, error } = await client
+    .from('attendance_records')
+    .select(
+      'id, team_id, worker_id, project_id, attendance_date, attendance_status, total_pay, billing_status, salary_bill_id, worker_name_snapshot, project_name_snapshot, deleted_at, created_at, updated_at'
+    )
+    .eq('id', record.id)
+    .maybeSingle()
+
+  if (error) {
+    return createCheckResult('attendance_record', false, {
+      reason: error.message,
+      record_id: record.id,
+    })
+  }
+
+  if (!data) {
+    return createCheckResult('attendance_record', false, {
+      reason: 'Row attendance_records tidak ditemukan.',
+      record_id: record.id,
+    })
+  }
+
+  const billIdMatches =
+    normalizeText(data.salary_bill_id, '') ===
+    normalizeText(record.salary_bill_id ?? artifact.records?.salary_bill?.id, '')
+  const attendanceDateMatches =
+    normalizeText(data.attendance_date, '') === normalizeText(record.attendance_date, '')
+  const attendanceStatusMatches =
+    normalizeText(data.attendance_status, '') === normalizeText(record.attendance_status, '')
+  const workerMatches = normalizeText(data.worker_id, '') === normalizeText(record.worker_id, '')
+  const projectMatches = normalizeText(data.project_id, '') === normalizeText(record.project_id, '')
+  const amountMatches = Number(data.total_pay) === Number(record.total_pay)
+  const billingStatusMatches = normalizeText(data.billing_status, '') === 'billed'
+
+  return createCheckResult(
+    'attendance_record',
+    Boolean(
+      billIdMatches &&
+        attendanceDateMatches &&
+        attendanceStatusMatches &&
+        workerMatches &&
+        projectMatches &&
+        amountMatches &&
+        billingStatusMatches &&
+        !data.deleted_at
+    ),
+    {
+      record_id: data.id,
+      team_id: data.team_id,
+      deleted_at: data.deleted_at,
+      actual_billing_status: data.billing_status,
+      actual_salary_bill_id: data.salary_bill_id,
+      actual_attendance_date: data.attendance_date,
+      actual_attendance_status: data.attendance_status,
+      actual_total_pay: data.total_pay,
+    }
+  )
+}
+
+async function verifySalaryBill(client, artifact) {
+  const record = artifact.records?.salary_bill
+
+  if (!record?.id) {
+    return createCheckResult('salary_bill', false, {
+      reason: 'Artifact salary_bill.id tidak ditemukan.',
+    })
+  }
+
+  const { data, error } = await client
+    .from('bills')
+    .select(
+      'id, team_id, worker_id, bill_type, amount, paid_amount, due_date, status, paid_at, description, worker_name_snapshot, deleted_at, created_at, updated_at'
+    )
+    .eq('id', record.id)
+    .maybeSingle()
+
+  if (error) {
+    return createCheckResult('salary_bill', false, {
+      reason: error.message,
+      record_id: record.id,
+    })
+  }
+
+  if (!data) {
+    return createCheckResult('salary_bill', false, {
+      reason: 'Row bills untuk salary bill tidak ditemukan.',
+      record_id: record.id,
+    })
+  }
+
+  const amountMatches = Number(data.amount) === Number(record.amount)
+  const paidMatches = Number(data.paid_amount) === Number(record.paid_amount ?? record.amount)
+  const dueDateMatches = normalizeText(data.due_date, '') === normalizeText(record.due_date, '')
+  const workerIdMatches = record.worker_id
+    ? normalizeText(data.worker_id, '') === normalizeText(record.worker_id, '')
+    : true
+  const workerNameMatches = record.worker_name_snapshot
+    ? normalizeText(data.worker_name_snapshot, '') ===
+      normalizeText(record.worker_name_snapshot, '')
+    : true
+  const statusMatches = normalizeText(data.status, '') === normalizeText(record.status, 'paid')
+
+  return createCheckResult(
+    'salary_bill',
+      Boolean(
+        amountMatches &&
+        paidMatches &&
+        dueDateMatches &&
+        workerIdMatches &&
+        workerNameMatches &&
+        statusMatches &&
+        normalizeText(data.bill_type, '') === normalizeText(record.bill_type, 'gaji') &&
+        normalizeText(data.paid_at, '') !== '' &&
+        !data.deleted_at
+    ),
+    {
+      record_id: data.id,
+      team_id: data.team_id,
+      deleted_at: data.deleted_at,
+      actual_bill_type: data.bill_type,
+      actual_status: data.status,
+      actual_amount: data.amount,
+      actual_paid_amount: data.paid_amount,
+      actual_due_date: data.due_date,
+      actual_paid_at: data.paid_at,
     }
   )
 }
@@ -854,6 +992,9 @@ async function main() {
     await verifyExpense(client, artifact, smokePrefix),
     await verifyExpenseBill(client, artifact),
     await verifyBillPayment(client, artifact),
+    await verifyAttendanceRecord(client, artifact),
+    await verifySalaryBill(client, artifact),
+    await verifyBillPayment(client, artifact, 'salary_bill_payment'),
     await verifyInviteToken(client, artifact),
   ]
   const status = checks.every((check) => check.ok) ? 'verified' : 'failed'

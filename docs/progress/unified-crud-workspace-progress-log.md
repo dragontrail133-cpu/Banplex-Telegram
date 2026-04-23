@@ -23,13 +23,35 @@ Dokumen ini adalah log progres khusus untuk stream `Unified CRUD Workspace`.
 - Active stream: `Unified CRUD Workspace`
 - Referensi plan: `docs/unified-crud-workspace-plan-2026-04-18.md`
 - Primary freeze authority: `docs/freeze/00-index.md`
-- Current task: `UCW-327`
+- Current task: `UCW-329`
 - Current status: `validated`
-- Catatan fokus: arahkan tombol review pembayaran bill ke detail transaksi surface riwayat, bukan ke halaman payment settlement.
-- Catatan brief terbaru: user melihat tombol review pembayaran masih menuju `/payment/:id`; yang diinginkan adalah mendarat ke detail transaksi dengan tab riwayat pembayaran.
-- Catatan audit freeze terbaru: scope tetap sempit pada route/link detail pembayaran, surface history, dan helper deep link; tidak menyentuh source of truth transaksi atau schema.
-- Status transitions touched: `UCW-242` tetap `audit_required`; `UCW-243`, `UCW-244`, `UCW-245`, `UCW-246`, `UCW-247`, `UCW-248`, `UCW-249`, `UCW-250`, `UCW-251`, `UCW-252`, `UCW-253`, `UCW-254`, `UCW-255`, `UCW-256`, `UCW-257`, `UCW-258`, `UCW-259`, `UCW-260`, `UCW-261`, `UCW-262`, `UCW-263`, `UCW-264`, `UCW-265`, `UCW-266`, `UCW-267`, `UCW-268`, `UCW-269`, `UCW-270`, `UCW-271`, `UCW-272`, `UCW-273`, `UCW-274`, `UCW-275`, `UCW-276`, dan `UCW-277` tetap `validated`; `UCW-278` sekarang `validated`; `UCW-279` tetap `validated`; `UCW-280` tetap `validated`; `UCW-281` tetap `validated`; `UCW-283` tetap `validated`; `UCW-284` tetap `validated`; `UCW-285` tetap `validated`; `UCW-286` sekarang `validated`; `UCW-287` sekarang `validated`; `UCW-288` sekarang `validated`; `UCW-289` sekarang `validated`; `UCW-290` sekarang `validated`; `UCW-291` sekarang `validated`; `UCW-292` sekarang `validated`; `UCW-293` sekarang `validated`; `UCW-294` sekarang `validated`; `UCW-295` sekarang `validated`; `UCW-296` sekarang `validated`; `UCW-297` sekarang `validated`; `UCW-298` sekarang `validated`; `UCW-299` sekarang `validated`; `UCW-300` sekarang `validated`; `UCW-301` tetap `validated`; `UCW-302` sekarang `validated`; `UCW-303` sekarang `validated`; `UCW-304` sekarang `validated`; `UCW-305` sekarang `validated`; `UCW-306` sekarang `validated`; `UCW-307` sekarang `validated`; `UCW-308` tetap `validated`; `UCW-309` tetap `validated`; `UCW-310` tetap `validated`; `UCW-311` tetap `validated`; `UCW-312` tetap `validated`; `UCW-313` tetap `validated`; `UCW-314` tetap `validated`; `UCW-315` tetap `validated`; `UCW-316` tetap `validated`; `UCW-317` sekarang `validated`; `UCW-318` sekarang `validated`; `UCW-319` sekarang `validated`; `UCW-320` sekarang `validated`; `UCW-321` sekarang `validated`; `UCW-322` tetap `planned`; `UCW-323` sekarang `deferred`; `UCW-324` sekarang `validated`; `UCW-325` sekarang `validated`; `UCW-326` sekarang `validated`; `UCW-327` sekarang `validated`.
-- Review order: route helper -> notify payload -> detail tab default -> validasi struktural.
+- Catatan fokus: Team Invite harus ringkas untuk owner, dengan field picker bottom sheet tanpa search dan tanpa helper/deskripsi tambahan.
+- Catatan brief terbaru: surface invite ini bukan surface edukasi; copy layar harus dipangkas ke label, action, dan data status saja.
+- Catatan audit freeze terbaru: scope tetap sempit pada `TeamInvitePage`, `TeamInviteManager`, dan `MasterPickerField`; tidak ada perubahan kontrak invite atau bot write boundary.
+- Status transitions touched: `UCW-242` tetap `audit_required`; `UCW-243`, `UCW-244`, `UCW-245`, `UCW-246`, `UCW-247`, `UCW-248`, `UCW-249`, `UCW-250`, `UCW-251`, `UCW-252`, `UCW-253`, `UCW-254`, `UCW-255`, `UCW-256`, `UCW-257`, `UCW-258`, `UCW-259`, `UCW-260`, `UCW-261`, `UCW-262`, `UCW-263`, `UCW-264`, `UCW-265`, `UCW-266`, `UCW-267`, `UCW-268`, `UCW-269`, `UCW-270`, `UCW-271`, `UCW-272`, `UCW-273`, `UCW-274`, `UCW-275`, `UCW-276`, dan `UCW-277` tetap `validated`; `UCW-278` sekarang `validated`; `UCW-279` tetap `validated`; `UCW-280` tetap `validated`; `UCW-281` tetap `validated`; `UCW-283` tetap `validated`; `UCW-284` tetap `validated`; `UCW-285` tetap `validated`; `UCW-286` sekarang `validated`; `UCW-287` sekarang `validated`; `UCW-288` sekarang `validated`; `UCW-289` sekarang `validated`; `UCW-290` sekarang `validated`; `UCW-291` sekarang `validated`; `UCW-292` sekarang `validated`; `UCW-293` sekarang `validated`; `UCW-294` sekarang `validated`; `UCW-295` sekarang `validated`; `UCW-296` sekarang `validated`; `UCW-297` sekarang `validated`; `UCW-298` sekarang `validated`; `UCW-299` sekarang `validated`; `UCW-300` sekarang `validated`; `UCW-301` tetap `validated`; `UCW-302` sekarang `validated`; `UCW-303` sekarang `validated`; `UCW-304` sekarang `validated`; `UCW-305` sekarang `validated`; `UCW-306` sekarang `validated`; `UCW-307` sekarang `validated`; `UCW-308` tetap `validated`; `UCW-309` tetap `validated`; `UCW-310` tetap `validated`; `UCW-311` tetap `validated`; `UCW-312` tetap `validated`; `UCW-313` tetap `validated`; `UCW-314` tetap `validated`; `UCW-315` tetap `validated`; `UCW-316` tetap `validated`; `UCW-317` sekarang `validated`; `UCW-318` sekarang `validated`; `UCW-319` sekarang `validated`; `UCW-320` sekarang `validated`; `UCW-321` sekarang `validated`; `UCW-322` tetap `planned`; `UCW-323` sekarang `deferred`; `UCW-324` sekarang `validated`; `UCW-325` sekarang `validated`; `UCW-326` sekarang `validated`; `UCW-327` sekarang `validated`; `UCW-328` sekarang `deferred`; `UCW-329` sekarang `validated`.
+- Review order: invite shell -> role picker -> invite card -> member list -> verifier lint/build.
+
+### [2026-04-23] `UCW-329` - Tumpulkan Team Invite jadi field picker owner-only tanpa helper teks
+- Status: `validated`
+- Ringkasan:
+  - Surface `Tim` sekarang lebih ringkas dan owner-only: role dipilih lewat field-style bottom sheet tanpa search, tanpa helper/deskripsi yang tidak perlu.
+  - Empty copy dan deskripsi halaman dipangkas supaya pola visual mengikuti master form existing, bukan layar edukasi.
+- File target:
+  - `src/pages/TeamInvitePage.jsx`
+  - `src/components/TeamInviteManager.jsx`
+  - `src/components/ui/MasterPickerField.jsx`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - penghapusan copy yang terlalu agresif bisa membuat state kosong terasa terlalu hampa jika data invite belum ada.
+  - picker tanpa search harus tetap konsisten dengan pola master form existing agar tidak memecah UX.
+- Audit hasil:
+  - `TeamInvitePage` tidak lagi menampilkan description pada header, sehingga surface langsung masuk ke konten utama.
+  - `TeamInviteManager` memakai `MasterPickerField` tanpa search untuk role selector, menaruh refresh pada header section, dan menghapus empty-state/helper copy yang tidak perlu.
+  - `MasterPickerField` tetap dipakai sebagai field-style bottom sheet, dengan dependency memo yang sudah konsisten untuk mode searchable/non-searchable.
+- Validasi:
+  - `npx eslint src/pages/TeamInvitePage.jsx src/components/TeamInviteManager.jsx src/components/ui/MasterPickerField.jsx`
+  - `npm run build`
 
 ### [2026-04-23] `UCW-326` - Polish UI halaman Tim invite agar lebih rapih, jelas, dan brand-consistent
 - Status: `validated`

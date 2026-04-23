@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { dismissToastIfVisible, expectDashboardReady, openLiveApp } from './helpers/live-app.js'
 import { createLiveSmokeArtifact } from './helpers/live-artifacts.js'
+import { getAppTodayKey } from '../../src/lib/date-time.js'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -19,6 +20,12 @@ function buildCurrencyPattern(value) {
     .replace(/\s+/gu, ' ')
 
   return new RegExp(escapeRegExp(formattedValue).replace(/ /g, '\\s*'))
+}
+
+function pickSmokeAttendanceDate() {
+  const [year, month, day] = getAppTodayKey().split('-')
+
+  return `${year}-${month}-${Number(day) <= 10 ? '20' : '10'}`
 }
 
 async function parseJsonResponse(response) {
@@ -107,6 +114,8 @@ test.describe('live release smoke', () => {
     test.setTimeout(300000)
 
     const artifact = await createLiveSmokeArtifact({ baseURL })
+    const attendanceDate = pickSmokeAttendanceDate()
+    const salaryPaymentNotes = `${artifact.smokePrefix} salary bill smoke`
     const creditorName = `${artifact.smokePrefix} Kreditur`
     const creditorNotes = `${artifact.smokePrefix} master creditor`
     const loanNotes = `${artifact.smokePrefix} loan smoke`
@@ -138,6 +147,260 @@ test.describe('live release smoke', () => {
     await expect(page.getByRole('heading', { name: 'Catatan Absensi' })).toBeVisible({
       timeout: 20000,
     })
+
+    await artifact.addStep('create_attendance')
+    await openLiveApp(page, '/attendance/new')
+    await expect(page.getByRole('heading', { name: 'Absensi Harian' })).toBeVisible({
+      timeout: 20000,
+    })
+
+    const attendanceSheetResponsePromise = page.waitForResponse((response) => {
+      if (response.request().method() !== 'GET') {
+        return false
+      }
+
+      try {
+        const responseUrl = new URL(response.url())
+
+        return (
+          responseUrl.pathname.endsWith('/api/records') &&
+          responseUrl.searchParams.get('resource') === 'attendance' &&
+          responseUrl.searchParams.get('date') === attendanceDate
+        )
+      } catch {
+        return false
+      }
+    })
+
+    await page.locator('input[name="date"]').fill(attendanceDate)
+    const attendanceSheetResponse = await attendanceSheetResponsePromise
+    expect(attendanceSheetResponse.ok()).toBeTruthy()
+
+    const attendanceRowButton = page
+      .locator('button[aria-haspopup="dialog"]')
+      .filter({ hasNotText: 'Terkunci' })
+      .first()
+    await expect(attendanceRowButton).toBeVisible({
+      timeout: 20000,
+    })
+
+    const attendanceWorkerName =
+      (await attendanceRowButton.locator('p').first().textContent().catch(() => null))?.trim() ??
+      ''
+    expect(attendanceWorkerName).toBeTruthy()
+
+    await attendanceRowButton.click()
+
+    const attendanceDialog = page.getByRole('dialog', { name: attendanceWorkerName })
+    await expect(attendanceDialog).toBeVisible({
+      timeout: 20000,
+    })
+    await attendanceDialog.getByRole('button', { name: 'Penuh' }).click()
+    await attendanceDialog.getByRole('button', { name: 'Tutup' }).click()
+
+    const attendanceResponsePromise = page.waitForResponse((response) =>
+      isRecordsApiResponse(response, 'attendance')
+    )
+
+    await page.getByRole('button', { name: 'Simpan Absensi' }).click()
+
+    const attendanceResponse = await attendanceResponsePromise
+    expect(attendanceResponse.ok()).toBeTruthy()
+
+    const attendancePayload = await parseJsonResponse(attendanceResponse)
+    const attendanceRows = Array.isArray(attendancePayload?.attendances)
+      ? attendancePayload.attendances
+      : []
+    const savedAttendance =
+      attendanceRows.find(
+        (record) =>
+          record?.attendance_date === attendanceDate &&
+          String(record?.worker_name_snapshot ?? record?.worker_name ?? '').trim() ===
+            attendanceWorkerName &&
+          String(record?.attendance_status ?? '').trim() === 'full_day'
+      ) ?? attendanceRows[0] ?? null
+
+    expect(savedAttendance?.id).toBeTruthy()
+    expect(String(savedAttendance?.billing_status ?? '').trim()).toBe('unbilled')
+    expect(savedAttendance?.salary_bill_id ?? null).toBeNull()
+
+    await artifact.record('attendance_record', {
+      id: savedAttendance.id,
+      team_id: savedAttendance.team_id ?? null,
+      worker_id: savedAttendance.worker_id ?? null,
+      project_id: savedAttendance.project_id ?? null,
+      attendance_date: savedAttendance.attendance_date ?? attendanceDate,
+      attendance_status: savedAttendance.attendance_status ?? 'full_day',
+      total_pay: savedAttendance.total_pay ?? null,
+      billing_status: savedAttendance.billing_status ?? null,
+      salary_bill_id: savedAttendance.salary_bill_id ?? null,
+      worker_name_snapshot:
+        savedAttendance.worker_name_snapshot ?? savedAttendance.worker_name ?? attendanceWorkerName,
+      project_name_snapshot: savedAttendance.project_name_snapshot ?? null,
+      created_at: savedAttendance.created_at ?? null,
+      updated_at: savedAttendance.updated_at ?? null,
+    })
+
+    await expect(page.getByText('Sheet absensi tersimpan')).toBeVisible({
+      timeout: 20000,
+    })
+    await expect(page.getByText('Record ini akan muncul di payroll dan bisa ditagihkan per worker.')).toBeVisible({
+      timeout: 20000,
+    })
+    await dismissToastIfVisible(page)
+
+    await artifact.addStep('generate_salary_bill')
+    await openLiveApp(page, '/payroll?tab=worker')
+    await expect(page.getByRole('heading', { name: 'Catatan Absensi' })).toBeVisible({
+      timeout: 20000,
+    })
+
+    const workerCardButton = page
+      .locator('button[aria-haspopup="dialog"]')
+      .filter({ hasText: new RegExp(escapeRegExp(attendanceWorkerName), 'i') })
+      .first()
+    await expect(workerCardButton).toBeVisible({
+      timeout: 20000,
+    })
+    await workerCardButton.click()
+
+    const workerActionSheet = page.getByRole('dialog', { name: 'Detail dan Aksi' })
+    await expect(workerActionSheet.getByRole('button', { name: 'Rekap' })).toBeVisible({
+      timeout: 20000,
+    })
+
+    const recapResponsePromise = page.waitForResponse((response) =>
+      isRecordsApiResponse(response, 'attendance-recap')
+    )
+
+    await workerActionSheet.getByRole('button', { name: 'Rekap' }).click()
+
+    const recapDialog = page.getByRole('dialog', { name: 'Konfirmasi Rekap Pekerja' })
+    await expect(recapDialog).toBeVisible({
+      timeout: 20000,
+    })
+
+    await recapDialog.getByRole('button', { name: 'Rekap' }).click()
+
+    const recapResponse = await recapResponsePromise
+    expect(recapResponse.ok()).toBeTruthy()
+
+    const recapPayload = await parseJsonResponse(recapResponse)
+    const salaryBillId = recapPayload?.billId ?? null
+    const salaryBillTotalAmount = Number(recapPayload?.totalAmount ?? savedAttendance.total_pay ?? 0)
+    const salaryBillAttendanceCount = Number(recapPayload?.attendanceCount ?? 0)
+
+    expect(salaryBillId).toBeTruthy()
+    expect(salaryBillTotalAmount).toBeGreaterThan(0)
+    expect(salaryBillAttendanceCount).toBeGreaterThan(0)
+
+    await artifact.record('salary_bill', {
+      id: salaryBillId,
+      team_id: savedAttendance.team_id ?? null,
+      worker_id: savedAttendance.worker_id ?? null,
+      bill_type: 'gaji',
+      amount: salaryBillTotalAmount,
+      paid_amount: 0,
+      due_date: getAppTodayKey(),
+      status: 'unpaid',
+      worker_name_snapshot: attendanceWorkerName,
+      attendance_count: salaryBillAttendanceCount,
+      created_at: null,
+      updated_at: null,
+    })
+
+    await artifact.addStep('pay_salary_bill')
+    await openLiveApp(page, `/payment/${salaryBillId}`)
+    await expect(page.getByRole('heading', { name: 'Pembayaran Tagihan Upah' })).toBeVisible({
+      timeout: 20000,
+    })
+    await expect(
+      page.getByRole('heading', { name: new RegExp(escapeRegExp(attendanceWorkerName), 'i') })
+    ).toBeVisible({
+      timeout: 20000,
+    })
+
+    const salaryPaymentResponsePromise = page.waitForResponse((response) =>
+      isRecordsApiResponse(response, 'bill-payments')
+    )
+
+    await page.getByLabel('Nominal Pembayaran').fill(String(salaryBillTotalAmount))
+    await page.getByLabel('Catatan').fill(salaryPaymentNotes)
+    await page.getByRole('button', { name: 'Simpan Pembayaran' }).click()
+
+    const salaryPaymentResponse = await salaryPaymentResponsePromise
+    expect(salaryPaymentResponse.ok()).toBeTruthy()
+
+    const salaryPaymentPayload = await parseJsonResponse(salaryPaymentResponse)
+    const salaryPayment = salaryPaymentPayload?.payment ?? null
+    const paidSalaryBill = salaryPaymentPayload?.bill ?? null
+
+    expect(salaryPayment?.id).toBeTruthy()
+    expect(paidSalaryBill?.id).toBeTruthy()
+    expect(Number(salaryPayment?.amount ?? 0)).toBe(salaryBillTotalAmount)
+    expect(Number(paidSalaryBill?.amount ?? paidSalaryBill?.total_amount ?? 0)).toBe(
+      salaryBillTotalAmount
+    )
+    expect(Number(paidSalaryBill?.paid_amount ?? paidSalaryBill?.paidAmount ?? 0)).toBe(
+      salaryBillTotalAmount
+    )
+    expect(String(paidSalaryBill?.status ?? '').trim().toLowerCase()).toBe('paid')
+
+    await artifact.record('salary_bill', {
+      id: paidSalaryBill.id,
+      team_id: paidSalaryBill.teamId ?? paidSalaryBill.team_id ?? savedAttendance.team_id ?? null,
+      worker_id:
+        paidSalaryBill.workerId ??
+        paidSalaryBill.worker_id ??
+        savedAttendance.worker_id ??
+        null,
+      bill_type: paidSalaryBill.billType ?? paidSalaryBill.bill_type ?? 'gaji',
+      amount: paidSalaryBill.amount ?? paidSalaryBill.total_amount ?? salaryBillTotalAmount,
+      paid_amount: paidSalaryBill.paidAmount ?? paidSalaryBill.paid_amount ?? salaryBillTotalAmount,
+      due_date: paidSalaryBill.dueDate ?? paidSalaryBill.due_date ?? getAppTodayKey(),
+      status: paidSalaryBill.status ?? 'paid',
+      paid_at: paidSalaryBill.paidAt ?? paidSalaryBill.paid_at ?? null,
+      worker_name_snapshot:
+        paidSalaryBill.workerName ??
+        paidSalaryBill.worker_name_snapshot ??
+        attendanceWorkerName,
+      attendance_count: salaryBillAttendanceCount,
+      created_at: paidSalaryBill.createdAt ?? paidSalaryBill.created_at ?? null,
+      updated_at: paidSalaryBill.updatedAt ?? paidSalaryBill.updated_at ?? null,
+    })
+
+    await artifact.record('salary_bill_payment', {
+      id: salaryPayment.id,
+      bill_id: salaryPayment.billId ?? salaryPayment.bill_id ?? paidSalaryBill.id,
+      team_id: salaryPayment.teamId ?? salaryPayment.team_id ?? savedAttendance.team_id ?? null,
+      amount: salaryPayment.amount ?? null,
+      payment_date: salaryPayment.paymentDate ?? salaryPayment.payment_date ?? null,
+      notes: salaryPayment.notes ?? null,
+      created_at: salaryPayment.createdAt ?? salaryPayment.created_at ?? null,
+      updated_at: salaryPayment.updatedAt ?? salaryPayment.updated_at ?? null,
+    })
+
+    await artifact.record('attendance_record', {
+      id: savedAttendance.id,
+      team_id: savedAttendance.team_id ?? null,
+      worker_id: savedAttendance.worker_id ?? null,
+      project_id: savedAttendance.project_id ?? null,
+      attendance_date: savedAttendance.attendance_date ?? attendanceDate,
+      attendance_status: savedAttendance.attendance_status ?? 'full_day',
+      total_pay: savedAttendance.total_pay ?? null,
+      billing_status: 'billed',
+      salary_bill_id: paidSalaryBill.id,
+      worker_name_snapshot:
+        savedAttendance.worker_name_snapshot ?? savedAttendance.worker_name ?? attendanceWorkerName,
+      project_name_snapshot: savedAttendance.project_name_snapshot ?? null,
+      created_at: savedAttendance.created_at ?? null,
+      updated_at: paidSalaryBill.updatedAt ?? paidSalaryBill.updated_at ?? savedAttendance.updated_at ?? null,
+    })
+
+    await expect(page.getByRole('button', { name: 'Simpan Pembayaran' })).toBeVisible({
+      timeout: 20000,
+    })
+    await dismissToastIfVisible(page)
 
     await artifact.addStep('open_master')
     await openLiveApp(page, '/master')

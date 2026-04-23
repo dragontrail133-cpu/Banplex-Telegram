@@ -2677,3 +2677,13 @@ Saat ada brief baru yang masih terkait stream ini, update dokumen dengan format:
   - Scope target: `api/notify.js`, `src/lib/telegram-assistant-links.js`, `src/pages/TransactionDetailPage.jsx`, `tests/unit/telegram-notify.test.js`, `tests/unit/telegram-assistant-routing.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
   - Dependensi: `UCW-242`, `UCW-252`, `UCW-320`.
   - Addendum audit: route review harus tetap canonical untuk Telegram deep link, dan detail page perlu menegaskan surface history tanpa mengubah source of truth settlement.
+- [ ] UCW-328 - Smoke live `attendance -> salary bill -> payment`
+  - Lane AQ staging harus membuktikan absensi UI bisa dibuat, direkap menjadi salary bill, lalu dibayar dari `/payment/:id` dengan hasil yang bisa diverifikasi service-role tanpa bergantung pada mock.
+  - Scope target: `tests/live/release-smoke.spec.js`, `scripts/aq/verify-live-smoke.mjs`, `docs/release-aq-gate.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-315`, `UCW-317`, `UCW-318`, `UCW-243`, `UCW-245`, `UCW-252`.
+  - Addendum audit: smoke akan memakai worker/project seed yang ada, membuat attendance sheet pada tanggal aman, men-trigger recap payroll, lalu membayar salary bill dan memverifikasi link attendance -> bill -> payment; jika seed belum siap, blocker tetap dibukukan di gate.
+- [x] UCW-329 - Tumpulkan Team Invite jadi field picker owner-only tanpa helper teks
+  - Halaman `Tim` harus tampil ringkas untuk owner: role dipilih lewat bottom sheet tanpa search, dan copy/helper text yang tidak perlu dihapus.
+  - Scope target: `src/pages/TeamInvitePage.jsx`, `src/components/TeamInviteManager.jsx`, `src/components/ui/MasterPickerField.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-124`, `UCW-125`, `UCW-324`, `UCW-326`.
+  - Addendum audit: surface invite boleh tetap punya action link/copy dan list anggota, tetapi tanpa deskripsi panjang, helper text, atau search field di picker.
