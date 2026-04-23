@@ -17,6 +17,8 @@ Runtime reconciliation: `2026-04-23`
 10. Dokumen barang diperlakukan sebagai inbound-stock contract untuk core release; stock-out otomatis dari dokumen barang adalah asumsi yang salah, dan stock-out manual yang aktif saat ini hanya boundary terbatas di `Stok Barang`.
 11. Route-level code splitting frontend sudah aktif di `src/App.jsx`; jangan menulis brief yang mengembalikan page utama ke static import atau menganggap lazy route belum menjadi baseline runtime.
 12. `Referensi` / `Master` adalah core-release fondasional untuk semua form inti; boundary implementasi yang masih transitional tidak mengubah status domain ini sebagai release inti.
+13. Task yang menyentuh `api/telegram-assistant.js` harus mempertahankan urutan runtime: deterministic intent gate -> Gemini/xAI writer untuk balasan natural-language -> backend verifier fact packet -> xAI fallback/deterministic fallback; model boleh menulis respons user-facing, tetapi hanya dari fakta yang sudah diverifikasi backend dan tidak boleh mengarang angka, nama, atau aksi baru.
+14. Surface command bot, inline callback, dan teks bebas untuk `Telegram assistant` wajib memakai planner, verifier, dan read boundary yang sama; command/inline tidak boleh membuka jalur mutasi atau source of truth baru.
 
 ## 2. What AI must never assume
 
@@ -39,6 +41,8 @@ Runtime reconciliation: `2026-04-23`
 - Hapus payment berarti hard delete yang menghilangkan histori.
 - `Payment Receipt PDF` adalah source of truth atau full PDF suite inti.
 - `pdf_settings` adalah boundary konfigurasi PDF bisnis yang berbeda dari `Payment Receipt PDF`; jangan mencampur konfigurasi report dengan receipt settlement.
+- `telegram_assistant_sessions` boleh menyimpan memory ringkas dalam bentuk summary, last turn, last route, entity hints, dan hybrid transcript pendek; ia bukan transcript panjang atau state bisnis baru.
+- `Telegram assistant` hanya read-only finance core; jangan memperluasnya menjadi chatbot umum, mutasi, atau kanal support bebas.
 - Dokumen lama atau brief chat lama boleh mengalahkan freeze package.
 - Supporting module seperti `HRD` atau `Penerima Manfaat` boleh dijadikan blocker core release tanpa keputusan baru.
 
@@ -170,6 +174,7 @@ Jika task menyentuh domain inti, output wajib menyebut:
 | `Attachment` | orphan asset, role matrix, dan relation tree |
 | `Reports` | agregasi client-side bisa drift dari truth relasional |
 | `Stok Barang` | negative stock, manual stock-out terbatas yang sudah aktif, dan risiko adjustment liar |
+| `Telegram assistant` | context summary terlalu panjang, fallback order provider tertukar, response bebas model, dan scope read-only melebar ke mutasi |
 
 ## 10. Recommended implementation order
 

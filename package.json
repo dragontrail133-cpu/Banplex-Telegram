@@ -9,8 +9,10 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:e2e": "playwright test",
+    "test:e2e:live": "playwright test --config=playwright.live.config.js",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "aq:verify:live": "node scripts/aq/verify-live-smoke.mjs"
   },
   "dependencies": {
     "@lottiefiles/dotlottie-react": "^0.19.0",

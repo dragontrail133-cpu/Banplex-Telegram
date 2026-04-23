@@ -98,6 +98,23 @@ function normalizeAssistantRoutePath(path) {
     return '/pembayaran'
   }
 
+  if (pathname === '/payroll') {
+    if (!search) {
+      return '/payroll'
+    }
+
+    const tab = parsedUrl.searchParams.get('tab')
+
+    if (
+      parsedUrl.searchParams.size === 1 &&
+      ['worker', 'daily'].includes(tab)
+    ) {
+      return `/payroll?tab=${tab}`
+    }
+
+    return null
+  }
+
   if (/^\/transactions\/[A-Za-z0-9-]+$/.test(pathname) && !search) {
     return pathname
   }

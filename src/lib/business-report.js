@@ -1,4 +1,4 @@
-import { formatAppDateLabel } from './date-time'
+import { formatAppDateLabel } from './date-time.js'
 
 const REPORT_KIND_OPTIONS = [
   {

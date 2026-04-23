@@ -27,6 +27,8 @@ dist-ssr
 *.sw?
 .vercel
 .env*.local
+firestore-legacy-export/
+.firestore-legacy-export/
 
 .vercel
 .env*.local

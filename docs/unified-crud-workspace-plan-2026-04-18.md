@@ -2537,9 +2537,73 @@ Saat ada brief baru yang masih terkait stream ini, update dokumen dengan format:
   - Bundle harus dibuat sebagai file local yang ter-ignore Git, memakai nilai dari `.env` aktif saat ini, dan tetap dibatasi hanya ke key runtime yang memang sudah diaudit pada `UCW-298` dan `UCW-299`.
   - Scope target: `.env.vercel-import-akhir-diedit.local`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
   - Dependensi: `UCW-299`.
+- [x] UCW-302 - Audit env Vercel project baru, redeploy, dan smoke test assistant
+  - Project Vercel baru harus punya 14 env runtime aktif di scope `production` dan `preview`, lalu deployment baru wajib dibangun ulang setelah env berubah supaya endpoint assistant membaca nilai terbaru tanpa inline env.
+  - Smoke test `/api/telegram-assistant` harus mengembalikan `{"ok":true,"processed":false}`; jika webhook dipindah ke project baru, `getWebhookInfo` harus mengonfirmasi URL aktif yang benar sebelum cutover dinyatakan siap.
+  - Scope target: `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-301`, `UCW-299`.
+  - Addendum audit: `telegram_assistant_sessions` sempat belum ada di remote Supabase dan membuat reply flow gagal saat `clearAssistantSession`; migrasi `20260423101000_create_telegram_assistant_sessions.sql` sudah diaplikasikan, lalu timeout classifier xAI dinaikkan dari 8s ke 15s agar intent `status`/`navigate` lolos tanpa fallback timeout.
+- [x] UCW-303 - Audit regresi notifikasi `/api/notify` pada create payment
+  - Notifikasi create bill/loan payment dan rekap salary bill harus kembali sukses di runtime Vercel tanpa mengubah payload client, karena route `/api/notify` sempat gagal `FUNCTION_INVOCATION_FAILED` akibat import ESM serverless yang tidak valid.
+  - Scope target: `src/lib/business-report.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-302`.
+- [x] UCW-304 - Prioritaskan intent deterministik untuk prompt Telegram eksplisit
+  - Prompt bot yang eksplisit seperti `status`, `search`, `navigate`, dan `refuse` harus diputuskan dari heuristic deterministik dulu supaya AI classifier tidak terus jatuh ke clarify generik pada prompt sederhana, sementara AI tetap dipakai untuk kasus ambigu.
+  - Scope target: `api/telegram-assistant.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-303`.
+- [x] UCW-305 - Batasi respons Telegram ke mention/reply atau intent eksplisit
+  - Bot Telegram harus diam pada chat bebas yang tidak jelas, lalu hanya merespons private chat yang punya intent read-only eksplisit atau sesi lanjutan aktif, serta merespons group/supergroup hanya ketika bot di-mention atau dijadikan reply target.
+  - Scope target: `api/telegram-assistant.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-304`.
 - [x] UCW-299 - Persist env Vercel preview via project API dan audit mismatch Git namespace
   - Runtime assistant `preview/staging` harus bisa dideploy ulang tanpa inline env; shared env level project untuk target `preview` perlu dipersist penuh untuk semua key runtime yang relevan, lalu deployment preview terbaru harus lolos tanpa `-e/-b`.
   - Audit harus membedakan jelas antara blocker yang masih tersisa dan workaround yang sudah valid: `vercel git connect` tetap gagal karena namespace GitHub yang terlihat oleh Vercel team tidak punya akses ke repo `dragontrail133-cpu/Banplex-Telegram`, tetapi shared preview env tetap bisa dipasang lewat Project Env API Vercel.
   - Scope target: `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
   - Dependensi: `UCW-298`.
-
+- [x] UCW-306 - Gemini-first clarifier dengan template final dan konteks Sunda
+  - Assistant Telegram harus tetap template-driven di output final, tetapi konteks per chat diperluas, intent ambigu diprioritaskan ke Gemini dulu, dan input campuran Indonesia/Sunda harus dipahami tanpa mengubah scope read-only.
+  - Klarifikasi tetap dikirim lewat template fixed, bukan teks bebas dari model, sehingga model hanya memilih intent, language, dan slot konteks yang dibutuhkan.
+  - Scope target: `api/telegram-assistant.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-304`, `UCW-305`.
+  - Addendum audit: context memory ringkas per chat sudah disimpan lewat `telegram_assistant_sessions`, Gemini diprioritaskan untuk prompt ambigu, dan reply final tetap dirender dari template fixed untuk `status`, `search`, `navigate`, `refuse`, serta `clarify`.
+- [x] UCW-307 - Semantic analytics pack untuk query ambigu dan alias entitas
+  - Assistant Telegram harus memahami pertanyaan read-only berbasis agregat seperti total tagihan, sisa hutang, jumlah pekerja hadir, pengeluaran per periode, dan ranking entitas terbesar dengan input campuran Indonesia/Sunda.
+  - Output final tetap template-driven; planner Gemini/xAI hanya memilih metric, entity, window, dan clarification slot, sementara reply user-facing tetap dirender dari template fixed.
+  - Scope target: `api/telegram-assistant.js`, `src/lib/telegram-assistant-links.js`, `tests/e2e/telegram-shell.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-306`.
+  - Addendum audit: query analytics sudah dipetakan ke metric `bill_summary`, `cash_outflow`, `attendance_present`, dan `obligation_ranking`; route `/payroll`/tab worker sudah dibuka; classifier analytics-aware dan template reply tetap dijaga; reply helper juga retry tanpa `reply_to_message_id` kalau Telegram menolak target reply yang tidak valid.
+- [x] UCW-308 - Orkestrasi AI natural-language untuk assistant Telegram read-only
+  - Assistant Telegram harus memadukan deterministic planner/backend read model dengan AI writer agar balasan final ke user terasa natural, tetapi tetap berbasis fakta yang sudah diverifikasi backend.
+  - Bot harus paham Indonesia/Sunda campuran, alias entitas ambigu seperti `mang dindin`, compound query read-only, dan follow-up antar-turn; response final boleh natural-language, tetapi verifier backend wajib menolak klaim yang tidak ada di fact packet.
+  - Scope target: `api/telegram-assistant.js`, `docs/freeze/01-planning-decision-freeze.md`, `docs/freeze/02-prd-master.md`, `docs/freeze/03-source-of-truth-contract-map.md`, `docs/freeze/05-ai-execution-guardrails.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`, `tests/unit/telegram-assistant-writer.test.js`.
+  - Dependensi: `UCW-307`.
+  - Delegation slices: fact packet + boundary planner, AI writer/verifier integration, compound answer assembly, dan docs/tests guardrail.
+  - Addendum audit: writer AI berjalan setelah planner deterministik, Gemini menjadi writer utama dengan xAI fallback, helper verifier menolak output yang mengarang angka/nama/aksi baru, dan smoke test production + unit test writer sudah lulus.
+- [x] UCW-309 - Upgrade assistant Telegram dengan command surface, inline callback, dan hybrid transcript
+  - Assistant Telegram harus menambah command `/menu /status /cari /analytics /riwayat /buka`, inline keyboard callback/deep link yang konsisten, dan hybrid transcript pendek di `telegram_assistant_sessions.pending_payload`, tanpa menambah jalur mutasi atau schema baru.
+  - Command, inline callback, dan teks bebas harus tetap memakai planner/verifier read-only yang sama; `pending_payload` cukup selama hanya menyimpan summary, last turn, last route, entity hints, dan transcript pendek yang dicap.
+  - Scope target: `api/telegram-assistant.js`, `docs/freeze/01-planning-decision-freeze.md`, `docs/freeze/02-prd-master.md`, `docs/freeze/03-source-of-truth-contract-map.md`, `docs/freeze/05-ai-execution-guardrails.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`, `tests/unit/telegram-assistant-writer.test.js`, `tests/unit/telegram-assistant-routing.test.js`.
+  - Dependensi: `UCW-308`.
+  - Addendum audit: command parser dan callback router sekarang memetakan slash command/inline ke workflow planner yang sama, reply markup bisa mencampur callback quick action dengan deep link resmi, dan `pending_payload` dipadatkan ke bentuk hybrid transcript tanpa migrasi kolom baru.
+- [x] UCW-310 - Deploy production assistant upgrade dan smoke command runtime
+  - Runtime production `banplex-telegram.vercel.app` harus dinaikkan ke build terbaru supaya slash command `/menu /status /analytics` dan session hybrid benar-benar hidup di alias yang dipakai webhook Telegram.
+  - Smoke live cukup membuktikan command read-only dan penyimpanan `pending_payload` hybrid di production; replay callback synthetic boleh gagal di `answerCallbackQuery` jika `callback_query.id` bukan ID Telegram asli, selama router callback sudah tertutup oleh unit test dan tidak membuka jalur mutasi.
+  - Scope target: `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-309`.
+  - Addendum audit: production deploy baru berhasil, alias tetap `banplex-telegram.vercel.app`, smoke POST `empty/menu/status/analytics/menu` sudah `processed=true` sesuai ekspektasi, dan query Supabase terbaru menunjukkan `pending_payload` mulai menyimpan field `summary` serta transcript hybrid.
+- [x] UCW-311 - Hardening callback ack replay untuk smoke end-to-end
+  - Runtime assistant harus tetap menuntaskan callback read-only saat webhook sintetis memakai `callback_query.id` palsu; kegagalan `answerCallbackQuery` boleh diabaikan hanya untuk error Telegram `query is too old` atau `query ID is invalid`, tanpa mengubah route planner/verifier atau membuka jalur mutasi baru.
+  - Scope target: `api/telegram-assistant.js`, `tests/unit/telegram-assistant-routing.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-310`.
+  - Addendum audit: `answerTelegramCallback` sekarang hanya melonggarkan ack untuk query ID invalid/expired, unit test routing bertambah untuk guard ini, smoke live `/analytics -> ta:am:cash_outflow -> ta:aw:month_current -> ta:cmd:riwayat` semuanya `processed:true`, dan row `telegram_assistant_sessions` tetap menyimpan summary/transcript hybrid serta `last_route` terbaru.
+- [x] UCW-312 - Bangun AQ gate staging dan harness live smoke release
+  - Stream release perlu punya gate AQ tertulis yang membedakan regression mock, live smoke staging, dan production canary, supaya keputusan `siap release` dan `simpan data real` tidak lagi bergantung pada audit ad-hoc.
+  - Live smoke minimal harus membuktikan auth nyata via `devAuthBypass` lokal, write `Master` (`funding_creditor`), write core finance (`loan`), dan write admin `Tim` (`invite_token`) terhadap Supabase staging mirror, lalu hasilnya diverifikasi lagi lewat service-role verifier dan artifact file.
+  - Scope target: `docs/release-aq-gate.md`, `playwright.live.config.js`, `tests/live/release-smoke.spec.js`, `tests/live/helpers/live-app.js`, `tests/live/helpers/live-artifacts.js`, `scripts/aq/verify-live-smoke.mjs`, `package.json`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-90`, `UCW-182`, `UCW-219`, `UCW-311`.
+  - Addendum audit: suite mock existing tetap dipakai untuk regression cepat, lane `tests/live/*` dipisah agar tidak ikut `npm run test:e2e`, artifact `test-results/live-smoke-created-records.json` menjadi source of truth smoke write staging, dan verifier service-role membaca artifact itu untuk memutuskan pass/fail persistence DB.
+- [x] UCW-313 - Modularisasi helper Telegram assistant menjadi routing/session/transport modules
+  - API assistant harus memindahkan helper pure ke modul terpisah agar routing command, session memory hybrid, dan transport Telegram tidak lagi bercampur di satu file besar, tetapi kontrak read-only dan hasil production tetap sama.
+  - Scope target: `api/telegram-assistant.js`, `src/lib/telegram-assistant-session.js`, `src/lib/telegram-assistant-routing.js`, `src/lib/telegram-assistant-transport.js`, `tests/unit/telegram-assistant-routing.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-312`.
+  - Addendum audit: helper session, routing, dan transport sekarang dipisah ke modul terpisah; routing test langsung memverifikasi modul baru; production deploy terbaru tetap lolos smoke live `/menu`, `/analytics`, callback metric/window/history, dan row `telegram_assistant_sessions` tetap menyimpan summary/transcript hybrid plus `last_route`.

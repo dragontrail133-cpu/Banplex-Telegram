@@ -56,4 +56,25 @@ test.describe('telegram shell', () => {
       timeout: 15000,
     })
   })
+
+  test('navigates to payroll from assistant deep link start param', async ({ page }) => {
+    await openApp(page, '/', {
+      telegram: {
+        user: {
+          id: 20004,
+          first_name: 'Mini',
+          last_name: 'Payroll',
+          username: 'mini_payroll_user',
+        },
+        startParam: buildTelegramAssistantStartParam('/payroll?tab=worker'),
+      },
+    })
+
+    await page.waitForURL(/\/payroll\?tab=worker$/, {
+      timeout: 15000,
+    })
+    await expect(page.getByRole('heading', { name: 'Catatan Absensi' })).toBeVisible({
+      timeout: 15000,
+    })
+  })
 })

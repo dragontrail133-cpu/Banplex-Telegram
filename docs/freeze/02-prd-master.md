@@ -6,7 +6,7 @@ Status: `official concise master PRD`
 
 ## 1. Overview
 
-Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu mencatat operasi harian secara mobile-first. Produk ini berfokus pada `Dashboard` sebagai overview cepat dan `Jurnal` sebagai workspace aktif utama untuk finance dan settlement, sambil menjaga `Halaman Absensi` sebagai surface input absensi harian dan `Catatan Absensi` sebagai halaman payroll untuk histori, filter, dan rekap. `Tagihan Upah` adalah derived payable payroll hasil rekap per worker yang boleh muncul di `Jurnal` dan `Riwayat`, sedangkan deleted recovery tetap berjalan lewat `Recycle Bin` yang terpisah.
+Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu mencatat operasi harian secara mobile-first. Produk ini berfokus pada `Dashboard` sebagai overview cepat dan `Jurnal` sebagai workspace aktif utama untuk finance dan settlement, sambil menjaga `Halaman Absensi` sebagai surface input absensi harian dan `Catatan Absensi` sebagai halaman payroll untuk histori, filter, dan rekap. `Telegram assistant` berperan sebagai helper read-only finance core di Telegram: ia membaca source of truth yang sudah ada, memahami campuran Indonesia/Sunda, menyediakan command `/menu /status /cari /analytics /riwayat /buka` plus inline keyboard read-only, menyimpan hybrid transcript pendek untuk continuation, lalu memakai AI writer untuk merangkai balasan natural-language yang tetap tervalidasi backend sebelum dikirim. `Tagihan Upah` adalah derived payable payroll hasil rekap per worker yang boleh muncul di `Jurnal` dan `Riwayat`, sedangkan deleted recovery tetap berjalan lewat `Recycle Bin` yang terpisah.
 
 ## 2. Requirements
 
@@ -17,6 +17,7 @@ Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu menc
 | Workspace | semua data inti terikat ke `team_id` dan access control workspace |
 | Main workspace | `Jurnal` menjadi workspace aktif utama untuk finance/settlement; `Dashboard` hanya overview; `Halaman Absensi` dan `Catatan Absensi` tetap terpisah dari ledger |
 | Payroll surface | `Halaman Absensi` = input harian, `Catatan Absensi` = histori/filter/rekap, `Tagihan Upah` = derived payable payroll per worker |
+| Telegram assistant | helper read-only finance core; mixed Indonesia/Sunda; command + inline read-only; hybrid transcript pendek; AI writer natural-language tervalidasi backend; tanpa mutasi atau free-form write action |
 | History semantics | `Riwayat` = completed/history surface; deleted recovery memakai `Recycle Bin` terpisah |
 | Data contract | domain inti memakai source of truth relasional final, bukan brief lama atau tabel legacy campuran |
 | Boundary | domain inti memakai `read direct/read model server` dan `write API/RPC only` |
@@ -42,6 +43,7 @@ Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu menc
 - `Riwayat`.
 - `Recycle Bin`.
 - `Tim` sebagai capability support/admin.
+- `Telegram assistant` sebagai helper read-only finance core yang merespons lewat AI writer natural-language tervalidasi backend, command/inline resmi, dan deep link workspace resmi.
 
 ## 4. User Flow
 

@@ -23,13 +23,324 @@ Dokumen ini adalah log progres khusus untuk stream `Unified CRUD Workspace`.
 - Active stream: `Unified CRUD Workspace`
 - Referensi plan: `docs/unified-crud-workspace-plan-2026-04-18.md`
 - Primary freeze authority: `docs/freeze/00-index.md`
-- Current task: `UCW-301`
+- Current task: `UCW-313`
 - Current status: `validated`
-- Catatan fokus: siapkan bundle env lokal yang aman untuk cutover ke akun Vercel Hobby baru, tanpa membuka nilai secret ke chat atau mencampur key di luar 14 runtime aktif yang sudah diaudit.
-- Catatan brief terbaru: file harus siap dipindahkan ke folder lain lalu di-rename sebelum import ke project target, sehingga migrasi env tidak perlu copy-paste manual dari dashboard lama.
-- Catatan audit freeze terbaru: bundle env harus tetap local-only dan ter-ignore Git; tidak boleh menambah file tracked yang berisi secret hidup ke repo.
-Status transitions touched: `UCW-242` tetap `audit_required`; `UCW-243`, `UCW-244`, `UCW-245`, `UCW-246`, `UCW-247`, `UCW-248`, `UCW-249`, `UCW-250`, `UCW-251`, `UCW-252`, `UCW-253`, `UCW-254`, `UCW-255`, `UCW-256`, `UCW-257`, `UCW-258`, `UCW-259`, `UCW-260`, `UCW-261`, `UCW-262`, `UCW-263`, `UCW-264`, `UCW-265`, `UCW-266`, `UCW-267`, `UCW-268`, `UCW-269`, `UCW-270`, `UCW-271`, `UCW-272`, `UCW-273`, `UCW-274`, `UCW-275`, `UCW-276`, dan `UCW-277` tetap `validated`; `UCW-278` sekarang `validated`; `UCW-279` tetap `validated`; `UCW-280` tetap `validated`; `UCW-281` tetap `validated`; `UCW-283` tetap `validated`; `UCW-284` tetap `validated`; `UCW-285` tetap `validated`; `UCW-286` sekarang `validated`; `UCW-287` sekarang `validated`; `UCW-288` sekarang `validated`; `UCW-289` sekarang `validated`; `UCW-290` sekarang `validated`; `UCW-291` sekarang `validated`; `UCW-292` sekarang `validated`; `UCW-293` sekarang `validated`; `UCW-294` sekarang `validated`; `UCW-295` sekarang `validated`; `UCW-296` sekarang `validated`; `UCW-297` sekarang `validated`; `UCW-298` sekarang `validated`; `UCW-299` sekarang `validated`; `UCW-300` sekarang `validated`; `UCW-301` sekarang `validated`.
-- Review order: audit daftar 14 key runtime -> buat file local ter-ignore dari `.env` aktif -> cek line count + nama key tanpa membuka nilainya -> update backlog dan log stream.
+- Catatan fokus: helper pure assistant dipisah ke modul session/routing/transport agar file API tidak lagi memikul seluruh boundary logic, tetapi kontrak read-only, command surface, dan payload session hybrid tetap sama.
+- Catatan brief terbaru: `api/telegram-assistant.js` sekarang mengimpor helper modular untuk session, routing, dan transport, lalu smoke live `/menu`, `/analytics`, callback metric/window/history, dan session query Supabase tetap lolos setelah deploy ulang production.
+- Catatan audit freeze terbaru: modul baru hanya memisahkan struktur kode; surface command/callback tetap read-only dan tidak menambah jalur mutasi atau source of truth baru.
+Status transitions touched: `UCW-242` tetap `audit_required`; `UCW-243`, `UCW-244`, `UCW-245`, `UCW-246`, `UCW-247`, `UCW-248`, `UCW-249`, `UCW-250`, `UCW-251`, `UCW-252`, `UCW-253`, `UCW-254`, `UCW-255`, `UCW-256`, `UCW-257`, `UCW-258`, `UCW-259`, `UCW-260`, `UCW-261`, `UCW-262`, `UCW-263`, `UCW-264`, `UCW-265`, `UCW-266`, `UCW-267`, `UCW-268`, `UCW-269`, `UCW-270`, `UCW-271`, `UCW-272`, `UCW-273`, `UCW-274`, `UCW-275`, `UCW-276`, dan `UCW-277` tetap `validated`; `UCW-278` sekarang `validated`; `UCW-279` tetap `validated`; `UCW-280` tetap `validated`; `UCW-281` tetap `validated`; `UCW-283` tetap `validated`; `UCW-284` tetap `validated`; `UCW-285` tetap `validated`; `UCW-286` sekarang `validated`; `UCW-287` sekarang `validated`; `UCW-288` sekarang `validated`; `UCW-289` sekarang `validated`; `UCW-290` sekarang `validated`; `UCW-291` sekarang `validated`; `UCW-292` sekarang `validated`; `UCW-293` sekarang `validated`; `UCW-294` sekarang `validated`; `UCW-295` sekarang `validated`; `UCW-296` sekarang `validated`; `UCW-297` sekarang `validated`; `UCW-298` sekarang `validated`; `UCW-299` sekarang `validated`; `UCW-300` sekarang `validated`; `UCW-301` tetap `validated`; `UCW-302` sekarang `validated`; `UCW-303` sekarang `validated`; `UCW-304` sekarang `validated`; `UCW-305` sekarang `validated`; `UCW-306` sekarang `validated`; `UCW-307` sekarang `validated`; `UCW-308` tetap `validated`; `UCW-309` tetap `validated`; `UCW-310` tetap `validated`; `UCW-311` tetap `validated`; `UCW-312` tetap `validated`; `UCW-313` sekarang `validated`.
+- Review order: audit monolith boundary -> extract pure helper modules -> direct module tests -> deploy production -> rerun smoke live -> cek session payload -> update docs stream.
+
+### [2026-04-23] `UCW-312` - Bangun AQ gate staging dan harness live smoke release
+- Status: `validated`
+- Ringkasan:
+  - Repo sekarang punya gate AQ tertulis yang memisahkan regression mock, live smoke staging, dan production canary, sehingga keputusan `siap release production` dan `bisa simpan data real` tidak lagi bercampur.
+  - Harness live smoke baru membuktikan tiga jalur write nyata yang paling murah tetapi representatif: `Master` (`funding_creditor`), core finance (`loan`), dan `Tim` (`invite_token`), lalu verifier service-role membaca artifact hasil smoke untuk memastikan row benar-benar tersimpan di Supabase.
+- File target:
+  - `docs/release-aq-gate.md`
+  - `playwright.live.config.js`
+  - `tests/live/helpers/live-app.js`
+  - `tests/live/helpers/live-artifacts.js`
+  - `tests/live/release-smoke.spec.js`
+  - `scripts/aq/verify-live-smoke.mjs`
+  - `package.json`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Lane live smoke mengasumsikan app lokal berjalan dengan env staging mirror dan `devAuthBypass`; ia bukan pengganti production canary Telegram nyata.
+  - Verifier hanya memeriksa row yang sudah tercatat di artifact smoke; jika test gagal sebelum artifact lengkap, cleanup staging tetap harus memakai artifact parsial itu secara hati-hati.
+- Audit hasil:
+  - `docs/release-aq-gate.md` sekarang mengunci severity `blocker/major/minor`, urutan gate, env wajib, checklist manual AQ, dan boundary scope `core release + Tim + Master`.
+  - `playwright.live.config.js` dan `tests/live/*` memisahkan lane write-real dari suite `tests/e2e/*` yang masih dominan mock, sehingga `npm run test:e2e` tidak otomatis menembak staging.
+  - `tests/live/release-smoke.spec.js` menggunakan `devAuthBypass` lokal tanpa `page.route()` mocking untuk membuka dashboard/ledger/payroll/master, membuat `funding_creditor`, membuat `loan`, membuat `invite_token`, lalu menulis artifact ke `test-results/live-smoke-created-records.json`.
+  - `scripts/aq/verify-live-smoke.mjs` membaca artifact itu dan memverifikasi `funding_creditors`, `loans`, dan `invite_tokens` lewat service-role Supabase sebelum menulis `test-results/live-smoke-verification.json`.
+  - `package.json` sekarang menyediakan command eksplisit `npm run test:e2e:live` dan `npm run aq:verify:live` untuk lane AQ staging.
+- Validasi:
+  - `git status --short`
+  - `git diff --check -- package.json playwright.live.config.js docs/release-aq-gate.md docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md tests/live scripts/aq`
+  - `node --check playwright.live.config.js`
+  - `node --check tests/live/helpers/live-app.js`
+  - `node --check tests/live/helpers/live-artifacts.js`
+  - `node --check tests/live/release-smoke.spec.js`
+  - `node --check scripts/aq/verify-live-smoke.mjs`
+  - `node scripts/aq/verify-live-smoke.mjs --help`
+  - `npx playwright test --config=playwright.live.config.js --list`
+  - `npm run lint`
+  - `npm run build`
+
+### [2026-04-23] `UCW-302` - Audit env Vercel project baru, redeploy, dan smoke test assistant
+- Status: `validated`
+- Ringkasan:
+  - Project Vercel baru untuk `banplex-telegram` sekarang punya 14 env runtime aktif di scope `production` dan `preview`, lalu deployment baru dibangun ulang agar env terbaru dibaca.
+  - Smoke test endpoint assistant lolos dengan response minimal `{"ok":true,"processed":false}`, lalu webhook Telegram dicutover ke alias production baru.
+- File target:
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Jika env preview berubah lagi, preview deployment berikutnya tetap harus dibangun ulang agar runtime preview membaca scope terbaru.
+  - Secret webhook harus terus dirotasi jika ada indikasi kebocoran baru; cutover berikutnya wajib menyamakan env project dan webhook Telegram.
+- Audit hasil:
+  - `vercel env ls production` dan `vercel env ls preview` sama-sama menunjukkan 14 entry runtime untuk project `dragontrail133-cpus-projects/banplex-telegram`.
+  - Jalur `vercel redeploy` pada deployment URL lama gagal dengan mismatch team, lalu rebuild final dilakukan via `vercel deploy --prod --yes --force` dari project yang ter-link.
+  - Production deployment baru `https://banplex-telegram-fohs0ktih-dragontrail133-cpus-projects.vercel.app` selesai, lalu alias production aktif menjadi `https://banplex-telegram.vercel.app`.
+  - Smoke POST ke `https://banplex-telegram.vercel.app/api/telegram-assistant` mengembalikan `200` + `{"ok":true,"processed":false}`.
+  - `Telegram setWebhook` diarahkan ke `https://banplex-telegram.vercel.app/api/telegram-assistant`, lalu `getWebhookInfo` menunjukkan URL itu, `pending_update_count = 0`, `last_error_message = null`, dan `allowed_updates = ["message","edited_message","callback_query"]`.
+  - Saat uji webhook read-only dijalankan dengan payload Telegram yang valid, sempat muncul blocker remote `telegram_assistant_sessions` belum ada; migrasi `supabase/migrations/20260423101000_create_telegram_assistant_sessions.sql` kemudian diaplikasikan ke Supabase project target, setelah itu request `status` dan `navigate` kembali lolos dengan `{"ok":true,"processed":true}`.
+  - Classifier xAI awalnya sempat timeout di 8 detik dan memicu fallback deterministik; timeout dinaikkan ke 15 detik, lalu request `status` dan `navigate` ulang tetap lolos dengan `{"ok":true,"processed":true}` tanpa error timeout.
+- Validasi:
+  - `vercel whoami --debug`
+  - `vercel env ls production`
+  - `vercel env ls preview`
+  - `vercel deploy --prod --yes --force`
+  - smoke test POST ke `/api/telegram-assistant`
+  - `Telegram setWebhook`
+  - `Telegram getWebhookInfo`
+  - direct POST webhook assistant dengan payload `status` dan `navigate`
+  - direct check `telegram_assistant_sessions` via Supabase REST setelah migrasi
+
+### [2026-04-23] `UCW-303` - Audit regresi notifikasi `/api/notify` pada create payment
+- Status: `validated`
+- Ringkasan:
+  - Route `/api/notify` sempat gagal `FUNCTION_INVOCATION_FAILED` untuk notifikasi payment karena `src/lib/business-report.js` mengimpor `./date-time` tanpa ekstensi `.js`, sehingga serverless Node ESM di Vercel tidak bisa resolve dependency saat `bill_payment`/`loan_payment` memanggil jalur PDF receipt.
+  - Import sudah diperbaiki ke `./date-time.js`, lalu production redeploy baru berhasil dan notifikasi `bill_payment` serta `salary_bill` kembali terkirim normal.
+- File target:
+  - `src/lib/business-report.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Jika ada helper server-side lain masih memakai import extensionless, Vercel serverless ESM bisa kena regresi serupa.
+  - Jalur notifikasi payment tetap bergantung pada `TELEGRAM_BOT_TOKEN` dan `TELEGRAM_CHAT_ID` yang valid di runtime project.
+- Audit hasil:
+  - Direct POST `https://banplex-telegram.vercel.app/api/notify` untuk `bill_payment` sempat gagal dengan `FUNCTION_INVOCATION_FAILED` + `ERR_MODULE_NOT_FOUND` dari `src/lib/business-report.js`.
+  - Setelah `src/lib/business-report.js` diganti ke `./date-time.js`, `npm run lint` dan `npm run build` lolos.
+  - `vercel deploy --prod --yes --force` menghasilkan deployment baru `https://banplex-telegram-ij1teid3h-dragontrail133-cpus-projects.vercel.app` dan alias production tetap aktif di `https://banplex-telegram.vercel.app`.
+  - Direct POST `bill_payment` dan `salary_bill` ke `/api/notify` sekarang kembali `200` + `success: true`, dengan Telegram menerima document/text notification.
+
+### [2026-04-23] `UCW-304` - Prioritaskan intent deterministik untuk prompt Telegram eksplisit
+- Status: `validated`
+- Ringkasan:
+  - Prompt Telegram eksplisit sempat terus dijawab clarifying question generik karena classifier AI meng-overwrite sinyal yang sudah jelas, sehingga intent `status/search/navigate/refuse` tidak konsisten untuk prompt sederhana.
+  - `api/telegram-assistant.js` sekarang memprioritaskan heuristic deterministik untuk prompt yang sudah jelas, dan AI classifier hanya dipakai saat heuristic masih `clarify`.
+- File target:
+  - `api/telegram-assistant.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Prompt yang sangat ambigu tetap akan lewat classifier AI; jika model provider melambat atau berubah perilaku, clarifying question bisa berbeda tanpa mengubah alur utama.
+  - Jika ada intent baru di masa depan, heuristic deterministik harus diperluas supaya tidak terlalu agresif mengabaikan classifier AI.
+- Audit hasil:
+  - Harness lokal berbasis VM menunjukkan `status tagihan unpaid` → `status`, `cari termin 2` → `search`, `buka jurnal` → `navigate`, dan `hapus tagihan ini` → `refuse`.
+  - `npx eslint api/telegram-assistant.js` dan `npm run build` lolos setelah patch.
+  - `vercel deploy --prod --yes --force` menghasilkan deployment baru `https://banplex-telegram-4zcxfxjym-dragontrail133-cpus-projects.vercel.app` dan alias production tetap aktif di `https://banplex-telegram.vercel.app`.
+  - Direct POST webhook assistant dengan prompt eksplisit kembali `200` + `{"ok":true,"processed":true}` tanpa error runtime.
+
+### [2026-04-23] `UCW-305` - Batasi respons Telegram ke mention/reply atau intent eksplisit
+- Status: `validated`
+- Ringkasan:
+  - Bot Telegram sekarang diam untuk chat bebas yang tidak jelas; private chat hanya diproses bila punya intent read-only eksplisit atau sesi lanjutan aktif, sedangkan group/supergroup hanya diproses bila bot di-mention atau dijadikan reply target.
+  - Gate ini mencegah clarifying question generik muncul untuk percakapan bebas di Telegram, tanpa mengubah jalur intent eksplisit yang sudah lolos di `UCW-304`.
+- File target:
+  - `api/telegram-assistant.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Jika `TELEGRAM_BOT_USERNAME` salah atau kosong, mention/reply gate di group bisa terlalu ketat dan bot tidak akan merespons percakapan yang semestinya valid.
+  - Chat group yang tidak memakai reply/mention tetap sengaja diabaikan, jadi user harus membiasakan pola interaksi eksplisit.
+- Audit hasil:
+  - `shouldProcessTelegramMessage()` sekarang menolak private `clarify` tanpa sesi aktif dan menolak group/supergroup yang tidak mention/reply bot.
+  - Harness VM lokal memverifikasi private explicit `true`, private free `false`, group mention `true`, group free `false`, dan group reply `true`.
+  - Production redeploy baru selesai ke `https://banplex-telegram-q1m8u8j3s-dragontrail133-cpus-projects.vercel.app` lalu alias aktif tetap `https://banplex-telegram.vercel.app`.
+  - Direct POST production untuk private `halo` dan group `status tagihan unpaid` tanpa mention/reply sama-sama mengembalikan `{"ok":true,"processed":false}`.
+- Validasi:
+  - `npm run lint`
+  - `npm run build`
+  - VM harness lokal untuk gating assistant
+  - `vercel deploy --prod --yes --force`
+  - Direct POST ke `/api/telegram-assistant` untuk private free chat dan group free chat
+
+### [2026-04-23] `UCW-306` - Gemini-first clarifier dengan template final dan konteks Sunda
+- Status: `validated`
+- Ringkasan:
+  - Assistant Telegram sedang diperluas dengan context ringkas per chat, dukungan input campuran Indonesia/Sunda, dan classifier Gemini-first untuk pesan ambigu sebelum fallback ke xAI atau deterministic plan.
+  - Output final tetap template-driven; model hanya memilih intent, bahasa, dan slot konteks yang dibutuhkan, bukan menulis teks bebas ke user.
+- File target:
+  - `api/telegram-assistant.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Jika context memory terlalu agresif, bot bisa lebih sering mengajukan klarifikasi pada pesan pendek yang seharusnya diabaikan.
+  - Jika Gemini gagal atau output JSON rusak, fallback xAI/deterministic harus tetap menjaga final template.
+- Audit hasil:
+  - `api/telegram-assistant.js` sekarang menyimpan context ringkas per chat, memprioritaskan Gemini untuk case ambigu, dan merender reply final lewat template fixed untuk status/search/navigate/refuse/clarify.
+  - `npm run lint` dan `npm run build` lolos setelah patch.
+  - `vercel deploy --prod --yes --force` menghasilkan deployment baru `https://banplex-telegram-1ip8pd5xc-dragontrail133-cpus-projects.vercel.app` dan alias production aktif tetap `https://banplex-telegram.vercel.app`.
+  - Smoke test aman ke `/api/telegram-assistant` dengan header secret dan body kosong mengembalikan `{"ok":true,"processed":false}`.
+  - Live replay 3 update private berurutan pada chat yang sama kembali `{"ok":true,"processed":true}` untuk prompt eksplisit Indonesia, prompt Sunda, dan follow-up ambigu.
+  - `vercel logs banplex-telegram.vercel.app --no-follow --since 10m` tidak menampilkan error runtime baru pada deploy final.
+
+### [2026-04-23] `UCW-307` - Semantic analytics pack untuk query ambigu dan alias entitas
+- Status: `validated`
+- Ringkasan:
+  - Assistant Telegram sekarang bisa menangani query read-only berbasis agregat seperti sisa hutang, total tagihan, jumlah pekerja hadir, pengeluaran per periode, dan ranking entitas terbesar dengan pemahaman Indonesia/Sunda campuran.
+  - Output final tetap template-driven; classifier hanya memilih metric, entity, window, dan clarification slot, lalu reply user-facing dirender dari template fixed.
+- File target:
+  - `api/telegram-assistant.js`
+  - `src/lib/telegram-assistant-links.js`
+  - `tests/e2e/telegram-shell.spec.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Analytics ranking bergantung pada kualitas label entity dan data view yang tersedia; kalau label ambigu, bot akan kembali ke clarifying template.
+  - Window periode seperti kemarin/minggu ini/bulan ini harus tetap konsisten dengan timezone app jika nanti helper tanggal berubah.
+- Audit hasil:
+  - `api/telegram-assistant.js` sekarang punya analytics planner, template reply, context ringkas per chat, dan clarifier slot untuk metric/entity/window.
+  - `src/lib/telegram-assistant-links.js` dan Playwright shell test sudah mendukung route `/payroll` serta tab worker.
+  - `node --check api/telegram-assistant.js`, `node --check src/lib/telegram-assistant-links.js`, `node --check tests/e2e/telegram-shell.spec.js`, `npm run lint`, `npm run build`, dan `npx playwright test tests/e2e/telegram-shell.spec.js --reporter=line` semuanya lolos.
+  - Deploy production terbaru dan smoke test live mengonfirmasi prompt analytics jelas `{"ok":true,"processed":true}`; prompt ambigu `sisa hutang mang dindin` juga berhasil diproses setelah helper reply retry tanpa target reply yang tidak valid.
+
+### [2026-04-23] `UCW-308` - Orkestrasi AI natural-language untuk assistant Telegram read-only
+- Status: `validated`
+- Ringkasan:
+  - Assistant Telegram sekarang berjalan dengan pola deterministic planner + AI writer natural-language, dengan backend verifier yang menolak klaim di luar fact packet.
+  - Output final tetap read-only dan paham Indonesia/Sunda campuran, tetapi tidak lagi terpaku pada template fixed; writer Gemini/xAI menjadi lapisan terakhir sebelum pesan dikirim ke Telegram.
+- File target:
+  - `api/telegram-assistant.js`
+  - `docs/freeze/01-planning-decision-freeze.md`
+  - `docs/freeze/02-prd-master.md`
+  - `docs/freeze/03-source-of-truth-contract-map.md`
+  - `docs/freeze/05-ai-execution-guardrails.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+  - `tests/unit/telegram-assistant-writer.test.js`
+- Risiko:
+  - Kalau verifier terlalu ketat, balasan AI bisa lebih sering jatuh ke fallback deterministic.
+  - Kalau prompt writer terlalu longgar, model bisa mengulang angka atau nama yang tidak ada di fact packet.
+- Audit hasil:
+  - Helper writer dan verifier sudah ditanam di `api/telegram-assistant.js`, lalu assistant runtime sekarang merewrite reply deterministik ke natural-language sebelum dikirim.
+  - `node --check api/telegram-assistant.js`, `node --check tests/unit/telegram-assistant-writer.test.js`, `npm run lint`, `npm run build`, dan `node --test tests/unit/telegram-assistant-writer.test.js` semuanya lolos.
+  - `vercel deploy --prod --yes --force` menghasilkan deployment produksi baru `https://banplex-telegram-oqh25yll6-dragontrail133-cpus-projects.vercel.app` dan alias tetap aktif di `https://banplex-telegram.vercel.app`.
+  - Smoke test live ke `/api/telegram-assistant` mengembalikan `{"ok":true,"processed":false}` untuk body kosong dan `{"ok":true,"processed":true}` untuk pesan read-only yang memicu writer AI.
+
+### [2026-04-23] `UCW-309` - Upgrade assistant Telegram dengan command surface, inline callback, dan hybrid transcript
+- Status: `validated`
+- Ringkasan:
+  - Assistant Telegram sekarang punya entrypoint command `/menu /status /cari /analytics /riwayat /buka`, inline keyboard yang bisa mencampur quick action callback dengan deep link workspace resmi, dan callback routing yang tetap masuk ke planner/verifier read-only yang sama.
+  - `telegram_assistant_sessions.pending_payload` sekarang dipadatkan ke format hybrid transcript yang menyimpan summary, last turn, last route, entity hints, dan transcript pendek bercap waktu tanpa menambah kolom atau source of truth baru.
+- File target:
+  - `api/telegram-assistant.js`
+  - `docs/freeze/01-planning-decision-freeze.md`
+  - `docs/freeze/02-prd-master.md`
+  - `docs/freeze/03-source-of-truth-contract-map.md`
+  - `docs/freeze/05-ai-execution-guardrails.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+  - `tests/unit/telegram-assistant-writer.test.js`
+  - `tests/unit/telegram-assistant-routing.test.js`
+- Risiko:
+  - Callback clarification untuk metric/entity/window sengaja bergantung pada session aktif; jika session expired, user harus memulai ulang dari command atau pesan baru.
+  - Inline keyboard sekarang lebih kaya; kalau `TELEGRAM_BOT_USERNAME` tidak valid, deep link resmi tidak akan terbentuk meski quick action callback tetap jalan.
+- Audit hasil:
+  - `api/telegram-assistant.js` sekarang mengenali slash command resmi, mengizinkan explicit command di private/group, memetakan callback `ta:*` ke input planner yang sama, dan menambahkan keyboard quick action + route link pada reply yang relevan.
+  - `pending_payload` sekarang dinormalisasi ke `summary`, `last_turn`, `last_route`, `entity_hints`, dan transcript pendek bercap waktu, sambil tetap kompatibel dengan field lama seperti `context_summary` dan `last_target_path`.
+  - `docs/freeze/*` dan plan/progress stream kini mencatat eksplisit bahwa command bot, inline callback, dan hybrid transcript adalah satu workflow read-only yang sama, tanpa migrasi schema baru.
+- Validasi:
+  - `node --check api/telegram-assistant.js`
+  - `node --check tests/unit/telegram-assistant-writer.test.js`
+  - `node --check tests/unit/telegram-assistant-routing.test.js`
+  - `node --test tests/unit/telegram-assistant-writer.test.js`
+  - `node --test tests/unit/telegram-assistant-routing.test.js`
+  - `npm run lint`
+  - `npm run build`
+
+### [2026-04-23] `UCW-313` - Modularisasi helper Telegram assistant menjadi routing/session/transport modules
+- Status: `validated`
+- Ringkasan:
+  - Helper pure assistant sekarang dipisah ke modul `session`, `routing`, dan `transport`, sehingga file API utama tidak lagi memikul seluruh boundary logic sekaligus.
+  - Production deploy terbaru tetap lolos smoke live read-only, termasuk command `/menu` dan `/analytics`, callback metric/window/history, serta query Supabase yang menunjukkan session hybrid masih utuh.
+- File target:
+  - `api/telegram-assistant.js`
+  - `src/lib/telegram-assistant-session.js`
+  - `src/lib/telegram-assistant-routing.js`
+  - `src/lib/telegram-assistant-transport.js`
+  - `tests/unit/telegram-assistant-routing.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Tiga modul baru menambah surface import yang harus dijaga konsistensinya; bila nanti helper umum berubah, perlu sinkronisasi antara API utama dan modul terpisah.
+  - Lint repo masih punya dua file pre-existing yang memanggil `process` tanpa deklarasi Node global, tetapi itu di luar area assistant dan tidak mengubah hasil smoke bot.
+- Audit hasil:
+  - `src/lib/telegram-assistant-session.js` memuat normalisasi payload hybrid dan builder session.
+  - `src/lib/telegram-assistant-routing.js` memuat parser command dan router callback.
+  - `src/lib/telegram-assistant-transport.js` memuat transport Telegram, `answerTelegramCallback`, dan hardening ack invalid/expired.
+  - `tests/unit/telegram-assistant-routing.test.js` sekarang memverifikasi modul direct, bukan hanya re-export API.
+  - `vercel deploy --prod --yes --force --format json` berhasil mempromosikan build terbaru ke alias `https://banplex-telegram.vercel.app`.
+  - Smoke live ke alias production mengembalikan `ok=true processed=true` untuk `/menu`, `/analytics`, callback `ta:am:cash_outflow`, callback `ta:aw:month_current`, dan callback `ta:cmd:riwayat`.
+  - Query SQL ke `public.telegram_assistant_sessions` menunjukkan row terbaru berstatus `idle`, `pending_payload ? 'summary' = true`, `jsonb_array_length(transcript) = 4`, dan `last_route = '/transactions?tab=history'`.
+- Validasi:
+  - `node --check api/telegram-assistant.js`
+  - `node --check src/lib/telegram-assistant-session.js`
+  - `node --check src/lib/telegram-assistant-routing.js`
+  - `node --check src/lib/telegram-assistant-transport.js`
+  - `node --check tests/unit/telegram-assistant-routing.test.js`
+  - `node --check tests/unit/telegram-assistant-writer.test.js`
+  - `node --test tests/unit/telegram-assistant-routing.test.js tests/unit/telegram-assistant-writer.test.js`
+  - `npm run build`
+  - `vercel deploy --prod --yes --force --format json`
+  - smoke POST live ke `https://banplex-telegram.vercel.app/api/telegram-assistant` untuk `/menu`, `/analytics`, callback metric/window/history
+  - query SQL ke `public.telegram_assistant_sessions` untuk verifikasi `summary`, `transcript`, dan `last_route`
+
+### [2026-04-23] `UCW-310` - Deploy production assistant upgrade dan smoke command runtime
+- Status: `validated`
+- Ringkasan:
+  - Alias production `https://banplex-telegram.vercel.app` sekarang sudah mengarah ke deployment baru yang membawa command surface assistant dan payload session hybrid dari `UCW-309`.
+  - Smoke live membuktikan `empty` tetap `processed:false`, sementara `/menu`, `/status tagihan unpaid`, `/analytics`, dan `/menu` penutup sudah `processed:true`; query Supabase terbaru juga menunjukkan `pending_payload` mulai memuat field `summary` dan transcript hybrid.
+- File target:
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Deploy production ini memakai current workspace yang juga mengandung perubahan lokal lain di luar task assistant; build dan smoke assistant lolos, tetapi area non-assistant yang ikut terdeploy tetap perlu dipantau terpisah.
+  - Callback replay lewat webhook sintetis masih tidak bisa dijadikan bukti end-to-end penuh karena Telegram menolak `callback_query.id` palsu di `answerCallbackQuery`; validasi callback tetap disangga oleh unit test router dan command smoke yang sudah live.
+- Audit hasil:
+  - Smoke awal ke production sebelum redeploy menunjukkan runtime lama: `empty` dan `/status` masih sehat, tetapi `/analytics` slash command dan callback `ta:*` masih `processed:false`.
+  - `vercel deploy --prod --yes --force --format json` berhasil membangun deployment produksi baru `https://banplex-telegram-g3xms2kha-dragontrail133-cpus-projects.vercel.app` dan alias tetap aktif di `https://banplex-telegram.vercel.app`.
+  - Smoke ulang ke alias production sesudah redeploy mengembalikan `{"ok":true,"processed":false}` untuk body kosong, lalu `{"ok":true,"processed":true}` untuk `/menu`, `/status tagihan unpaid`, `/analytics`, dan `/menu` penutup.
+  - Replay callback synthetic ke production sekarang memang masuk ke runtime baru, tetapi Telegram membalas `Bad Request: query is too old and response timeout expired or query ID is invalid`; ini sesuai batasan callback replay non-Telegram dan bukan regresi planner/callback router.
+  - Query Supabase terbaru memperlihatkan row session paling baru berstatus `idle`, `pending_payload ? 'summary' = true`, `pending_payload ? 'context_summary' = true`, dan `jsonb_array_length(pending_payload->'transcript') = 2`, menandakan format hybrid baru sudah tersimpan di runtime production.
+  - `vercel logs banplex-telegram.vercel.app --no-follow --since 15m` menunjukkan POST `200` untuk smoke command, plus log error `200` yang konsisten dengan replay callback synthetic ber-ID palsu.
+- Validasi:
+  - `vercel deploy --prod --yes --force --format json`
+  - smoke POST live ke `https://banplex-telegram.vercel.app/api/telegram-assistant` untuk `empty`, `/menu`, `/status tagihan unpaid`, `/analytics`, callback synthetic `ta:*`, dan `/menu` penutup
+
+### [2026-04-23] `UCW-311` - Hardening callback ack replay untuk smoke end-to-end
+- Status: `validated`
+- Ringkasan:
+  - Runtime assistant sekarang tetap menuntaskan callback read-only walau replay webhook sintetis memakai `callback_query.id` yang invalid/expired; ack Telegram untuk kasus spesifik itu hanya dilog warning, bukan lagi menggagalkan seluruh request.
+  - Smoke live ke alias production sekarang membuktikan alur `/analytics -> ta:am:cash_outflow -> ta:aw:month_current -> ta:cmd:riwayat` seluruhnya `processed:true`, dan row session terbaru tetap menyimpan summary/transcript hybrid plus `last_route` hasil navigasi.
+- File target:
+  - `api/telegram-assistant.js`
+  - `tests/unit/telegram-assistant-routing.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Pelonggaran hanya berlaku untuk error ack Telegram yang eksplisit menyatakan query terlalu lama atau ID invalid; error Telegram lain tetap melempar exception agar kegagalan nyata tidak tertutup.
+  - Deploy production masih membawa current workspace yang punya perubahan lokal lain di luar area assistant; smoke assistant sudah sehat, tetapi area non-assistant yang ikut terdeploy tetap perlu dipantau terpisah.
+- Audit hasil:
+  - `api/telegram-assistant.js` menambah guard `isIgnorableTelegramCallbackError(...)` dan memperbarui `answerTelegramCallback(...)` supaya hanya melewati error `query is too old` / `query ID is invalid` saat replay callback sintetis.
+  - `tests/unit/telegram-assistant-routing.test.js` menambah uji untuk memastikan ack callback invalid/expired tidak menggagalkan handler, sementara routing command/callback dan hybrid transcript tetap terjaga.
+  - `vercel deploy --prod --yes --force --format json` berhasil mempromosikan build terbaru ke alias `https://banplex-telegram.vercel.app`.
+  - Smoke live ke `https://banplex-telegram.vercel.app/api/telegram-assistant` mengembalikan `{"ok":true,"processed":true}` untuk `/analytics`, callback `ta:am:cash_outflow`, callback `ta:aw:month_current`, dan callback `ta:cmd:riwayat`.
+  - Query Supabase terbaru ke `public.telegram_assistant_sessions` menunjukkan row terkini berstatus `idle`, `pending_payload ? 'summary' = true`, `jsonb_array_length(pending_payload->'transcript') = 4`, `pending_payload->>'last_route' = '/transactions?tab=history'`, dan `pending_payload->'last_turn'->>'intent' = 'navigate'`.
+- Validasi:
+  - `node --check api/telegram-assistant.js`
+  - `node --check tests/unit/telegram-assistant-routing.test.js`
+  - `node --test tests/unit/telegram-assistant-routing.test.js`
+  - `npm run lint`
+  - `npm run build`
+  - `vercel deploy --prod --yes --force --format json`
+  - smoke POST live ke `https://banplex-telegram.vercel.app/api/telegram-assistant` untuk `/analytics`, `ta:am:cash_outflow`, `ta:aw:month_current`, dan `ta:cmd:riwayat`
+  - query SQL ke `public.telegram_assistant_sessions` untuk verifikasi `summary`, `transcript`, `last_route`, dan `last_turn`
+  - `select ... from public.telegram_assistant_sessions order by updated_at desc limit 1`
+  - `vercel logs banplex-telegram.vercel.app --no-follow --since 15m`
 
 ### [2026-04-23] `UCW-301` - Siapkan bundle env lokal untuk migrasi Vercel Hobby
 - Status: `validated`

@@ -5,6 +5,27 @@ import {
   buildTelegramAssistantLink,
   normalizeAssistantRoutePath,
 } from '../src/lib/telegram-assistant-links.js'
+import {
+  allowedLanguages,
+  buildAssistantMemoryPayload,
+  buildPendingSessionPayload,
+  maxAssistantEntityHints,
+  normalizeAssistantPendingPayload,
+} from '../src/lib/telegram-assistant-session.js'
+import {
+  allowedAnalyticsEntityTypes,
+  allowedAnalyticsMetricKeys,
+  allowedAnalyticsWindows,
+  assistantCallbackPrefixes,
+  buildAssistantCommandInput,
+  buildAssistantCommandRawText,
+  extractAssistantCommand,
+  resolveAssistantCallbackAction,
+} from '../src/lib/telegram-assistant-routing.js'
+import {
+  answerTelegramCallback,
+  sendTelegramMessage,
+} from '../src/lib/telegram-assistant-transport.js'
 
 const assistantSelectColumns =
   'team_id, source_type, type, id, sort_at, transaction_date, income_date, expense_date, due_date, created_at, updated_at, amount, description, project_name_snapshot, supplier_name_snapshot, creditor_name_snapshot, worker_name_snapshot, expense_type, document_type, bill_id, bill_type, bill_status, bill_amount, bill_paid_amount, bill_remaining_amount, bill_due_date, bill_paid_at, bill_description, bill_project_name_snapshot, bill_supplier_name_snapshot, bill_worker_name_snapshot, search_text'
@@ -13,10 +34,17 @@ const sessionStates = new Set([
   'awaiting_workspace_choice',
   'awaiting_clarification',
 ])
-const allowedIntents = new Set(['status', 'search', 'navigate', 'clarify', 'refuse'])
+const allowedIntents = new Set(['status', 'search', 'navigate', 'analytics', 'clarify', 'refuse'])
 const allowedStatuses = new Set(['any', 'paid', 'partial', 'unpaid'])
 const allowedKinds = new Set(['all', 'transaction', 'bill', 'loan'])
-const financeCoreScopes = new Set(['project-income', 'expense', 'loan-disbursement'])
+const allowedClarificationCodes = new Set([
+  'specific_filter',
+  'followup_context',
+  'analytics_metric',
+  'analytics_entity',
+  'analytics_window',
+])
+const financeCoreScopes = new Set(['project-income', 'expense', 'loan-disbursement', 'bill'])
 const payrollScopeKeywords = [
   'gaji',
   'upah',
@@ -26,6 +54,9 @@ const payrollScopeKeywords = [
   'hrd',
   'beneficiary',
   'penerima manfaat',
+  'pagawai',
+  'pagawé',
+  'pekerja',
 ]
 const mutationKeywords = [
   'buat',
@@ -43,21 +74,468 @@ const mutationKeywords = [
   'submit',
   'posting',
   'bayarkan',
+  'hapuskeun',
+  'robah',
+  'ganti',
+  'tambahkeun',
+  'batalkeun',
+  'balikeun',
+  'bayarkeun',
 ]
 const routeKeywordMap = [
-  { pattern: /\b(riwayat|history)\b/, path: '/transactions?tab=history', label: 'Riwayat' },
-  { pattern: /\b(tagihan|invoice)\b/, path: '/transactions?tab=tagihan', label: 'Tagihan' },
-  { pattern: /\b(pembayaran|payment)\b/, path: '/pembayaran', label: 'Pembayaran' },
-  { pattern: /\b(jurnal|transaksi|ledger)\b/, path: '/transactions', label: 'Jurnal' },
-  { pattern: /\b(pinjaman|loan)\b/, path: '/transactions', label: 'Jurnal Pinjaman' },
+  { pattern: /\b(riwayat|history|histori)\b/, path: '/transactions?tab=history', label: 'Riwayat' },
+  { pattern: /\b(tagihan|invoice|tunggakan)\b/, path: '/transactions?tab=tagihan', label: 'Tagihan' },
+  { pattern: /\b(pembayaran|payment|bayaran)\b/, path: '/pembayaran', label: 'Pembayaran' },
+  { pattern: /\b(jurnal|transaksi|ledger|catetan transaksi|catetan)\b/, path: '/transactions', label: 'Jurnal' },
+  { pattern: /\b(pinjaman|loan|hutang|utang|nginjeum)\b/, path: '/transactions', label: 'Jurnal Pinjaman' },
+  { pattern: /\b(payroll|absensi|attendance|kehadiran|rekap absensi|catatan absensi)\b/, path: '/payroll', label: 'Absensi' },
 ]
 const stopWordPatterns = [
-  /\b(tolong|mohon|bantu|buat|tambah|hapus|delete|edit|ubah|update|perbarui|lihat|buka|cek|status|cari|temukan|search|tampilkan|pindah|masuk|ke)\b/g,
+  /\b(tolong|mohon|bantu|punten|mangga|parios|neangan|milarian|tingali|muka|buka|cek|status|cari|temukan|search|tampilkan|pindah|masuk|ke)\b/g,
+  /\b(total|nominal|jumlah|berapa|data|ringkasan|rekap|siapa|mana|terbesar|paling|besar|hadir|pengeluaran|saldo|toko)\b/g,
   /\b(hari ini|kemarin|minggu ini|minggu lalu|bulan ini|bulan lalu|lalu|sekarang)\b/g,
-  /\b(unpaid|paid|partial|lunas|belum lunas|terbayar|sudah dibayar)\b/g,
-  /\b(tagihan|pembayaran|payment|jurnal|transaksi|riwayat|history|pinjaman|loan)\b/g,
+  /\b(unpaid|paid|partial|lunas|belum lunas|terbayar|sudah dibayar|acan lunas|can lunas|acan dibayar|can dibayar|beres)\b/g,
+  /\b(tagihan|pembayaran|payment|jurnal|transaksi|riwayat|history|pinjaman|loan|tunggakan|bayaran|hutang|utang)\b/g,
+  /\b(worker|pekerja|karyawan|supplier|creditor|kreditur|gaji|upah|absensi|attendance|hrd|beneficiary|penerima manfaat)\b/g,
+  /\b(yang|memiliki|mempunyai|punya|ada|dengan)\b/g,
+  /\b(mang|kang|teh|teteh|pak|bu|bapak|ibu|si)\b/g,
   /\b(rp\.?|rupiah)\b/g,
 ]
+const assistantTopicSignals = [
+  'tagihan',
+  'pembayaran',
+  'payment',
+  'jurnal',
+  'transaksi',
+  'rekap',
+  'laporan',
+  'riwayat',
+  'history',
+  'pinjaman',
+  'loan',
+  'bayaran',
+  'tunggakan',
+  'hutang',
+  'utang',
+  'total',
+  'nominal',
+  'jumlah',
+  'berapa',
+  'siapa',
+  'mana',
+  'terbesar',
+  'paling besar',
+  'hadir',
+  'pengeluaran',
+  'saldo',
+  'worker',
+  'pekerja',
+  'supplier',
+  'creditor',
+  'kreditur',
+  'gaji',
+  'upah',
+  'absensi',
+  'attendance',
+  'kehadiran',
+  'hrd',
+  'beneficiary',
+  'penerima manfaat',
+  'toko',
+  'payroll',
+  'rekap absensi',
+  'analitik',
+  'status',
+  'cek',
+  'parios',
+  'neangan',
+  'milarian',
+  'buka',
+  'tingali',
+  'muka',
+]
+const followUpSignals = [
+  'itu',
+  'yang tadi',
+  'yang itu',
+  'tadi',
+  'anu',
+  'eta',
+  'nu tadi',
+  'nu eta',
+  'kumaha',
+  'gimana',
+  'maksudnya',
+  'maksudna',
+  'terus',
+  'lanjut',
+  'lagi',
+  'ulang',
+  'jelas',
+  'jelaskan',
+  'barusan',
+  'saterasna',
+]
+const clarifySpecificFilterTemplate = {
+  id: 'Saya butuh filter yang lebih spesifik: ID, nama proyek/supplier, nominal, tanggal, atau status.',
+  su: 'Kuring peryogi filter nu leuwih spésifik: ID, nami proyek/supplier, nominal, tanggal, atawa status.',
+}
+const clarifyFollowUpTemplate = {
+  id: 'Maksudnya yang tadi itu ID, nama proyek/supplier, nominal, tanggal, atau status?',
+  su: 'Maksudna nu tadi téh ID, nami proyek/supplier, nominal, tanggal, atawa status?',
+}
+const clarifyAnalyticsMetricTemplate = {
+  id: 'Mau saya cek tagihan, pengeluaran, kehadiran, atau ranking terbesar?',
+  su: 'Mau dipariksa tagihan, pangeluaran, kahadiran, atawa ranking panggedena?',
+}
+const clarifyAnalyticsEntityTemplate = {
+  id: 'Mau saya baca untuk supplier, worker, atau kreditur?',
+  su: 'Mau dibaca pikeun supplier, worker, atawa kreditur?',
+}
+const clarifyAnalyticsWindowTemplate = {
+  id: 'Mau periode hari ini, kemarin, minggu ini, atau bulan ini?',
+  su: 'Mau periodena poé ieu, kamari, minggu ieu, atawa bulan ieu?',
+}
+
+const localeTemplates = {
+  id: {
+    workspaceChoiceIntro: 'Saya menemukan beberapa workspace aktif. Pilih workspace yang dipakai:',
+    workspaceChoiceHint: 'Kirim angka, nama workspace, atau tekan tombol pilihan di bawah.',
+    workspaceChoiceCancelled: 'Pilihan workspace dibatalkan.',
+    workspaceMissing: 'Saya tidak menemukan workspace aktif untuk akun ini. Hubungi admin untuk akses workspace yang valid.',
+    membershipMissing: 'Saya tidak menemukan membership aktif yang bisa dipakai untuk workspace ini.',
+    sessionExpired: 'Sesi sudah kedaluwarsa. Kirim ulang pesan.',
+    workspaceNotFound: 'Workspace tidak ditemukan.',
+    menuIntro: 'Pilih quick action assistant atau buka halaman workspace yang dibutuhkan.',
+    menuHint: 'Command assistant tetap read-only: status, cari, analytics, riwayat, dan buka.',
+    openRoutePrompt: 'Pilih halaman workspace yang ingin dibuka.',
+    noResultStatus: (queryLabel) =>
+      queryLabel
+        ? `Tidak ada tagihan atau pinjaman outstanding yang cocok untuk "${queryLabel}".\nBuka Jurnal untuk melihat riwayat lengkap.`
+        : 'Tidak ada tagihan atau pinjaman outstanding yang cocok.\nBuka Jurnal untuk melihat riwayat lengkap.',
+    statusIntro: (queryLabel) =>
+      queryLabel ? `Status untuk "${queryLabel}":` : 'Status finance core workspace ini:',
+    statusBills: (count, amountLabel) => `• Tagihan aktif: ${count} item, sisa ${amountLabel}`,
+    statusLoans: (count, amountLabel) => `• Pinjaman aktif: ${count} item, sisa ${amountLabel}`,
+    noResultSearch: (queryLabel) =>
+      queryLabel
+        ? `Belum ketemu data yang cocok untuk "${queryLabel}".\nTambah ID, nama proyek/supplier, nominal, tanggal, atau status yang lebih spesifik.`
+        : 'Belum ketemu data yang cocok.\nTambah ID, nama proyek/supplier, nominal, tanggal, atau status yang lebih spesifik.',
+    searchIntro: (queryLabel, count) =>
+      queryLabel
+        ? `Saya menemukan ${count} data paling relevan untuk "${queryLabel}":`
+        : `Saya menemukan ${count} data paling relevan:`,
+    searchMore: (count) => `Dan ${count} hasil lain yang serupa.`,
+    navigateIntro: (routeLabel) => `Membuka ${routeLabel}.`,
+    analyticsIntro: (label) =>
+      label ? `Ringkasan untuk "${label}":` : 'Ringkasan analytics workspace ini:',
+    analyticsNoData: (label) =>
+      label ? `Tidak ada data ${label} yang bisa dirangkum.` : 'Tidak ada data yang bisa dirangkum.',
+    analyticsTotalBills: (count, amountLabel) =>
+      `• Total tagihan aktif: ${count} item, sisa ${amountLabel}`,
+    analyticsCashOutflow: (windowLabel, amountLabel) =>
+      `• Pengeluaran ${windowLabel}: ${amountLabel}`,
+    analyticsAttendance: (windowLabel, countLabel, breakdownLabel = '') =>
+      `• Kehadiran ${windowLabel}: ${countLabel}${breakdownLabel ? ` (${breakdownLabel})` : ''}`,
+    analyticsRankingIntro: (entityLabel) =>
+      `• ${entityLabel} dengan sisa terbesar:`,
+    analyticsRankingEmpty: (entityLabel) =>
+      `Tidak ada data ${entityLabel} yang bisa dirangkum.`,
+    analyticsTopRanking: (nameLabel, amountLabel) => `  1. ${nameLabel} — ${amountLabel}`,
+    analyticsMoreRanking: (count) => `  + ${count} data lain.`,
+    analyticsTotalLoans: (count, amountLabel) =>
+      `â€¢ Total pinjaman aktif: ${count} item, sisa ${amountLabel}`,
+    analyticsRankingItem: (rankLabel, nameLabel, amountLabel) =>
+      `  ${rankLabel}. ${nameLabel} â€” ${amountLabel}`,
+    refusal:
+      'Saya hanya melayani finance core read-only: jurnal, tagihan, pembayaran, dan pinjaman. Permintaan ini berada di luar scope v1 atau bersifat mutasi.',
+    clarifySpecific: clarifySpecificFilterTemplate.id,
+    clarifyFollowUp: clarifyFollowUpTemplate.id,
+    clarifyAnalyticsMetric: clarifyAnalyticsMetricTemplate.id,
+    clarifyAnalyticsEntity: clarifyAnalyticsEntityTemplate.id,
+    clarifyAnalyticsWindow: clarifyAnalyticsWindowTemplate.id,
+    workspaceSelected: 'Workspace dipilih.',
+    actionDetail: 'Buka detail',
+    actionPayment: 'Buka pembayaran',
+    actionLedger: 'Buka Jurnal',
+    openRoute: (routeLabel) => `Buka ${routeLabel}`,
+    noWorkspaceChoice: 'Saya tidak menemukan membership aktif yang bisa dipakai untuk workspace ini.',
+    workspacePicked: (workspaceName) => `${workspaceName ?? 'Workspace'} dipilih.`,
+    callbackSessionExpired: 'Sesi sudah kedaluwarsa. Kirim ulang pesan.',
+    callbackWorkspaceNotFound: 'Workspace tidak ditemukan.',
+    noActiveMembership: 'Akun ini belum punya membership workspace aktif. Hubungi admin untuk akses workspace yang valid.',
+    quickStatus: 'Status',
+    quickSearch: 'Cari',
+    quickAnalytics: 'Analytics',
+    quickHistory: 'Riwayat',
+    quickMenu: 'Menu',
+    routeLedger: 'Jurnal',
+    routeHistory: 'Riwayat',
+    routePayment: 'Pembayaran',
+    routeAttendance: 'Absensi',
+    analyticsMetricBillSummary: 'Tagihan',
+    analyticsMetricCashOutflow: 'Pengeluaran',
+    analyticsMetricAttendance: 'Kehadiran',
+    analyticsMetricRanking: 'Ranking',
+    analyticsEntitySupplier: 'Supplier',
+    analyticsEntityWorker: 'Worker',
+    analyticsEntityCreditor: 'Kreditur',
+    analyticsWindowToday: 'Hari ini',
+    analyticsWindowYesterday: 'Kemarin',
+    analyticsWindowWeekCurrent: 'Minggu ini',
+    analyticsWindowMonthCurrent: 'Bulan ini',
+  },
+  su: {
+    menuIntro: 'Pilih quick action assistant atawa buka halaman workspace nu diperlukeun.',
+    menuHint: 'Command assistant tetep read-only: status, cari, analytics, riwayat, jeung buka.',
+    openRoutePrompt: 'Pilih halaman workspace nu rek dibuka.',
+    workspaceChoiceIntro: 'Kuring manggihan sababaraha workspace aktip. Pilih workspace nu dipaké:',
+    workspaceChoiceHint: 'Kirim angka, nami workspace, atawa pencét tombol pilihan di handap.',
+    workspaceChoiceCancelled: 'Pilihan workspace dibatalkeun.',
+    workspaceMissing: 'Kuring teu manggihan workspace aktip pikeun akun ieu. Hubungi admin pikeun aksés workspace nu valid.',
+    membershipMissing: 'Kuring teu manggihan membership aktip nu bisa dipaké pikeun workspace ieu.',
+    sessionExpired: 'Sési geus kadaluwarsa. Kirim deui pesen.',
+    workspaceNotFound: 'Workspace teu kapanggih.',
+    noResultStatus: (queryLabel) =>
+      queryLabel
+        ? `Teu aya tagihan atawa pinjaman outstanding nu cocog pikeun "${queryLabel}".\nBuka Jurnal pikeun ningali riwayat lengkep.`
+        : 'Teu aya tagihan atawa pinjaman outstanding nu cocog.\nBuka Jurnal pikeun ningali riwayat lengkep.',
+    statusIntro: (queryLabel) =>
+      queryLabel ? `Status pikeun "${queryLabel}":` : 'Status finance core workspace ieu:',
+    statusBills: (count, amountLabel) => `• Tagihan aktip: ${count} item, sésa ${amountLabel}`,
+    statusLoans: (count, amountLabel) => `• Pinjaman aktip: ${count} item, sésa ${amountLabel}`,
+    noResultSearch: (queryLabel) =>
+      queryLabel
+        ? `Can kapanggih data nu cocog pikeun "${queryLabel}".\nTambah ID, nami proyek/supplier, nominal, tanggal, atawa status nu leuwih spésifik.`
+        : 'Can kapanggih data nu cocog.\nTambah ID, nami proyek/supplier, nominal, tanggal, atawa status nu leuwih spésifik.',
+    searchIntro: (queryLabel, count) =>
+      queryLabel
+        ? `Kuring manggihan ${count} data nu paling relevan pikeun "${queryLabel}":`
+        : `Kuring manggihan ${count} data nu paling relevan:`,
+    searchMore: (count) => `Jeung ${count} hasil séjén nu sarupa.`,
+    navigateIntro: (routeLabel) => `Muka ${routeLabel}.`,
+    analyticsIntro: (label) =>
+      label ? `Ringkesan pikeun "${label}":` : 'Ringkesan analytics workspace ieu:',
+    analyticsNoData: (label) =>
+      label ? `Teu aya data ${label} nu bisa diringkes.` : 'Teu aya data nu bisa diringkes.',
+    analyticsTotalBills: (count, amountLabel) =>
+      `• Tagihan aktip total: ${count} item, sésa ${amountLabel}`,
+    analyticsCashOutflow: (windowLabel, amountLabel) =>
+      `• Pangeluaran ${windowLabel}: ${amountLabel}`,
+    analyticsAttendance: (windowLabel, countLabel, breakdownLabel = '') =>
+      `• Kahadiran ${windowLabel}: ${countLabel}${breakdownLabel ? ` (${breakdownLabel})` : ''}`,
+    analyticsRankingIntro: (entityLabel) =>
+      `• ${entityLabel} kalayan sésa panggedena:`,
+    analyticsRankingEmpty: (entityLabel) =>
+      `Teu aya data ${entityLabel} nu bisa diringkes.`,
+    analyticsTopRanking: (nameLabel, amountLabel) => `  1. ${nameLabel} — ${amountLabel}`,
+    analyticsMoreRanking: (count) => `  + ${count} data deui.`,
+    analyticsTotalLoans: (count, amountLabel) =>
+      `â€¢ Pinjaman aktip total: ${count} item, sÃ©sa ${amountLabel}`,
+    analyticsRankingItem: (rankLabel, nameLabel, amountLabel) =>
+      `  ${rankLabel}. ${nameLabel} â€” ${amountLabel}`,
+    refusal:
+      'Kuring ngan ngalayanan finance core read-only: jurnal, tagihan, pembayaran, jeung pinjaman. Pamundut ieu di luar scope v1 atawa mangrupakeun mutasi.',
+    clarifySpecific: clarifySpecificFilterTemplate.su,
+    clarifyFollowUp: clarifyFollowUpTemplate.su,
+    clarifyAnalyticsMetric: clarifyAnalyticsMetricTemplate.su,
+    clarifyAnalyticsEntity: clarifyAnalyticsEntityTemplate.su,
+    clarifyAnalyticsWindow: clarifyAnalyticsWindowTemplate.su,
+    workspaceSelected: 'Workspace dipilih.',
+    actionDetail: 'Buka detil',
+    actionPayment: 'Buka pembayaran',
+    actionLedger: 'Buka Jurnal',
+    openRoute: (routeLabel) => `Muka ${routeLabel}`,
+    noWorkspaceChoice: 'Kuring teu manggihan membership aktip nu bisa dipaké pikeun workspace ieu.',
+    workspacePicked: (workspaceName) => `${workspaceName ?? 'Workspace'} dipilih.`,
+    callbackSessionExpired: 'Sési geus kadaluwarsa. Kirim deui pesen.',
+    callbackWorkspaceNotFound: 'Workspace teu kapanggih.',
+    noActiveMembership: 'Akun ieu can boga membership workspace aktip. Hubungi admin pikeun aksés workspace nu valid.',
+    quickStatus: 'Status',
+    quickSearch: 'Cari',
+    quickAnalytics: 'Analytics',
+    quickHistory: 'Riwayat',
+    quickMenu: 'Menu',
+    routeLedger: 'Jurnal',
+    routeHistory: 'Riwayat',
+    routePayment: 'Pembayaran',
+    routeAttendance: 'Absensi',
+    analyticsMetricBillSummary: 'Tagihan',
+    analyticsMetricCashOutflow: 'Pangeluaran',
+    analyticsMetricAttendance: 'Kahadiran',
+    analyticsMetricRanking: 'Ranking',
+    analyticsEntitySupplier: 'Supplier',
+    analyticsEntityWorker: 'Worker',
+    analyticsEntityCreditor: 'Kreditur',
+    analyticsWindowToday: 'Poe ieu',
+    analyticsWindowYesterday: 'Kamari',
+    analyticsWindowWeekCurrent: 'Minggu ieu',
+    analyticsWindowMonthCurrent: 'Bulan ieu',
+  },
+}
+
+function truncateText(value, maxLength = 240) {
+  const normalizedValue = normalizeText(value, '')
+
+  if (normalizedValue.length <= maxLength) {
+    return normalizedValue
+  }
+
+  return `${normalizedValue.slice(0, Math.max(maxLength - 1, 1)).trim()}…`
+}
+
+function countKeywordHits(text, keywords = []) {
+  const normalizedText = normalizeText(text, '').toLowerCase()
+
+  return keywords.reduce(
+    (count, keyword) => count + (normalizedText.includes(normalizeText(keyword, '').toLowerCase()) ? 1 : 0),
+    0
+  )
+}
+
+function hasAnyKeyword(text, keywords = []) {
+  return countKeywordHits(text, keywords) > 0
+}
+
+function getLocaleTemplate(language) {
+  return allowedLanguages.has(normalizeText(language, '').toLowerCase()) ? normalizeText(language, '').toLowerCase() : 'id'
+}
+
+function getLocaleText(language) {
+  return localeTemplates[getLocaleTemplate(language)] ?? localeTemplates.id
+}
+
+function getAssistantLanguageFromText(text, session = null) {
+  const normalizedText = normalizeText(text, '').toLowerCase()
+  const previousLanguage = getLocaleTemplate(session?.pending_payload?.last_language)
+  const previousSummary = normalizeText(session?.pending_payload?.context_summary, '').toLowerCase()
+  const sourceText = [normalizedText, previousSummary].filter(Boolean).join(' ')
+
+  const sundaneseHits = countKeywordHits(sourceText, [
+    'punten',
+    'mangga',
+    'parios',
+    'neangan',
+    'milarian',
+    'tingali',
+    'muka',
+    'acan',
+    'can',
+    'anjeunna',
+    'kuring',
+    'kumaha',
+    'maksudna',
+    'anjeunna',
+    'sabaraha',
+    'anjeunna',
+    'sanes',
+    'beres',
+  ])
+  const indonesianHits = countKeywordHits(sourceText, [
+    'tolong',
+    'mohon',
+    'bantu',
+    'cek',
+    'cari',
+    'temukan',
+    'lihat',
+    'buka',
+    'saya',
+    'maksud',
+    'berapa',
+    'belum',
+    'lunas',
+    'tagihan',
+    'pembayaran',
+  ])
+
+  if (sundaneseHits > indonesianHits && sundaneseHits > 0) {
+    return 'su'
+  }
+
+  if (indonesianHits > sundaneseHits && indonesianHits > 0) {
+    return 'id'
+  }
+
+  return previousLanguage
+}
+
+function isFollowUpLikeText(text) {
+  return hasAnyKeyword(text, followUpSignals)
+}
+
+function hasAssistantTopicHint(text) {
+  return hasAnyKeyword(text, [...assistantTopicSignals, ...payrollScopeKeywords])
+}
+
+function detectClarificationCode(text, session = null) {
+  const normalizedText = normalizeText(text, '').toLowerCase()
+  const hasContextMemory =
+    Boolean(normalizeText(session?.pending_payload?.context_summary, '')) ||
+    Boolean(normalizeText(session?.pending_payload?.last_turn?.user_text, ''))
+
+  if (isFollowUpLikeText(normalizedText) && hasContextMemory) {
+    return 'followup_context'
+  }
+
+  return 'specific_filter'
+}
+
+function buildTurnSummary({ text, plan, language, workspaceName }) {
+  const analyticsPlan = plan?.analytics ?? {}
+  const summaryParts = [
+    `user=${truncateText(text, 120)}`,
+    `intent=${normalizeText(plan?.intent, 'clarify')}`,
+    `lang=${getLocaleTemplate(language)}`,
+    workspaceName ? `workspace=${truncateText(workspaceName, 60)}` : null,
+    normalizeText(plan?.search?.query, '') ? `query=${truncateText(plan.search.query, 80)}` : null,
+    normalizeText(plan?.targetPath, '') ? `path=${normalizeText(plan.targetPath, '')}` : null,
+    normalizeText(analyticsPlan?.metricKey, '') ? `metric=${normalizeText(analyticsPlan.metricKey, '')}` : null,
+    normalizeText(analyticsPlan?.entityType, '') ? `entity=${normalizeText(analyticsPlan.entityType, '')}` : null,
+    normalizeText(analyticsPlan?.entityQuery, '') ? `entity_query=${truncateText(analyticsPlan.entityQuery, 80)}` : null,
+    normalizeText(analyticsPlan?.windowKey, '') ? `window=${normalizeText(analyticsPlan.windowKey, '')}` : null,
+  ].filter(Boolean)
+
+  return summaryParts.join(' | ')
+}
+
+function buildAssistantTurnData({ text, plan = {}, language, workspaceName = null }) {
+  const normalizedLanguage = getLocaleTemplate(language)
+  const normalizedPlan = plan ?? {}
+  const normalizedWorkspaceName = normalizeText(workspaceName, null)
+  const analyticsPlan = normalizedPlan?.analytics ?? {}
+  const analyticsWindowKey = normalizeText(analyticsPlan?.windowKey, 'none')
+  const analyticsMetricKey = normalizeText(analyticsPlan?.metricKey, 'clarify')
+  const entityHints = [
+    ...(Array.isArray(analyticsPlan?.entityHints) ? analyticsPlan.entityHints : []),
+    ...detectEntityTypeHints(
+      [text, normalizedPlan?.search?.query, analyticsPlan?.entityQuery].filter(Boolean).join(' ')
+    ),
+  ]
+    .map((value) => normalizeText(value, ''))
+    .filter(Boolean)
+  const dedupedEntityHints = [...new Set(entityHints)].slice(0, maxAssistantEntityHints)
+
+  return {
+    userText: truncateText(text, 180),
+    intent: normalizeText(normalizedPlan?.intent, 'clarify'),
+    language: normalizedLanguage,
+    workspaceName: normalizedWorkspaceName,
+    targetPath: normalizeAssistantRoutePath(normalizedPlan?.targetPath),
+    query: normalizeText(normalizedPlan?.search?.query, null),
+    metricKey: analyticsMetricKey,
+    entityType: normalizeText(analyticsPlan?.entityType, null),
+    entityQuery: normalizeText(analyticsPlan?.entityQuery, null),
+    entityHints: dedupedEntityHints,
+    windowKey: analyticsWindowKey,
+    summary: buildTurnSummary({
+      text,
+      plan: normalizedPlan,
+      language: normalizedLanguage,
+      workspaceName: normalizedWorkspaceName,
+    }),
+  }
+}
 
 function getEnv(name, fallback = '') {
   return String(globalThis.process?.env?.[name] ?? fallback).trim()
@@ -121,125 +599,6 @@ function createAdminClient(url, serviceRoleKey) {
   })
 }
 
-function buildTelegramApiUrl(botToken, method) {
-  return `https://api.telegram.org/bot${botToken}/${method}`
-}
-
-async function postTelegram(url, body) {
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 8000)
-
-  try {
-    const headers = {
-      Accept: 'application/json',
-      'User-Agent': 'Vercel-Serverless-Function',
-    }
-
-    if (typeof body === 'string') {
-      headers['Content-Type'] = 'application/json'
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      body,
-      signal: controller.signal,
-      headers,
-    })
-    const rawBody = (await response.text()).trim()
-
-    try {
-      return {
-        status: response.status,
-        data: rawBody ? JSON.parse(rawBody) : {},
-      }
-    } catch (error) {
-      throw createHttpError(
-        response.status,
-        error instanceof Error
-          ? `Gagal parse respons Telegram: ${error.message}`
-          : 'Gagal parse respons Telegram.'
-      )
-    }
-  } catch (error) {
-    if (error?.name === 'AbortError') {
-      throw createHttpError(504, 'Request ke Telegram timeout.')
-    }
-
-    throw error instanceof Error
-      ? error
-      : createHttpError(500, 'Terjadi kesalahan saat menghubungi Telegram API.')
-  } finally {
-    clearTimeout(timeoutId)
-  }
-}
-
-function assertTelegramSuccess(response, fallbackMessage) {
-  if (response.status >= 200 && response.status < 300 && response.data?.ok) {
-    return
-  }
-
-  throw createHttpError(
-    response.status,
-    response.data?.description || fallbackMessage || 'Telegram request gagal.'
-  )
-}
-
-async function sendTelegramMessage({
-  botToken,
-  chatId,
-  text,
-  replyMarkup = null,
-  replyToMessageId = null,
-}) {
-  const payload = {
-    chat_id: chatId,
-    text,
-    disable_web_page_preview: true,
-  }
-
-  if (replyMarkup) {
-    payload.reply_markup = replyMarkup
-  }
-
-  if (replyToMessageId) {
-    payload.reply_to_message_id = replyToMessageId
-  }
-
-  const response = await postTelegram(
-    buildTelegramApiUrl(botToken, 'sendMessage'),
-    JSON.stringify(payload)
-  )
-
-  assertTelegramSuccess(response, 'Gagal mengirim pesan Telegram.')
-
-  return response.data
-}
-
-async function answerTelegramCallback({
-  botToken,
-  callbackQueryId,
-  text = null,
-  showAlert = false,
-}) {
-  const payload = {
-    callback_query_id: callbackQueryId,
-    show_alert: Boolean(showAlert),
-  }
-
-  if (text) {
-    payload.text = text
-  }
-
-  const response = await postTelegram(
-    buildTelegramApiUrl(botToken, 'answerCallbackQuery'),
-    JSON.stringify(payload)
-  )
-
-  assertTelegramSuccess(response, 'Gagal menjawab callback Telegram.')
-
-  return response.data
-}
-
 function normalizeTelegramId(value) {
   return normalizeText(value, '')
 }
@@ -249,6 +608,86 @@ function getTelegramBotUsername() {
     getEnv('TELEGRAM_BOT_USERNAME', getEnv('VITE_TELEGRAM_BOT_USERNAME')),
     ''
   )
+}
+
+function escapeRegExp(value) {
+  return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function getTelegramChatType(message) {
+  return normalizeText(message?.chat?.type, '').toLowerCase()
+}
+
+function getTelegramMessageText(message) {
+  return normalizeText(message?.text ?? message?.caption, '')
+}
+
+function isTelegramAssistantMention(messageText, botUsername) {
+  const normalizedBotUsername = normalizeText(botUsername, '').replace(/^@/, '').toLowerCase()
+
+  if (!normalizedBotUsername) {
+    return false
+  }
+
+  const normalizedText = normalizeText(messageText, '').toLowerCase()
+
+  return new RegExp(`(^|\\s)@${escapeRegExp(normalizedBotUsername)}(?:\\b|$)`).test(
+    normalizedText
+  )
+}
+
+function isTelegramAssistantReply(message, botUsername) {
+  const normalizedBotUsername = normalizeText(botUsername, '').replace(/^@/, '').toLowerCase()
+  const repliedFromUsername = normalizeText(message?.reply_to_message?.from?.username, '')
+    .replace(/^@/, '')
+    .toLowerCase()
+
+  if (!normalizedBotUsername || !repliedFromUsername) {
+    return false
+  }
+
+  return repliedFromUsername === normalizedBotUsername
+}
+
+function shouldProcessTelegramMessage({ message, session, botUsername, messageText }) {
+  const chatType = getTelegramChatType(message)
+  const normalizedText = normalizeText(messageText, '')
+  const command = extractAssistantCommand(normalizedText, botUsername)
+  const intent = determineIntentFromText(normalizedText)
+  const hasClarifyHint = hasAssistantTopicHint(normalizedText) || isFollowUpLikeText(normalizedText)
+
+  if (chatType === 'private') {
+    if (session?.state === 'awaiting_workspace_choice' || session?.state === 'awaiting_clarification') {
+      return true
+    }
+
+    if (!normalizedText) {
+      return false
+    }
+
+    if (command) {
+      return true
+    }
+
+    if (intent !== 'clarify') {
+      return true
+    }
+
+    return hasClarifyHint
+  }
+
+  if (chatType === 'group' || chatType === 'supergroup') {
+    if (command) {
+      return true
+    }
+
+    return (
+      isTelegramAssistantReply(message, botUsername) ||
+      isTelegramAssistantMention(normalizedText, botUsername)
+    )
+  }
+
+  return false
 }
 
 function isWebhookSecretEnabled() {
@@ -335,9 +774,7 @@ function normalizeSessionRow(row) {
     team_id: normalizeText(row?.team_id, null),
     state,
     pending_intent: normalizeText(row?.pending_intent, null),
-    pending_payload: row?.pending_payload && typeof row.pending_payload === 'object'
-      ? row.pending_payload
-      : {},
+    pending_payload: normalizeAssistantPendingPayload(row?.pending_payload),
     expires_at: normalizeText(row?.expires_at, null),
     created_at: normalizeText(row?.created_at, null),
     updated_at: normalizeText(row?.updated_at, null),
@@ -397,8 +834,7 @@ async function saveAssistantSession(
   const normalizedTeamId = normalizeTelegramId(teamId)
   const normalizedState = isSessionState(state) ? normalizeText(state, 'idle') : 'idle'
   const normalizedPendingIntent = normalizeText(pendingIntent, null)
-  const normalizedPayload =
-    pendingPayload && typeof pendingPayload === 'object' ? pendingPayload : {}
+  const normalizedPayload = normalizeAssistantPendingPayload(pendingPayload)
   const normalizedExpiresAt = normalizeText(
     expiresAt,
     new Date(Date.now() + 30 * 60 * 1000).toISOString()
@@ -447,8 +883,9 @@ async function clearAssistantSession(adminClient, chatId) {
   }
 }
 
-function buildWorkspaceChoiceMessage(memberships) {
-  const lines = ['Saya menemukan beberapa workspace aktif. Pilih workspace yang dipakai:']
+function buildWorkspaceChoiceMessage(memberships, language = 'id') {
+  const locale = getLocaleText(language)
+  const lines = [locale.workspaceChoiceIntro]
 
   memberships.forEach((membership, index) => {
     const roleLabel = membership.role ? ` - ${membership.role}` : ''
@@ -457,7 +894,7 @@ function buildWorkspaceChoiceMessage(memberships) {
     lines.push(`${index + 1}. ${membership.team_name ?? 'Workspace'}${roleLabel}${defaultLabel}`)
   })
 
-  lines.push('Kirim angka, nama workspace, atau tekan tombol pilihan di bawah.')
+  lines.push(locale.workspaceChoiceHint)
 
   return lines.join('\n')
 }
@@ -473,57 +910,50 @@ function buildWorkspaceChoiceMarkup(memberships) {
   return rows.length > 0 ? { inline_keyboard: rows } : null
 }
 
-function getAllowedBotProviderConfig() {
-  const configuredProvider = normalizeText(
-    getEnv('TELEGRAM_ASSISTANT_LLM_PROVIDER', getEnv('ASSISTANT_LLM_PROVIDER')),
+function getAllowedBotProviderConfigs() {
+  const geminiApiKey = normalizeText(
+    getEnv('TELEGRAM_ASSISTANT_GEMINI_API_KEY', getEnv('GEMINI_API_KEY')),
     ''
-  ).toLowerCase()
+  )
+  const geminiModel = normalizeText(
+    getEnv('TELEGRAM_ASSISTANT_GEMINI_MODEL', getEnv('GEMINI_MODEL')),
+    ''
+  )
+  const xaiApiKey = normalizeText(
+    getEnv('TELEGRAM_ASSISTANT_XAI_API_KEY', getEnv('XAI_API_KEY')),
+    ''
+  )
+  const xaiModel = normalizeText(
+    getEnv('TELEGRAM_ASSISTANT_XAI_MODEL', getEnv('XAI_MODEL')),
+    ''
+  )
+  const providerConfigs = []
 
-  const providerCandidates =
-    configuredProvider === 'gemini'
-      ? ['gemini']
-      : configuredProvider === 'xai'
-        ? ['xai']
-        : ['xai', 'gemini']
-
-  for (const provider of providerCandidates) {
-    if (provider === 'xai') {
-      const apiKey = normalizeText(
-        getEnv('TELEGRAM_ASSISTANT_XAI_API_KEY', getEnv('XAI_API_KEY')),
-        ''
-      )
-      const model = normalizeText(
-        getEnv('TELEGRAM_ASSISTANT_XAI_MODEL', getEnv('XAI_MODEL')),
-        ''
-      )
-
-      if (apiKey && model) {
-        return { provider, apiKey, model }
-      }
-    }
-
-    if (provider === 'gemini') {
-      const apiKey = normalizeText(
-        getEnv('TELEGRAM_ASSISTANT_GEMINI_API_KEY', getEnv('GEMINI_API_KEY')),
-        ''
-      )
-      const model = normalizeText(
-        getEnv('TELEGRAM_ASSISTANT_GEMINI_MODEL', getEnv('GEMINI_MODEL')),
-        ''
-      )
-
-      if (apiKey && model) {
-        return { provider, apiKey, model }
-      }
-    }
+  if (geminiApiKey && geminiModel) {
+    providerConfigs.push({
+      provider: 'gemini',
+      apiKey: geminiApiKey,
+      model: geminiModel,
+    })
   }
 
-  return null
+  if (xaiApiKey && xaiModel) {
+    providerConfigs.push({
+      provider: 'xai',
+      apiKey: xaiApiKey,
+      model: xaiModel,
+    })
+  }
+
+  return providerConfigs
 }
 
-async function postAssistantClassifierPrompt(providerConfig, promptText) {
+async function postAssistantModelPrompt(
+  providerConfig,
+  { promptText, systemMessage, temperature = 0, maxOutputTokens = 512 }
+) {
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 8000)
+  const timeoutId = setTimeout(() => controller.abort(), 15000)
 
   try {
     if (providerConfig.provider === 'xai') {
@@ -537,12 +967,12 @@ async function postAssistantClassifierPrompt(providerConfig, promptText) {
         },
         body: JSON.stringify({
           model: providerConfig.model,
-          temperature: 0,
-          max_tokens: 512,
+          temperature,
+          max_tokens: maxOutputTokens,
           messages: [
             {
               role: 'system',
-              content: 'Kamu adalah classifier JSON untuk Telegram assistant finance core yang read-only.',
+              content: systemMessage,
             },
             {
               role: 'user',
@@ -577,12 +1007,12 @@ async function postAssistantClassifierPrompt(providerConfig, promptText) {
             contents: [
               {
                 role: 'user',
-                parts: [{ text: promptText }],
+                parts: [{ text: `${systemMessage}\n\n${promptText}` }],
               },
             ],
             generationConfig: {
-              temperature: 0,
-              maxOutputTokens: 512,
+              temperature,
+              maxOutputTokens,
             },
           }),
         }
@@ -612,6 +1042,25 @@ async function postAssistantClassifierPrompt(providerConfig, promptText) {
   }
 }
 
+async function postAssistantClassifierPrompt(providerConfig, promptText) {
+  return postAssistantModelPrompt(providerConfig, {
+    promptText,
+    systemMessage: 'Kamu adalah classifier JSON untuk Telegram assistant finance core yang read-only.',
+    temperature: 0,
+    maxOutputTokens: 512,
+  })
+}
+
+async function postAssistantWriterPrompt(providerConfig, promptText) {
+  return postAssistantModelPrompt(providerConfig, {
+    promptText,
+    systemMessage:
+      'Kamu adalah penulis jawaban Telegram untuk assistant finance core yang read-only. Ubah fakta terstruktur menjadi balasan natural language yang singkat, jelas, dan tidak mengarang data baru. Jangan menambah angka, nama, tanggal, atau aksi yang tidak ada di fact packet. Jika data kurang, ajukan satu klarifikasi singkat. Kembalikan JSON valid dengan shape {"text":"...","language":"id|su"}.',
+    temperature: 0.2,
+    maxOutputTokens: 256,
+  })
+}
+
 function extractJsonObject(text) {
   const normalizedText = normalizeText(text, '')
 
@@ -634,6 +1083,129 @@ function extractJsonObject(text) {
   } catch {
     return null
   }
+}
+
+function extractNumericTokens(text) {
+  return [...normalizeText(text, '').matchAll(/\b\d[\d.,]*\b/g)].map((match) => match[0])
+}
+
+function buildAssistantResponseFactPacket({
+  plan,
+  reply,
+  workspaceName = null,
+  session = null,
+}) {
+  const fallbackText = normalizeText(reply?.text, '')
+  const sessionPayload = normalizeAssistantPendingPayload(session?.pending_payload)
+  const replyFacts = reply?.facts && typeof reply.facts === 'object' ? reply.facts : {}
+  const rawButtons = Array.isArray(reply?.buttonRows) && reply.buttonRows.length > 0
+    ? reply.buttonRows.flat()
+    : Array.isArray(reply?.buttons)
+      ? reply.buttons
+      : []
+  const buttons = rawButtons.map((button) => ({
+        text: normalizeText(button?.text, ''),
+        path: normalizeText(button?.path, ''),
+        callbackData: normalizeText(button?.callbackData, ''),
+      }))
+
+  return {
+    intent: normalizeText(plan?.intent, 'clarify'),
+    language: normalizeText(plan?.language, 'id'),
+    workspaceName: normalizeText(workspaceName, ''),
+    clarificationCode: normalizeText(plan?.clarificationCode, ''),
+    replyType: reply?.needsClarification ? 'clarify' : normalizeText(plan?.intent, 'clarify'),
+    fallbackText,
+    buttons,
+    facts: replyFacts,
+    context: {
+      summary: normalizeText(sessionPayload.summary, ''),
+      lastTurn: normalizeText(sessionPayload.last_turn?.user_text, ''),
+      lastIntent: normalizeText(sessionPayload.last_intent, ''),
+      lastRoute: normalizeText(sessionPayload.last_route, ''),
+      entityHints: sessionPayload.entity_hints ?? [],
+      transcript: sessionPayload.transcript ?? [],
+      lastAnalytics: sessionPayload.last_turn?.analytics ?? null,
+      sessionState: normalizeText(session?.state, 'idle'),
+    },
+  }
+}
+
+function buildAssistantResponsePrompt(factPacket) {
+  return [
+    'Ubah fact packet Telegram assistant ini menjadi jawaban natural language yang singkat, jelas, dan tetap read-only.',
+    'Aturan wajib:',
+    '- Jangan menambah angka, nama, tanggal, entity, atau aksi yang tidak ada di fact packet.',
+    '- Pertahankan semua angka sebagai digit yang sama persis jika disebut ulang.',
+    '- Jika fact packet meminta klarifikasi, ajukan satu pertanyaan singkat dan spesifik.',
+    '- Jika fact packet berisi jawaban final, jawab langsung tanpa menjelaskan proses internal.',
+    '- Bahasa jawaban harus mengikuti field language.',
+    '- Kembalikan JSON valid dengan shape {"text":"...","language":"id|su"}.',
+    `Fact packet:\n${JSON.stringify(factPacket, null, 2)}`,
+  ].join('\n')
+}
+
+function isAssistantResponseSafe(candidateText, factPacket) {
+  const normalizedText = normalizeText(candidateText, '')
+
+  if (!normalizedText) {
+    return false
+  }
+
+  if (normalizedText.length > 700) {
+    return false
+  }
+
+  const allowedNumbers = new Set(
+    [
+      ...extractNumericTokens(JSON.stringify(factPacket ?? {})),
+      ...extractNumericTokens(normalizeText(factPacket?.fallbackText, '')),
+    ].filter(Boolean)
+  )
+  const candidateNumbers = extractNumericTokens(normalizedText)
+
+  return candidateNumbers.every((numberToken) => allowedNumbers.has(numberToken))
+}
+
+async function rewriteAssistantReply({
+  plan,
+  reply,
+  workspaceName = null,
+  session = null,
+  providerConfigs = getAllowedBotProviderConfigs(),
+}) {
+  const fallbackText = normalizeText(reply?.text, '')
+
+  if (!fallbackText || providerConfigs.length === 0) {
+    return fallbackText
+  }
+
+  const factPacket = buildAssistantResponseFactPacket({
+    plan,
+    reply,
+    workspaceName,
+    session,
+  })
+  const prompt = buildAssistantResponsePrompt(factPacket)
+
+  for (const providerConfig of providerConfigs) {
+    try {
+      const responseText = await postAssistantWriterPrompt(providerConfig, prompt)
+      const parsedResponse = extractJsonObject(responseText)
+      const candidateText = normalizeText(parsedResponse?.text, '')
+
+      if (candidateText && isAssistantResponseSafe(candidateText, factPacket)) {
+        return candidateText
+      }
+    } catch (error) {
+      console.error('[api/telegram-assistant] writer failed', {
+        message: error instanceof Error ? error.message : String(error),
+        provider: providerConfig.provider,
+      })
+    }
+  }
+
+  return fallbackText
 }
 
 function normalizeMoneyText(value) {
@@ -744,12 +1316,32 @@ function getMonthRange(dateKey, offsetMonths = 0) {
   }
 }
 
-function extractRelativeDateRange(text) {
+function getCalendarWeekRange(dateKey, offsetWeeks = 0) {
+  const parsedDate = new Date(`${String(dateKey ?? '').trim()}T12:00:00Z`)
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null
+  }
+
+  const dayOffset = (parsedDate.getUTCDay() + 6) % 7
+  const startDate = new Date(parsedDate)
+  startDate.setUTCDate(parsedDate.getUTCDate() - dayOffset + offsetWeeks * 7)
+  const endDate = new Date(startDate)
+  endDate.setUTCDate(startDate.getUTCDate() + 6)
+
+  return {
+    dateFrom: getAppTodayKey(startDate),
+    dateTo: getAppTodayKey(endDate),
+  }
+}
+
+function extractTimeWindowRange(text) {
   const normalizedText = normalizeText(text, '').toLowerCase()
   const todayKey = getAppTodayKey()
 
   if (normalizedText.includes('hari ini')) {
     return {
+      windowKey: 'today',
       dateFrom: todayKey,
       dateTo: todayKey,
     }
@@ -759,34 +1351,74 @@ function extractRelativeDateRange(text) {
     const yesterdayKey = shiftAppDateKey(todayKey, -1)
 
     return {
+      windowKey: 'yesterday',
       dateFrom: yesterdayKey,
       dateTo: yesterdayKey,
     }
   }
 
   if (normalizedText.includes('minggu ini')) {
-    return {
-      dateFrom: shiftAppDateKey(todayKey, -6),
-      dateTo: todayKey,
-    }
+    const weekRange = getCalendarWeekRange(todayKey, 0)
+
+    return weekRange
+      ? {
+          windowKey: 'week_current',
+          dateFrom: weekRange.dateFrom,
+          dateTo: weekRange.dateTo,
+        }
+      : null
   }
 
   if (normalizedText.includes('minggu lalu')) {
-    return {
-      dateFrom: shiftAppDateKey(todayKey, -13),
-      dateTo: shiftAppDateKey(todayKey, -7),
-    }
+    const weekRange = getCalendarWeekRange(todayKey, -1)
+
+    return weekRange
+      ? {
+          windowKey: 'week_previous',
+          dateFrom: weekRange.dateFrom,
+          dateTo: weekRange.dateTo,
+        }
+      : null
   }
 
   if (normalizedText.includes('bulan ini')) {
-    return getMonthRange(todayKey, 0)
+    const monthRange = getMonthRange(todayKey, 0)
+
+    return monthRange
+      ? {
+          windowKey: 'month_current',
+          dateFrom: monthRange.dateFrom,
+          dateTo: monthRange.dateTo,
+        }
+      : null
   }
 
   if (normalizedText.includes('bulan lalu')) {
-    return getMonthRange(todayKey, -1)
+    const monthRange = getMonthRange(todayKey, -1)
+
+    return monthRange
+      ? {
+          windowKey: 'month_previous',
+          dateFrom: monthRange.dateFrom,
+          dateTo: monthRange.dateTo,
+        }
+      : null
   }
 
   return null
+}
+
+function extractRelativeDateRange(text) {
+  const windowRange = extractTimeWindowRange(text)
+
+  if (!windowRange) {
+    return null
+  }
+
+  return {
+    dateFrom: windowRange.dateFrom,
+    dateTo: windowRange.dateTo,
+  }
 }
 
 function extractStatusFilter(text) {
@@ -858,31 +1490,290 @@ function extractUuid(text) {
   return match ? match[0].toLowerCase() : null
 }
 
+function detectEntityTypeHints(text) {
+  const normalizedText = normalizeText(text, '').toLowerCase()
+  const hints = []
+
+  if (
+    /\b(worker|pekerja|karyawan|absensi|attendance|gaji|upah|salary|payroll)\b/.test(
+      normalizedText
+    )
+  ) {
+    hints.push('worker')
+  }
+
+  if (/\b(supplier|toko|vendor|material|barang|faktur|invoice)\b/.test(normalizedText)) {
+    hints.push('supplier')
+  }
+
+  if (/\b(creditor|kreditur|hutang|utang|pinjaman|loan|nginjeum)\b/.test(normalizedText)) {
+    hints.push('creditor')
+  }
+
+  return [...new Set(hints)]
+}
+
+function extractEntityTypeFromText(text, metricKey = null) {
+  const normalizedText = normalizeText(text, '').toLowerCase()
+  const hints = detectEntityTypeHints(normalizedText)
+
+  if (hints.length === 1) {
+    return {
+      entityType: hints[0],
+      entityConfidence: 0.95,
+      entityHints: hints,
+    }
+  }
+
+  if (hints.length > 1) {
+    return {
+      entityType: null,
+      entityConfidence: 0.25,
+      entityHints: hints,
+    }
+  }
+
+  if (metricKey === 'attendance_present') {
+    return {
+      entityType: 'worker',
+      entityConfidence: 0.9,
+      entityHints: ['worker'],
+    }
+  }
+
+  if (metricKey === 'obligation_ranking' && /\b(hutang|utang|pinjaman|loan)\b/.test(normalizedText)) {
+    return {
+      entityType: 'creditor',
+      entityConfidence: 0.8,
+      entityHints: ['creditor'],
+    }
+  }
+
+  if (metricKey === 'bill_summary' && /\b(creditor|kreditur|hutang|utang|pinjaman|loan)\b/.test(normalizedText)) {
+    return {
+      entityType: 'creditor',
+      entityConfidence: 0.8,
+      entityHints: ['creditor'],
+    }
+  }
+
+  if (metricKey === 'bill_summary' && /\b(gaji|upah|worker|pekerja|absensi|attendance)\b/.test(normalizedText)) {
+    return {
+      entityType: 'worker',
+      entityConfidence: 0.8,
+      entityHints: ['worker'],
+    }
+  }
+
+  if (metricKey === 'bill_summary' && /\b(supplier|toko|vendor|material|barang|invoice|faktur)\b/.test(normalizedText)) {
+    return {
+      entityType: 'supplier',
+      entityConfidence: 0.8,
+      entityHints: ['supplier'],
+    }
+  }
+
+  return {
+    entityType: null,
+    entityConfidence: metricKey === 'cash_outflow' ? 1 : 0.5,
+    entityHints: [],
+  }
+}
+
+function extractAnalyticsMetricCandidates(text) {
+  const normalizedText = normalizeText(text, '').toLowerCase()
+  const candidates = []
+
+  if (
+    /(\b(cek|lihat|tampilkan|tinjau|ringkas|rekap|data|total|nominal|sisa|saldo|jumlah|berapa)\b.*\b(tagihan|hutang|utang)\b)|(\b(tagihan|hutang|utang)\b.*\b(cek|lihat|tampilkan|tinjau|ringkas|rekap|data|total|nominal|sisa|saldo|jumlah|berapa)\b)/.test(
+      normalizedText
+    )
+  ) {
+    candidates.push('bill_summary')
+  }
+
+  if (/\b(pengeluaran|outflow|biaya keluar|keluar)\b/.test(normalizedText)) {
+    candidates.push('cash_outflow')
+  }
+
+  if (
+    /(\b(jumlah|berapa|total|cek|lihat|tampilkan)\b.*\b(pekerja|worker|karyawan|hadir|absensi|attendance|kehadiran)\b)|(\b(hadir|absen|absensi|kehadiran)\b.*\b(hari ini|kemarin|minggu ini|minggu lalu|bulan ini|bulan lalu)\b)/.test(
+      normalizedText
+    )
+  ) {
+    candidates.push('attendance_present')
+  }
+
+  if (
+    /(\b(siapa|mana|yang)\b.*\b(terbesar|paling besar|tertinggi|terbanyak|terbanyak|terluas)\b)|(\b(terbesar|paling besar|tertinggi|terbanyak)\b.*\b(hutang|utang|pinjaman|tagihan)\b)/.test(
+      normalizedText
+    )
+  ) {
+    candidates.push('obligation_ranking')
+  }
+
+  return [...new Set(candidates)]
+}
+
+function buildAnalyticsWindowLabel(windowKey, dateFrom = null, dateTo = null) {
+  const normalizedWindowKey = normalizeText(windowKey, 'none').toLowerCase()
+
+  if (normalizedWindowKey === 'today') {
+    return 'hari ini'
+  }
+
+  if (normalizedWindowKey === 'yesterday') {
+    return 'kemarin'
+  }
+
+  if (normalizedWindowKey === 'week_current') {
+    return 'minggu ini'
+  }
+
+  if (normalizedWindowKey === 'week_previous') {
+    return 'minggu lalu'
+  }
+
+  if (normalizedWindowKey === 'month_current') {
+    return 'bulan ini'
+  }
+
+  if (normalizedWindowKey === 'month_previous') {
+    return 'bulan lalu'
+  }
+
+  if (dateFrom && dateTo) {
+    if (dateFrom === dateTo) {
+      return formatDateLabel(dateFrom)
+    }
+
+    return `${formatDateLabel(dateFrom)} - ${formatDateLabel(dateTo)}`
+  }
+
+  return 'periode ini'
+}
+
+function analyticsRequiresWindow(metricKey) {
+  return ['cash_outflow', 'attendance_present'].includes(normalizeText(metricKey, '').toLowerCase())
+}
+
+function analyticsRequiresEntity(metricKey) {
+  return normalizeText(metricKey, '').toLowerCase() === 'obligation_ranking'
+}
+
+function normalizeAnalyticsEntityQuery(text) {
+  const query = buildSearchQueryText(text)
+
+  return query ? query : null
+}
+
+function buildAnalyticsPlan(text, context = {}) {
+  const normalizedText = normalizeText(text, '')
+  const lowerText = normalizedText.toLowerCase()
+  const metricCandidates = extractAnalyticsMetricCandidates(lowerText)
+  const metricKey = metricCandidates[0] ?? null
+  const windowRange = extractTimeWindowRange(lowerText)
+  const entityProfile = extractEntityTypeFromText(normalizedText, metricKey)
+  const entityQuery = normalizeAnalyticsEntityQuery(normalizedText)
+  const metricConfidence = metricCandidates.length === 1 ? 1 : metricCandidates.length > 1 ? 0.55 : 0.25
+  const entityConfidence = entityProfile.entityConfidence ?? 0.5
+  const windowKey = normalizeText(windowRange?.windowKey, 'none').toLowerCase()
+  const requiresWindow = analyticsRequiresWindow(metricKey)
+  const requiresEntity = analyticsRequiresEntity(metricKey)
+  let clarificationCode = detectClarificationCode(normalizedText, context.session ?? null)
+
+  if (metricCandidates.length > 1) {
+    clarificationCode = 'analytics_metric'
+  } else if (metricKey && requiresEntity && !entityProfile.entityType) {
+    clarificationCode = 'analytics_entity'
+  } else if (metricKey && requiresWindow && windowKey === 'none') {
+    clarificationCode = 'analytics_window'
+  }
+
+  return {
+    metricCandidates,
+    metricKey,
+    windowKey,
+    dateFrom: normalizeNullableText(windowRange?.dateFrom),
+    dateTo: normalizeNullableText(windowRange?.dateTo),
+    entityType: entityProfile.entityType,
+    entityConfidence,
+    entityHints: entityProfile.entityHints ?? [],
+    entityQuery,
+    metricConfidence,
+    requiresWindow,
+    requiresEntity,
+    clarificationCode,
+    needsClarification:
+      metricCandidates.length > 1 ||
+      (metricKey && requiresEntity && !entityProfile.entityType) ||
+      (metricKey && requiresWindow && windowKey === 'none'),
+  }
+}
+
 function determineIntentFromText(text) {
   const normalizedText = normalizeText(text, '').toLowerCase()
   const hasMutation = mutationKeywords.some((keyword) => normalizedText.includes(keyword))
-  const hasPayrollKeyword = payrollScopeKeywords.some((keyword) =>
-    normalizedText.includes(keyword)
-  )
+  const analyticsPlan = buildAnalyticsPlan(normalizedText)
   const routeKeyword = extractRouteKeyword(normalizedText)
   const exactId = extractUuid(normalizedText)
   const hasSearchSignal = Boolean(
     exactId ||
-      /\b(cari|search|temukan|nominal|tanggal|id|kode|nama|berapa|sisa|lunas|partial)\b/.test(
-        normalizedText
-      )
+      hasAnyKeyword(normalizedText, [
+        'cari',
+        'search',
+        'temukan',
+        'neangan',
+        'milarian',
+        'nominal',
+        'jumlah',
+        'tanggal',
+        'id',
+        'kode',
+        'nama',
+        'sabaraha',
+        'berapa',
+        'sisa',
+        'lunas',
+        'partial',
+        'detil',
+        'detail',
+        'rincian',
+      ])
   )
   const hasStatusSignal = Boolean(
-    /\b(status|cek|belum lunas|unpaid|paid|partial|outstanding|tersisa)\b/.test(
-      normalizedText
-    ) || /\b(tagihan|pembayaran|pinjaman)\b/.test(normalizedText)
+    hasAnyKeyword(normalizedText, [
+      'status',
+      'cek',
+      'parios',
+      'belum lunas',
+      'unpaid',
+      'paid',
+      'partial',
+      'outstanding',
+      'tersisa',
+      'acan lunas',
+      'can lunas',
+      'acan dibayar',
+      'can dibayar',
+      'tagihan',
+      'pembayaran',
+      'pinjaman',
+      'hutang',
+      'utang',
+    ])
   )
   const hasNavigateSignal = Boolean(
-    /\b(buka|lihat|menu|masuk|ke)\b/.test(normalizedText) && routeKeyword
+    hasAnyKeyword(normalizedText, ['buka', 'lihat', 'tingali', 'muka', 'menu', 'masuk', 'ke']) &&
+      routeKeyword
   )
 
-  if (hasMutation || (hasPayrollKeyword && !/\b(pembayaran|jurnal|tagihan|pinjaman)\b/.test(normalizedText))) {
+  if (hasMutation) {
     return 'refuse'
+  }
+
+  if (analyticsPlan.metricKey) {
+    return 'analytics'
   }
 
   if (hasNavigateSignal) {
@@ -904,7 +1795,7 @@ function determineIntentFromText(text) {
   return 'clarify'
 }
 
-function buildDeterministicPlan(text) {
+function buildDeterministicPlan(text, context = {}) {
   const normalizedText = normalizeText(text, '')
   const lowerText = normalizedText.toLowerCase()
   const routeKeyword = extractRouteKeyword(lowerText)
@@ -916,7 +1807,12 @@ function buildDeterministicPlan(text) {
   const status = extractStatusFilter(lowerText)
   const kind = extractKindFilter(lowerText)
   const amount = parseFlexibleAmount(lowerText)
-  const intent = determineIntentFromText(lowerText)
+  const analytics = buildAnalyticsPlan(normalizedText, context)
+  const intent = analytics.metricKey ? 'analytics' : determineIntentFromText(lowerText)
+  const language = getAssistantLanguageFromText(normalizedText, context.session ?? null)
+  const clarificationCode = analytics.metricKey
+    ? analytics.clarificationCode
+    : detectClarificationCode(normalizedText, context.session ?? null)
 
   let targetPath = null
 
@@ -952,9 +1848,9 @@ function buildDeterministicPlan(text) {
       intent: 'clarify',
       targetPath: null,
       search,
-      question:
-        'Saya butuh filter yang lebih spesifik: ID, nama proyek/supplier, nominal, tanggal, atau status.',
-      reason: null,
+      language,
+      clarificationCode,
+      analytics,
     }
   }
 
@@ -962,20 +1858,21 @@ function buildDeterministicPlan(text) {
     intent,
     targetPath: normalizeAssistantRoutePath(targetPath),
     search,
-    question: null,
-    reason: null,
+    analytics,
+    language,
+    clarificationCode,
   }
 }
 
-function normalizePlannerObject(rawObject, fallbackText) {
+function normalizePlannerObject(rawObject, fallbackText, context = {}) {
   if (!rawObject || typeof rawObject !== 'object') {
-    return buildDeterministicPlan(fallbackText)
+    return buildDeterministicPlan(fallbackText, context)
   }
 
   const normalizedIntent = normalizeText(rawObject.intent, '').toLowerCase()
   const intent = allowedIntents.has(normalizedIntent)
     ? normalizedIntent
-    : buildDeterministicPlan(fallbackText).intent
+    : buildDeterministicPlan(fallbackText, context).intent
   const targetPath = normalizeAssistantRoutePath(rawObject.targetPath)
   const rawSearch = rawObject.search && typeof rawObject.search === 'object' ? rawObject.search : {}
   const exactId = extractUuid(rawSearch.exactId ?? rawSearch.id ?? rawObject.exactId ?? '')
@@ -998,8 +1895,16 @@ function normalizePlannerObject(rawObject, fallbackText) {
   const dateTo = normalizeNullableText(
     rawSearch.dateTo ?? rawObject.dateTo ?? rawSearch.to ?? rawObject.to
   )
-  const question = normalizeNullableText(rawObject.question ?? rawObject.clarificationQuestion)
-  const reason = normalizeNullableText(rawObject.reason ?? rawObject.refusalReason)
+  const language = allowedLanguages.has(
+    normalizeText(rawObject.language ?? rawObject.languageHint, '').toLowerCase()
+  )
+    ? normalizeText(rawObject.language ?? rawObject.languageHint, '').toLowerCase()
+    : buildDeterministicPlan(fallbackText, context).language
+  const clarificationCode = ['specific_filter', 'followup_context'].includes(
+    normalizeText(rawObject.clarificationCode ?? rawObject.clarification_type, '').toLowerCase()
+  )
+    ? normalizeText(rawObject.clarificationCode ?? rawObject.clarification_type, '').toLowerCase()
+    : buildDeterministicPlan(fallbackText, context).clarificationCode
   const query = buildSearchQueryText(
     normalizeText(
       rawSearch.query ?? rawSearch.text ?? rawObject.query ?? rawObject.text ?? fallbackText,
@@ -1019,12 +1924,254 @@ function normalizePlannerObject(rawObject, fallbackText) {
       dateFrom,
       dateTo,
     },
-    question,
-    reason,
+    language,
+    clarificationCode,
   }
 }
 
-function buildClassificationPrompt({ text, workspaceName, role, membershipsCount }) {
+function normalizePlannerObjectV2(rawObject, fallbackText, context = {}) {
+  const fallbackPlan = normalizePlannerObject(rawObject, fallbackText, context)
+
+  if (!rawObject || typeof rawObject !== 'object') {
+    return fallbackPlan
+  }
+
+  const normalizedIntent = normalizeText(rawObject.intent, '').toLowerCase()
+  const intent = allowedIntents.has(normalizedIntent) ? normalizedIntent : fallbackPlan.intent
+  const fallbackAnalytics = fallbackPlan.analytics ?? {}
+  const targetPath = normalizeAssistantRoutePath(rawObject.targetPath) ?? fallbackPlan.targetPath
+  const rawSearch = rawObject.search && typeof rawObject.search === 'object' ? rawObject.search : {}
+  const rawAnalytics =
+    rawObject.analytics && typeof rawObject.analytics === 'object' ? rawObject.analytics : {}
+  const exactId = extractUuid(rawSearch.exactId ?? rawSearch.id ?? rawObject.exactId ?? '')
+  const status = allowedStatuses.has(
+    normalizeText(rawSearch.status ?? rawObject.status, 'any').toLowerCase()
+  )
+    ? normalizeText(rawSearch.status ?? rawObject.status, 'any').toLowerCase()
+    : fallbackPlan.search?.status ?? 'any'
+  const kind = allowedKinds.has(
+    normalizeText(rawSearch.kind ?? rawObject.kind, 'all').toLowerCase()
+  )
+    ? normalizeText(rawSearch.kind ?? rawObject.kind, 'all').toLowerCase()
+    : fallbackPlan.search?.kind ?? 'all'
+  const amount = parseFlexibleAmount(normalizeText(rawSearch.amount ?? rawObject.amount, ''))
+  const dateFrom = normalizeNullableText(
+    rawSearch.dateFrom ?? rawObject.dateFrom ?? rawSearch.from ?? fallbackPlan.search?.dateFrom
+  )
+  const dateTo = normalizeNullableText(
+    rawSearch.dateTo ?? rawObject.dateTo ?? rawSearch.to ?? fallbackPlan.search?.dateTo
+  )
+  const language = allowedLanguages.has(
+    normalizeText(rawObject.language ?? rawObject.languageHint, '').toLowerCase()
+  )
+    ? normalizeText(rawObject.language ?? rawObject.languageHint, '').toLowerCase()
+    : fallbackPlan.language
+  const clarificationCode = allowedClarificationCodes.has(
+    normalizeText(rawObject.clarificationCode ?? rawObject.clarification_type, '').toLowerCase()
+  )
+    ? normalizeText(rawObject.clarificationCode ?? rawObject.clarification_type, '').toLowerCase()
+    : fallbackPlan.clarificationCode
+  const query = buildSearchQueryText(
+    normalizeText(
+      rawSearch.query ?? rawSearch.text ?? rawObject.query ?? rawObject.text ?? fallbackText,
+      fallbackText
+    )
+  )
+  const analyticsMetricKey = allowedAnalyticsMetricKeys.has(
+    normalizeText(
+      rawAnalytics.metricKey ?? rawObject.metricKey ?? fallbackAnalytics.metricKey,
+      ''
+    ).toLowerCase()
+  )
+    ? normalizeText(
+        rawAnalytics.metricKey ?? rawObject.metricKey ?? fallbackAnalytics.metricKey,
+        ''
+      ).toLowerCase()
+    : fallbackAnalytics.metricKey ?? null
+  const analyticsEntityType = allowedAnalyticsEntityTypes.has(
+    normalizeText(
+      rawAnalytics.entityType ?? rawObject.entityType ?? fallbackAnalytics.entityType,
+      ''
+    ).toLowerCase()
+  )
+    ? normalizeText(
+        rawAnalytics.entityType ?? rawObject.entityType ?? fallbackAnalytics.entityType,
+        ''
+      ).toLowerCase()
+    : fallbackAnalytics.entityType ?? null
+  const analyticsWindowKey = allowedAnalyticsWindows.has(
+    normalizeText(
+      rawAnalytics.windowKey ?? rawObject.windowKey ?? fallbackAnalytics.windowKey,
+      'none'
+    ).toLowerCase()
+  )
+    ? normalizeText(
+        rawAnalytics.windowKey ?? rawObject.windowKey ?? fallbackAnalytics.windowKey,
+        'none'
+      ).toLowerCase()
+    : fallbackAnalytics.windowKey ?? 'none'
+  const analyticsDateFrom = normalizeNullableText(
+    rawAnalytics.dateFrom ??
+      rawObject.analyticsDateFrom ??
+      rawObject.from ??
+      fallbackAnalytics.dateFrom ??
+      dateFrom
+  )
+  const analyticsDateTo = normalizeNullableText(
+    rawAnalytics.dateTo ??
+      rawObject.analyticsDateTo ??
+      rawObject.to ??
+      fallbackAnalytics.dateTo ??
+      dateTo
+  )
+  const analyticsEntityQuery = normalizeAnalyticsEntityQuery(
+    rawAnalytics.entityQuery ??
+      rawAnalytics.query ??
+      rawObject.entityQuery ??
+      rawObject.entityName ??
+      query ??
+      fallbackAnalytics.entityQuery ??
+      ''
+  )
+  const analyticsEntityConfidence = Number(
+    rawAnalytics.entityConfidence ?? rawObject.entityConfidence ?? fallbackAnalytics.entityConfidence
+  )
+  const analyticsMetricConfidence = Number(
+    rawAnalytics.metricConfidence ?? rawObject.metricConfidence ?? fallbackAnalytics.metricConfidence
+  )
+  const analyticsEntityHints = Array.isArray(rawAnalytics.entityHints)
+    ? rawAnalytics.entityHints
+    : Array.isArray(rawObject.entityHints)
+      ? rawObject.entityHints
+      : fallbackAnalytics.entityHints ?? []
+  const analyticsMetricCandidates = Array.isArray(rawAnalytics.metricCandidates)
+    ? rawAnalytics.metricCandidates
+    : Array.isArray(rawObject.metricCandidates)
+      ? rawObject.metricCandidates
+      : fallbackAnalytics.metricCandidates ?? []
+  const analyticsNeedsClarification =
+    Boolean(rawAnalytics.needsClarification ?? rawObject.needsClarification) ||
+    Boolean(fallbackAnalytics.needsClarification)
+
+  return {
+    intent,
+    targetPath,
+    search: {
+      query,
+      exactId,
+      status,
+      kind,
+      amount,
+      dateFrom,
+      dateTo,
+    },
+    analytics: {
+      metricKey: analyticsMetricKey,
+      entityType: analyticsEntityType,
+      entityQuery: analyticsEntityQuery,
+      entityConfidence: Number.isFinite(analyticsEntityConfidence)
+        ? analyticsEntityConfidence
+        : fallbackAnalytics.entityConfidence ?? 0,
+      metricConfidence: Number.isFinite(analyticsMetricConfidence)
+        ? analyticsMetricConfidence
+        : fallbackAnalytics.metricConfidence ?? 0,
+      windowKey: analyticsWindowKey,
+      dateFrom: analyticsDateFrom,
+      dateTo: analyticsDateTo,
+      entityHints: analyticsEntityHints,
+      metricCandidates: analyticsMetricCandidates,
+      requiresWindow: analyticsRequiresWindow(analyticsMetricKey),
+      requiresEntity: analyticsRequiresEntity(analyticsMetricKey),
+      needsClarification:
+        analyticsNeedsClarification ||
+        (analyticsMetricKey && analyticsRequiresEntity(analyticsMetricKey) && !analyticsEntityType) ||
+        (analyticsMetricKey && analyticsRequiresWindow(analyticsMetricKey) && analyticsWindowKey === 'none'),
+    },
+    language,
+    clarificationCode,
+  }
+}
+
+function buildClassificationPromptV2({
+  text,
+  workspaceName,
+  role,
+  membershipsCount,
+  languageHint = 'id',
+  contextSummary = '',
+  lastTurn = null,
+  lastTurnAnalytics = null,
+  transcript = [],
+  entityHints = [],
+}) {
+  void buildClassificationPrompt({
+    text,
+    workspaceName,
+    role,
+    membershipsCount,
+    languageHint,
+    contextSummary,
+    lastTurn,
+  })
+
+  return [
+    'Kamu adalah classifier JSON untuk Telegram assistant finance core yang read-only.',
+    'Aturan:',
+    '- Intent hanya status, search, navigate, analytics, clarify, refuse.',
+    '- Analytics dipakai untuk ringkasan, hitung, pengeluaran, kehadiran, dan ranking read-only.',
+    '- Finance core only: jurnal, tagihan, pembayaran, pinjaman.',
+    '- Jangan pernah menyarankan create/edit/delete/pay/approve/restore.',
+    '- Jika user meminta payroll/gaji/upah/absensi/hrd/master/stok/tim untuk mutasi atau admin, intent harus refuse.',
+    '- Jika pesan ambigu, intent clarify.',
+    '- Jika metric analytics jelas tapi entity, kategori, atau window ambigu, isi slot analytics lalu pakai clarificationCode yang sesuai.',
+    '- Bahasa input bisa Indonesia, Sunda, atau campuran; gunakan konteks ringkas untuk memahami rujukan seperti "itu", "anu tadi", atau "yang tadi".',
+    '- Jangan menulis pertanyaan bebas; output hanya JSON valid tanpa markdown, tanpa penjelasan tambahan, dan tanpa teks final ke user.',
+    'Skema JSON:',
+    '{',
+    '  "intent": "status|search|navigate|analytics|clarify|refuse",',
+    '  "targetPath": "/transactions|/transactions?tab=tagihan|/transactions/:id|/payment/:id|/loan-payment/:id|/pembayaran|/payroll|/payroll?tab=worker|/payroll?tab=daily|null",',
+    '  "search": {',
+    '    "query": "string",',
+    '    "exactId": "uuid or null",',
+    '    "status": "any|paid|partial|unpaid",',
+    '    "kind": "all|transaction|bill|loan",',
+    '    "amount": 0,',
+    '    "dateFrom": "YYYY-MM-DD or null",',
+    '    "dateTo": "YYYY-MM-DD or null"',
+    '  },',
+    '  "analytics": {',
+    '    "metricKey": "bill_summary|cash_outflow|attendance_present|obligation_ranking|null",',
+    '    "entityType": "supplier|worker|creditor|null",',
+    '    "entityQuery": "string or null",',
+    '    "entityConfidence": 0,',
+    '    "metricConfidence": 0,',
+    '    "windowKey": "none|today|yesterday|week_current|week_previous|month_current|month_previous|custom",',
+    '    "dateFrom": "YYYY-MM-DD or null",',
+    '    "dateTo": "YYYY-MM-DD or null"',
+    '  },',
+    '  "language": "id|su",',
+    '  "clarificationCode": "specific_filter|followup_context|analytics_metric|analytics_entity|analytics_window"',
+    '}',
+    `Bahasa dominan terdeteksi: ${languageHint ?? 'id'}`,
+    `Workspace aktif: ${workspaceName ?? '-'} | Role: ${role ?? '-'} | Membership aktif: ${membershipsCount ?? 0}`,
+    `Ringkasan konteks: ${normalizeText(contextSummary, '-')}`,
+    `Turn terakhir: ${normalizeText(lastTurn, '-')}`,
+    `Turn terakhir analytics: ${normalizeText(JSON.stringify(lastTurnAnalytics ?? {}), '-')}`,
+    `Entity hints: ${normalizeText(JSON.stringify(entityHints ?? []), '[]')}`,
+    `Transcript pendek: ${normalizeText(JSON.stringify(transcript ?? []), '[]')}`,
+    `Pesan user: ${text}`,
+  ].join('\n')
+}
+
+function buildClassificationPrompt({
+  text,
+  workspaceName,
+  role,
+  membershipsCount,
+  languageHint = 'id',
+  contextSummary = '',
+  lastTurn = null,
+}) {
   return [
     'Kamu adalah classifier JSON untuk Telegram assistant read-only finance core.',
     'Aturan:',
@@ -1032,8 +2179,9 @@ function buildClassificationPrompt({ text, workspaceName, role, membershipsCount
     '- Finance core only: jurnal, tagihan, pembayaran, pinjaman.',
     '- Jangan pernah menyarankan create/edit/delete/pay/approve/restore.',
     '- Jika user meminta payroll/gaji/upah/absensi/hrd/master/stok/tim, intent harus refuse.',
-    '- Jika pesan ambigu, intent clarify dan berikan pertanyaan singkat.',
-    '- Output harus JSON valid tanpa markdown atau penjelasan tambahan.',
+    '- Jika pesan ambigu, intent clarify.',
+    '- Bahasa input bisa Indonesia, Sunda, atau campuran; gunakan konteks ringkas untuk memahami rujukan seperti "itu", "anu tadi", atau "yang tadi".',
+    '- Jangan menulis pertanyaan bebas; output hanya JSON valid tanpa markdown, tanpa penjelasan tambahan, dan tanpa teks final ke user.',
     'Skema JSON:',
     '{',
     '  "intent": "status|search|navigate|clarify|refuse",',
@@ -1047,12 +2195,52 @@ function buildClassificationPrompt({ text, workspaceName, role, membershipsCount
     '    "dateFrom": "YYYY-MM-DD or null",',
     '    "dateTo": "YYYY-MM-DD or null"',
     '  },',
-    '  "question": "string or null",',
-    '  "reason": "string or null"',
+    '  "language": "id|su"',
     '}',
+    `Bahasa dominan terdeteksi: ${languageHint ?? 'id'}`,
     `Workspace aktif: ${workspaceName ?? '-'} | Role: ${role ?? '-'} | Membership aktif: ${membershipsCount ?? 0}`,
-    `Pesan user: ${text}`,
+    `Ringkasan konteks: ${normalizeText(contextSummary, '-')}`,
+    `Turn terakhir: ${normalizeText(lastTurn, '-')}`,
+  `Pesan user: ${text}`,
   ].join('\n')
+}
+
+function shouldUseClassifierForPlan(plan = {}) {
+  const analytics = plan?.analytics ?? {}
+
+  if (plan?.intent === 'clarify') {
+    return true
+  }
+
+  if (plan?.intent !== 'analytics') {
+    return false
+  }
+
+  if (!analytics.metricKey) {
+    return true
+  }
+
+  if (Array.isArray(analytics.metricCandidates) && analytics.metricCandidates.length > 1) {
+    return true
+  }
+
+  if (analytics.requiresEntity && !analytics.entityType) {
+    return true
+  }
+
+  if (analytics.requiresWindow && normalizeText(analytics.windowKey, 'none') === 'none') {
+    return true
+  }
+
+  if (analytics.entityQuery && (!analytics.entityType || Number(analytics.entityConfidence) < 0.85)) {
+    return true
+  }
+
+  if (analytics.metricConfidence !== undefined && Number(analytics.metricConfidence) < 0.9) {
+    return true
+  }
+
+  return false
 }
 
 async function classifyAssistantMessage({
@@ -1060,35 +2248,46 @@ async function classifyAssistantMessage({
   workspaceName = null,
   role = null,
   membershipsCount = 0,
+  languageHint = 'id',
+  contextSummary = '',
+  lastTurn = null,
+  session = null,
 }) {
-  const fallbackPlan = buildDeterministicPlan(text)
-  const providerConfig = getAllowedBotProviderConfig()
+  const fallbackPlan = buildDeterministicPlan(text, { session })
+  const providerConfigs = getAllowedBotProviderConfigs()
 
-  if (!providerConfig) {
+  if (providerConfigs.length === 0 || !shouldUseClassifierForPlan(fallbackPlan)) {
     return fallbackPlan
   }
 
-  try {
-    const responseText = await postAssistantClassifierPrompt(
-      providerConfig,
-      buildClassificationPrompt({
-        text,
-        workspaceName,
-        role,
-        membershipsCount,
+  const prompt = buildClassificationPromptV2({
+    text,
+    workspaceName,
+    role,
+    membershipsCount,
+    languageHint,
+    contextSummary,
+    lastTurn,
+    lastTurnAnalytics: session?.pending_payload?.last_turn?.analytics ?? null,
+    entityHints: session?.pending_payload?.entity_hints ?? [],
+    transcript: session?.pending_payload?.transcript ?? [],
+  })
+
+  for (const providerConfig of providerConfigs) {
+    try {
+      const responseText = await postAssistantClassifierPrompt(providerConfig, prompt)
+      const parsedResponse = extractJsonObject(responseText)
+
+      return normalizePlannerObjectV2(parsedResponse, text, { session })
+    } catch (error) {
+      console.error('[api/telegram-assistant] classifier failed', {
+        message: error instanceof Error ? error.message : String(error),
+        provider: providerConfig.provider,
       })
-    )
-    const parsedResponse = extractJsonObject(responseText)
-
-    return normalizePlannerObject(parsedResponse, text)
-  } catch (error) {
-    console.error('[api/telegram-assistant] classifier failed', {
-      message: error instanceof Error ? error.message : String(error),
-      provider: providerConfig.provider,
-    })
-
-    return fallbackPlan
+    }
   }
+
+  return fallbackPlan
 }
 
 function normalizeRecordDateValue(row) {
@@ -1173,6 +2372,10 @@ function getRowSourceLabel(row) {
     return 'Pinjaman'
   }
 
+  if (sourceType === 'bill') {
+    return isPayrollRow(row) ? 'Tagihan Upah' : 'Tagihan'
+  }
+
   return 'Transaksi'
 }
 
@@ -1203,6 +2406,16 @@ function getRowPrimaryLabel(row) {
     )
   }
 
+  if (sourceType === 'bill') {
+    return (
+      normalizeText(row?.worker_name_snapshot, null) ??
+      normalizeText(row?.supplier_name_snapshot, null) ??
+      normalizeText(row?.bill_description, null) ??
+      normalizeText(row?.description, null) ??
+      'Tagihan'
+    )
+  }
+
   return normalizeText(row?.description, null) ?? 'Transaksi'
 }
 
@@ -1219,6 +2432,15 @@ function getRowSecondaryLabel(row) {
 
   if (sourceType === 'loan-disbursement') {
     return normalizeText(row?.description, null)
+  }
+
+  if (sourceType === 'bill') {
+    const parts = [
+      normalizeText(row?.bill_type, null),
+      formatStatusLabel(row?.bill_status, row?.bill_remaining_amount),
+    ].filter(Boolean)
+
+    return parts.length > 0 ? parts.join(' • ') : normalizeText(row?.bill_description, null)
   }
 
   return normalizeText(row?.description, null)
@@ -1245,7 +2467,7 @@ function filterRowsByPlan(rows, plan) {
   const dateTo = normalizeText(normalizedPlan.search?.dateTo, null)
 
   let filteredRows = [...(rows ?? [])]
-    .filter((row) => row && isFinanceCoreRow(row) && !isPayrollRow(row))
+    .filter((row) => row && isFinanceCoreRow(row))
 
   if (kind === 'loan') {
     filteredRows = filteredRows.filter(
@@ -1329,7 +2551,7 @@ async function loadWorkspaceRows(adminClient, teamId, plan, { limit = 12, outsta
   const searchQuery = normalizeText(plan?.search?.query, '').toLowerCase()
   const exactId = normalizeText(plan?.search?.exactId, null)
   const normalizedLimit = Number.isFinite(Number(limit))
-    ? Math.min(Math.max(Number(limit), 1), 50)
+    ? Math.min(Math.max(Number(limit), 1), 100)
     : 12
 
   let query = adminClient
@@ -1358,6 +2580,711 @@ async function loadWorkspaceRows(adminClient, teamId, plan, { limit = 12, outsta
   return filterRowsByPlan(data ?? [], plan)
 }
 
+function scoreAnalyticsEntityMatch(candidateName, searchQuery) {
+  const normalizedCandidate = normalizeText(candidateName, '').toLowerCase()
+  const normalizedQuery = normalizeText(searchQuery, '').toLowerCase()
+
+  if (!normalizedCandidate || !normalizedQuery) {
+    return 0
+  }
+
+  if (normalizedCandidate === normalizedQuery) {
+    return 100
+  }
+
+  if (normalizedCandidate.startsWith(normalizedQuery)) {
+    return 90
+  }
+
+  if (normalizedCandidate.includes(normalizedQuery)) {
+    return 80
+  }
+
+  if (normalizedQuery.includes(normalizedCandidate)) {
+    return 70
+  }
+
+  const candidateTokens = normalizedCandidate.split(/\s+/).filter(Boolean)
+  const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean)
+  const overlapCount = candidateTokens.filter((token) => queryTokens.includes(token)).length
+
+  return overlapCount > 0 ? 60 + overlapCount : 0
+}
+
+function getAnalyticsEntityLabel(entityType, language = 'id') {
+  const normalizedEntityType = normalizeText(entityType, '').toLowerCase()
+  const locale = getLocaleTemplate(language)
+  const labelMap = {
+    id: {
+      supplier: 'supplier',
+      worker: 'worker',
+      creditor: 'kreditur',
+    },
+    su: {
+      supplier: 'supplier',
+      worker: 'worker',
+      creditor: 'kreditur',
+    },
+  }
+
+  return labelMap[locale]?.[normalizedEntityType] ?? normalizedEntityType
+}
+
+async function loadAnalyticsEntityCandidates(adminClient, teamId, entityQuery) {
+  const normalizedTeamId = normalizeTelegramId(teamId)
+  const normalizedQuery = normalizeText(entityQuery, '').toLowerCase()
+
+  if (!normalizedQuery) {
+    return {
+      workers: [],
+      suppliers: [],
+      creditors: [],
+    }
+  }
+
+  const [workersResult, suppliersResult, creditorsResult] = await Promise.all([
+    adminClient
+      .from('workers')
+      .select('id, name, worker_name, team_id, deleted_at, is_active')
+      .eq('team_id', normalizedTeamId)
+      .eq('is_active', true)
+      .is('deleted_at', null)
+      .ilike('name', `%${normalizedQuery}%`)
+      .limit(10),
+    adminClient
+      .from('suppliers')
+      .select('id, name, supplier_name, team_id, deleted_at, is_active')
+      .eq('team_id', normalizedTeamId)
+      .eq('is_active', true)
+      .is('deleted_at', null)
+      .ilike('name', `%${normalizedQuery}%`)
+      .limit(10),
+    adminClient
+      .from('funding_creditors')
+      .select('id, name, creditor_name, team_id, deleted_at, is_active')
+      .eq('team_id', normalizedTeamId)
+      .eq('is_active', true)
+      .is('deleted_at', null)
+      .ilike('name', `%${normalizedQuery}%`)
+      .limit(10),
+  ])
+
+  if (workersResult.error) {
+    throw workersResult.error
+  }
+
+  if (suppliersResult.error) {
+    throw suppliersResult.error
+  }
+
+  if (creditorsResult.error) {
+    throw creditorsResult.error
+  }
+
+  const workers = (workersResult.data ?? []).map((row) => ({
+    ...row,
+    entityType: 'worker',
+    entityName: normalizeText(row?.worker_name ?? row?.name, null),
+    score: scoreAnalyticsEntityMatch(row?.worker_name ?? row?.name, normalizedQuery),
+  }))
+  const suppliers = (suppliersResult.data ?? []).map((row) => ({
+    ...row,
+    entityType: 'supplier',
+    entityName: normalizeText(row?.supplier_name ?? row?.name, null),
+    score: scoreAnalyticsEntityMatch(row?.supplier_name ?? row?.name, normalizedQuery),
+  }))
+  const creditors = (creditorsResult.data ?? []).map((row) => ({
+    ...row,
+    entityType: 'creditor',
+    entityName: normalizeText(row?.creditor_name ?? row?.name, null),
+    score: scoreAnalyticsEntityMatch(row?.creditor_name ?? row?.name, normalizedQuery),
+  }))
+
+  return {
+    workers,
+    suppliers,
+    creditors,
+  }
+}
+
+function chooseAnalyticsEntitySelection({
+  explicitEntityType = null,
+  entityQuery = null,
+  candidateRows = {},
+} = {}) {
+  const normalizedExplicitType = normalizeText(explicitEntityType, '').toLowerCase()
+  const normalizedQuery = normalizeText(entityQuery, '').toLowerCase()
+  const typeEntries = [
+    ['worker', candidateRows.workers ?? []],
+    ['supplier', candidateRows.suppliers ?? []],
+    ['creditor', candidateRows.creditors ?? []],
+  ]
+
+  const bestPerType = typeEntries
+    .map(([entityType, rows]) => {
+      const bestRow = [...rows].sort((left, right) => Number(right.score ?? 0) - Number(left.score ?? 0))[0] ?? null
+
+      return {
+        entityType,
+        row: bestRow,
+        score: Number(bestRow?.score ?? 0),
+      }
+    })
+    .filter((candidate) => candidate.row || candidate.score > 0)
+
+  if (normalizedExplicitType) {
+    const explicitCandidate = bestPerType.find((candidate) => candidate.entityType === normalizedExplicitType)
+
+    if (explicitCandidate?.row) {
+      return {
+        entityType: normalizedExplicitType,
+        entityName: explicitCandidate.row.entityName,
+        entityId: explicitCandidate.row.id,
+        entityConfidence: Math.max(0.8, Math.min(0.99, explicitCandidate.score / 100)),
+        candidateTypes: [normalizedExplicitType],
+        needsClarification: false,
+      }
+    }
+
+    return {
+      entityType: normalizedExplicitType,
+      entityName: normalizedQuery || null,
+      entityId: null,
+      entityConfidence: 0.7,
+      candidateTypes: [normalizedExplicitType],
+      needsClarification: false,
+    }
+  }
+
+  if (bestPerType.length === 0) {
+    return {
+      entityType: null,
+      entityName: normalizedQuery || null,
+      entityId: null,
+      entityConfidence: 0,
+      candidateTypes: [],
+      needsClarification: Boolean(normalizedQuery),
+      clarificationCode: normalizedQuery ? 'analytics_entity' : null,
+    }
+  }
+
+  const sortedCandidates = [...bestPerType].sort((left, right) => right.score - left.score)
+  const topCandidate = sortedCandidates[0] ?? null
+  const secondCandidate = sortedCandidates[1] ?? null
+
+  if (
+    topCandidate &&
+    secondCandidate &&
+    topCandidate.score === secondCandidate.score &&
+    topCandidate.score > 0
+  ) {
+    return {
+      entityType: null,
+      entityName: normalizedQuery || null,
+      entityId: null,
+      entityConfidence: 0.4,
+      candidateTypes: sortedCandidates
+        .filter((candidate) => candidate.score === topCandidate.score)
+        .map((candidate) => candidate.entityType),
+      needsClarification: true,
+      clarificationCode: 'analytics_entity',
+    }
+  }
+
+  return {
+    entityType: topCandidate?.entityType ?? null,
+    entityName: topCandidate?.row?.entityName ?? (normalizedQuery || null),
+    entityId: topCandidate?.row?.id ?? null,
+    entityConfidence: topCandidate ? Math.max(0.5, Math.min(0.99, topCandidate.score / 100)) : 0,
+    candidateTypes: [topCandidate?.entityType].filter(Boolean),
+    needsClarification: false,
+  }
+}
+
+function groupRowsByAnalyticsEntity(rows = [], entityType = null) {
+  const normalizedEntityType = normalizeText(entityType, '').toLowerCase()
+
+  return rows.reduce((groups, row) => {
+    const rawName =
+      normalizedEntityType === 'creditor'
+        ? row?.creditor_name_snapshot
+        : normalizedEntityType === 'worker'
+          ? row?.worker_name_snapshot
+          : row?.supplier_name_snapshot ?? row?.worker_name_snapshot ?? row?.creditor_name_snapshot
+    const entityName = normalizeText(rawName, null) ?? normalizeText(row?.description, null) ?? 'Tanpa Nama'
+    const groupKey = entityName.toLowerCase()
+    const nextGroup =
+      groups.get(groupKey) ?? {
+        entityName,
+        rows: [],
+        totalAmount: 0,
+      }
+
+    nextGroup.rows.push(row)
+    nextGroup.totalAmount += normalizeAmountValue(row?.bill_remaining_amount)
+    groups.set(groupKey, nextGroup)
+
+    return groups
+  }, new Map())
+}
+
+function filterAnalyticsRowsByEntityType(rows = [], entityType = null) {
+  const normalizedEntityType = normalizeText(entityType, '').toLowerCase()
+
+  if (normalizedEntityType === 'worker') {
+    return rows.filter((row) => Boolean(normalizeText(row?.worker_name_snapshot, null)))
+  }
+
+  if (normalizedEntityType === 'supplier') {
+    return rows.filter((row) => Boolean(normalizeText(row?.supplier_name_snapshot, null)))
+  }
+
+  if (normalizedEntityType === 'creditor') {
+    return rows.filter((row) => Boolean(normalizeText(row?.creditor_name_snapshot, null)))
+  }
+
+  return rows
+}
+
+function formatAnalyticsAttendanceBreakdown(locale, counts = {}) {
+  const fullDay = Number(counts.full_day ?? 0)
+  const halfDay = Number(counts.half_day ?? 0)
+  const overtime = Number(counts.overtime ?? 0)
+
+  const labels = {
+    id: {
+      full_day: 'Penuh',
+      half_day: '½ Hari',
+      overtime: 'Lembur',
+    },
+    su: {
+      full_day: 'Penuh',
+      half_day: 'Satengah',
+      overtime: 'Lembur',
+    },
+  }
+
+  const localizedLabels = labels[getLocaleTemplate(locale)] ?? labels.id
+
+  return [
+    `${localizedLabels.full_day} ${fullDay}`,
+    `${localizedLabels.half_day} ${halfDay}`,
+    `${localizedLabels.overtime} ${overtime}`,
+  ].join(', ')
+}
+
+async function buildAnalyticsReply(adminClient, teamId, plan) {
+  const locale = getLocaleText(plan?.language)
+  const analyticsPlan = plan?.analytics ?? {}
+  const metricKey = normalizeText(analyticsPlan?.metricKey, '').toLowerCase()
+  const factsBase = {
+    metricKey,
+    language: normalizeText(plan?.language, 'id'),
+    windowKey: normalizeText(analyticsPlan?.windowKey, 'none'),
+    entityType: normalizeText(analyticsPlan?.entityType, ''),
+    entityQuery: normalizeText(analyticsPlan?.entityQuery, ''),
+  }
+
+  if (!metricKey) {
+    return {
+      text: locale.clarifyAnalyticsMetric,
+      buttons: [],
+      needsClarification: true,
+      facts: {
+        ...factsBase,
+        needsClarification: true,
+        clarificationCode: 'analytics_metric',
+      },
+    }
+  }
+
+  if (analyticsPlan.requiresWindow && normalizeText(analyticsPlan.windowKey, 'none') === 'none') {
+    return {
+      text: locale.clarifyAnalyticsWindow,
+      buttons: [],
+      needsClarification: true,
+      facts: {
+        ...factsBase,
+        needsClarification: true,
+        clarificationCode: 'analytics_window',
+      },
+    }
+  }
+
+  if (
+    analyticsPlan.requiresWindow &&
+    (!normalizeText(analyticsPlan.dateFrom, null) || !normalizeText(analyticsPlan.dateTo, null))
+  ) {
+    return {
+      text: locale.clarifyAnalyticsWindow,
+      buttons: [],
+      needsClarification: true,
+      facts: {
+        ...factsBase,
+        needsClarification: true,
+        clarificationCode: 'analytics_window',
+      },
+    }
+  }
+
+  const entityResolution = await chooseAnalyticsEntitySelection({
+    explicitEntityType: analyticsPlan.entityType,
+    entityQuery: analyticsPlan.entityQuery,
+    candidateRows:
+      analyticsPlan.entityQuery
+        ? await loadAnalyticsEntityCandidates(adminClient, teamId, analyticsPlan.entityQuery)
+        : {},
+  })
+
+  if (
+    (metricKey === 'bill_summary' || metricKey === 'obligation_ranking') &&
+    entityResolution.needsClarification &&
+    Array.isArray(entityResolution.candidateTypes) &&
+    entityResolution.candidateTypes.length > 0
+  ) {
+    return {
+      text: locale.clarifyAnalyticsEntity,
+      buttons: [],
+      needsClarification: true,
+      facts: {
+        ...factsBase,
+        needsClarification: true,
+        clarificationCode: 'analytics_entity',
+        candidateTypes: entityResolution.candidateTypes,
+      },
+    }
+  }
+
+  if (
+    analyticsRequiresEntity(metricKey) &&
+    (entityResolution.needsClarification || !entityResolution.entityType)
+  ) {
+    return {
+      text: locale.clarifyAnalyticsEntity,
+      buttons: [],
+      needsClarification: true,
+      facts: {
+        ...factsBase,
+        needsClarification: true,
+        clarificationCode: 'analytics_entity',
+        candidateTypes: entityResolution.candidateTypes ?? [],
+      },
+    }
+  }
+
+  const queryPlan = {
+    ...plan,
+    search: {
+      ...plan.search,
+      query: entityResolution.entityName ?? analyticsPlan.entityQuery ?? plan?.search?.query ?? '',
+      kind:
+        entityResolution.entityType === 'creditor'
+          ? 'loan'
+          : entityResolution.entityType
+            ? 'bill'
+            : plan?.search?.kind ?? 'all',
+      dateFrom: analyticsPlan.dateFrom ?? plan?.search?.dateFrom ?? null,
+      dateTo: analyticsPlan.dateTo ?? plan?.search?.dateTo ?? null,
+    },
+  }
+
+  if (metricKey === 'cash_outflow') {
+    const windowLabel = buildAnalyticsWindowLabel(
+      analyticsPlan.windowKey,
+      analyticsPlan.dateFrom,
+      analyticsPlan.dateTo
+    )
+    const { data, error } = await adminClient
+      .from('vw_cash_mutation')
+      .select('transaction_date, type, amount, description, source_table, team_id')
+      .eq('team_id', normalizeTelegramId(teamId))
+      .eq('type', 'out')
+      .gte('transaction_date', analyticsPlan.dateFrom)
+      .lte('transaction_date', analyticsPlan.dateTo)
+      .order('transaction_date', { ascending: false })
+
+    if (error) {
+      throw error
+    }
+
+    const totalAmount = (data ?? []).reduce((sum, row) => sum + normalizeAmountValue(row?.amount), 0)
+
+    return {
+      text: [
+        locale.analyticsIntro(buildAnalyticsWindowLabel(analyticsPlan.windowKey, analyticsPlan.dateFrom, analyticsPlan.dateTo)),
+        locale.analyticsCashOutflow(windowLabel, formatCurrency(totalAmount)),
+      ].join('\n'),
+      buttons: [
+        {
+          text: locale.actionLedger,
+          path: '/transactions',
+        },
+      ],
+      needsClarification: false,
+      facts: {
+        ...factsBase,
+        metricKey,
+        windowLabel,
+        dateFrom: analyticsPlan.dateFrom,
+        dateTo: analyticsPlan.dateTo,
+        totalAmount,
+        rowCount: (data ?? []).length,
+      },
+    }
+  }
+
+  if (metricKey === 'attendance_present') {
+    const windowLabel = buildAnalyticsWindowLabel(
+      analyticsPlan.windowKey,
+      analyticsPlan.dateFrom,
+      analyticsPlan.dateTo
+    )
+    const { data, error } = await adminClient
+      .from('attendance_records')
+      .select('attendance_status, attendance_date, team_id')
+      .eq('team_id', normalizeTelegramId(teamId))
+      .gte('attendance_date', analyticsPlan.dateFrom)
+      .lte('attendance_date', analyticsPlan.dateTo)
+
+    if (error) {
+      throw error
+    }
+
+    const counts = {
+      full_day: 0,
+      half_day: 0,
+      overtime: 0,
+      absent: 0,
+    }
+
+    for (const row of data ?? []) {
+      const attendanceStatus = normalizeText(row?.attendance_status, '').toLowerCase()
+
+      if (Object.hasOwn(counts, attendanceStatus)) {
+        counts[attendanceStatus] += 1
+      }
+    }
+
+    const totalPresent = counts.full_day + counts.half_day + counts.overtime
+    const breakdownLabel = formatAnalyticsAttendanceBreakdown(plan?.language, counts)
+
+    return {
+      text: [
+        locale.analyticsIntro(windowLabel),
+        locale.analyticsAttendance(windowLabel, `${totalPresent} pekerja`, breakdownLabel),
+      ].join('\n'),
+      buttons: [
+        {
+          text: locale.openRoute('Absensi'),
+          path: '/payroll?tab=daily',
+        },
+      ],
+      needsClarification: false,
+      facts: {
+        ...factsBase,
+        metricKey,
+        windowLabel,
+        dateFrom: analyticsPlan.dateFrom,
+        dateTo: analyticsPlan.dateTo,
+        totalPresent,
+        counts,
+        rowCount: (data ?? []).length,
+      },
+    }
+  }
+
+  if (metricKey === 'obligation_ranking') {
+    const rowKind =
+      entityResolution.entityType === 'creditor'
+        ? 'loan'
+        : entityResolution.entityType === 'worker' || entityResolution.entityType === 'supplier'
+          ? 'bill'
+          : null
+
+    const rows = await loadWorkspaceRows(adminClient, teamId, {
+      ...queryPlan,
+      search: {
+        ...queryPlan.search,
+        kind: rowKind ?? queryPlan.search.kind ?? 'all',
+      },
+    }, {
+      limit: 50,
+      outstandingOnly: true,
+    })
+
+    const analyticsRows = filterAnalyticsRowsByEntityType(rows, entityResolution.entityType)
+    const groupedRows = groupRowsByAnalyticsEntity(analyticsRows, entityResolution.entityType)
+    const rankedRows = [...groupedRows.values()]
+      .sort((left, right) => Number(right.totalAmount ?? 0) - Number(left.totalAmount ?? 0))
+      .slice(0, 3)
+
+    if (rankedRows.length === 0) {
+      const entityLabel = getAnalyticsEntityLabel(
+        entityResolution.entityType ?? analyticsPlan.entityType,
+        plan?.language
+      )
+
+      return {
+        text: locale.analyticsRankingEmpty(entityLabel),
+        buttons: [],
+        needsClarification: false,
+        facts: {
+          ...factsBase,
+          metricKey,
+          entityType: entityResolution.entityType ?? analyticsPlan.entityType ?? null,
+          entityLabel,
+          rowCount: 0,
+          rankedRows: [],
+        },
+      }
+    }
+
+    const entityLabel = getAnalyticsEntityLabel(
+      entityResolution.entityType ?? analyticsPlan.entityType,
+      plan?.language
+    )
+    const lines = [
+      locale.analyticsIntro(entityLabel),
+      locale.analyticsRankingIntro(entityLabel),
+      ...rankedRows.map((group, index) =>
+        locale.analyticsRankingItem(
+          String(index + 1),
+          group.entityName,
+          formatCurrency(group.totalAmount)
+        )
+      ),
+    ]
+
+    if (groupedRows.size > rankedRows.length) {
+      lines.push(locale.analyticsMoreRanking(groupedRows.size - rankedRows.length))
+    }
+
+    return {
+      text: lines.join('\n'),
+      buttons: [
+        {
+          text: locale.openRoute(entityResolution.entityType === 'worker' ? 'Absensi' : 'Tagihan'),
+          path: entityResolution.entityType === 'worker' ? '/payroll?tab=worker' : '/transactions?tab=tagihan',
+        },
+      ],
+      needsClarification: false,
+      facts: {
+        ...factsBase,
+        metricKey,
+        entityType: entityResolution.entityType ?? analyticsPlan.entityType ?? null,
+        entityLabel,
+        rowCount: analyticsRows.length,
+        rankedRows: rankedRows.map((group, index) => ({
+          rank: index + 1,
+          entityName: group.entityName,
+          totalAmount: group.totalAmount,
+        })),
+      },
+    }
+  }
+
+  const resolvedEntityType = entityResolution.entityType ?? analyticsPlan.entityType ?? null
+  const kind =
+    resolvedEntityType === 'creditor'
+      ? 'loan'
+      : resolvedEntityType === 'worker' || resolvedEntityType === 'supplier'
+        ? 'bill'
+        : 'all'
+  const rows = await loadWorkspaceRows(adminClient, teamId, {
+    ...queryPlan,
+    search: {
+      ...queryPlan.search,
+      kind,
+      query: entityResolution.entityName ?? analyticsPlan.entityQuery ?? queryPlan.search.query ?? '',
+      dateFrom: analyticsPlan.dateFrom ?? queryPlan.search.dateFrom ?? null,
+      dateTo: analyticsPlan.dateTo ?? queryPlan.search.dateTo ?? null,
+    },
+  }, {
+    limit: 50,
+    outstandingOnly: true,
+  })
+  const analyticsRows = filterAnalyticsRowsByEntityType(rows, resolvedEntityType)
+  const groupedRows = groupOutstandingRows(analyticsRows)
+  const totalBillRemaining = groupedRows.bills.reduce(
+    (sum, row) => sum + normalizeAmountValue(row?.bill_remaining_amount),
+    0
+  )
+  const totalLoanRemaining = groupedRows.loans.reduce(
+    (sum, row) => sum + normalizeAmountValue(row?.bill_remaining_amount),
+    0
+  )
+  const introLabel =
+    entityResolution.entityName ?? 
+    analyticsPlan.entityQuery ?? 
+    getAnalyticsEntityLabel(resolvedEntityType, plan?.language) ??
+    null
+  const lines = [locale.analyticsIntro(introLabel)]
+
+  if (groupedRows.bills.length > 0) {
+    lines.push(
+      locale.analyticsTotalBills(groupedRows.bills.length, formatCurrency(totalBillRemaining))
+    )
+  }
+
+  if (groupedRows.loans.length > 0) {
+    lines.push(
+      locale.analyticsTotalLoans(groupedRows.loans.length, formatCurrency(totalLoanRemaining))
+    )
+  }
+
+  if (groupedRows.bills.length === 0 && groupedRows.loans.length === 0) {
+    return {
+      text: locale.analyticsNoData(introLabel ?? 'data tagihan'),
+      buttons: [],
+      needsClarification: false,
+      facts: {
+        ...factsBase,
+        metricKey,
+        entityType: resolvedEntityType,
+        entityLabel: introLabel,
+        rowCount: 0,
+        groupedRows: {
+          bills: 0,
+          loans: 0,
+        },
+      },
+    }
+  }
+
+  return {
+    text: lines.join('\n'),
+    buttons: [
+      {
+        text: locale.openRoute(
+          resolvedEntityType === 'worker' ? 'Absensi' : resolvedEntityType === 'creditor' ? 'Jurnal' : 'Tagihan'
+        ),
+        path:
+          resolvedEntityType === 'worker'
+            ? '/payroll?tab=worker'
+            : resolvedEntityType === 'creditor'
+              ? '/transactions'
+              : '/transactions?tab=tagihan',
+      },
+    ],
+    needsClarification: false,
+    facts: {
+      ...factsBase,
+      metricKey,
+      entityType: resolvedEntityType,
+      entityLabel: introLabel,
+      rowCount: analyticsRows.length,
+      groupedRows: {
+        bills: groupedRows.bills.length,
+        loans: groupedRows.loans.length,
+      },
+      totals: {
+        billRemainingAmount: totalBillRemaining,
+        loanRemainingAmount: totalLoanRemaining,
+      },
+    },
+  }
+}
+
 function buildRouteForRow(row, plan = {}) {
   const explicitTarget = normalizeAssistantRoutePath(plan?.targetPath)
 
@@ -1384,6 +3311,26 @@ function buildRouteForRow(row, plan = {}) {
   return `/transactions/${row.id}`
 }
 
+function buildRowFactItem(row, plan, index = 0) {
+  const routePath = buildRouteForRow(row, plan)
+
+  return {
+    index: index + 1,
+    sourceLabel: getRowSourceLabel(row),
+    primaryLabel: getRowPrimaryLabel(row),
+    secondaryLabel: getRowSecondaryLabel(row),
+    amountLabel: formatCurrency(row?.amount ?? row?.bill_amount ?? 0),
+    remainingLabel: formatStatusLabel(row?.bill_status, row?.bill_remaining_amount),
+    routePath,
+    routeLabel:
+      routePath.startsWith('/payment') || routePath.startsWith('/loan-payment')
+        ? 'payment'
+        : routePath.startsWith('/payroll')
+          ? 'payroll'
+          : 'detail',
+  }
+}
+
 function buildRowSummary(row) {
   const sourceLabel = getRowSourceLabel(row)
   const primaryLabel = getRowPrimaryLabel(row)
@@ -1404,33 +3351,37 @@ function buildRowSummary(row) {
 }
 
 function buildSearchReply(rows, plan) {
+  const locale = getLocaleText(plan?.language)
   const routeButtons = []
   const lines = []
   const queryLabel = normalizeText(plan?.search?.query, '')
+  const facts = {
+    queryLabel,
+    rowCount: rows.length,
+    items: rows.slice(0, 3).map((row, index) => buildRowFactItem(row, plan, index)),
+    extraCount: Math.max(0, rows.length - 3),
+  }
 
   if (rows.length === 0) {
     return {
-      text:
-        queryLabel.length > 0
-          ? `Belum ketemu data yang cocok untuk "${queryLabel}".\nTambah ID, nama proyek/supplier, nominal, tanggal, atau status yang lebih spesifik.`
-          : 'Belum ketemu data yang cocok.\nTambah ID, nama proyek/supplier, nominal, tanggal, atau status yang lebih spesifik.',
+      text: locale.noResultSearch(queryLabel),
       buttons: [],
       needsClarification: true,
+      facts: {
+        ...facts,
+        empty: true,
+      },
     }
   }
 
-  lines.push(
-    queryLabel.length > 0
-      ? `Saya menemukan ${rows.length} data paling relevan untuk "${queryLabel}":`
-      : `Saya menemukan ${rows.length} data paling relevan:`
-  )
+  lines.push(locale.searchIntro(queryLabel, rows.length))
 
   rows.slice(0, 3).forEach((row, index) => {
     const path = buildRouteForRow(row, plan)
     const buttonLabel =
       path.startsWith('/payment') || path.startsWith('/loan-payment')
-        ? 'Buka pembayaran'
-        : 'Buka detail'
+        ? locale.actionPayment
+        : locale.actionDetail
 
     routeButtons.push({
       text: buttonLabel,
@@ -1441,13 +3392,14 @@ function buildSearchReply(rows, plan) {
   })
 
   if (rows.length > 3) {
-    lines.push(`Dan ${rows.length - 3} hasil lain yang serupa.`)
+    lines.push(locale.searchMore(rows.length - 3))
   }
 
   return {
     text: lines.join('\n'),
     buttons: routeButtons,
     needsClarification: false,
+    facts,
   }
 }
 
@@ -1472,6 +3424,7 @@ function groupOutstandingRows(rows) {
 }
 
 function buildStatusReply(rows, plan) {
+  const locale = getLocaleText(plan?.language)
   const queryLabel = normalizeText(plan?.search?.query, '')
   const groupedRows = groupOutstandingRows(rows)
   const totalBillRemaining = groupedRows.bills.reduce(
@@ -1484,39 +3437,41 @@ function buildStatusReply(rows, plan) {
   )
   const lines = []
   const buttons = []
+  const facts = {
+    queryLabel,
+    rowCount: rows.length,
+    billCount: groupedRows.bills.length,
+    loanCount: groupedRows.loans.length,
+    billRemainingAmount: totalBillRemaining,
+    loanRemainingAmount: totalLoanRemaining,
+    items: rows.slice(0, 3).map((row, index) => buildRowFactItem(row, plan, index)),
+  }
 
   if (groupedRows.bills.length === 0 && groupedRows.loans.length === 0) {
     return {
-      text:
-        queryLabel.length > 0
-          ? `Tidak ada tagihan atau pinjaman outstanding yang cocok untuk "${queryLabel}".\nBuka Jurnal untuk melihat riwayat lengkap.`
-          : 'Tidak ada tagihan atau pinjaman outstanding yang cocok.\nBuka Jurnal untuk melihat riwayat lengkap.',
+      text: locale.noResultStatus(queryLabel),
       buttons: [
         {
-          text: 'Buka Jurnal',
+          text: locale.actionLedger,
           path: '/transactions',
         },
       ],
       needsClarification: false,
+      facts: {
+        ...facts,
+        empty: true,
+      },
     }
   }
 
-  lines.push(
-    queryLabel.length > 0
-      ? `Status untuk "${queryLabel}":`
-      : 'Status finance core workspace ini:'
-  )
+  lines.push(locale.statusIntro(queryLabel))
 
   if (groupedRows.bills.length > 0) {
-    lines.push(
-      `• Tagihan aktif: ${groupedRows.bills.length} item, sisa ${formatCurrency(totalBillRemaining)}`
-    )
+    lines.push(locale.statusBills(groupedRows.bills.length, formatCurrency(totalBillRemaining)))
   }
 
   if (groupedRows.loans.length > 0) {
-    lines.push(
-      `• Pinjaman aktif: ${groupedRows.loans.length} item, sisa ${formatCurrency(totalLoanRemaining)}`
-    )
+    lines.push(locale.statusLoans(groupedRows.loans.length, formatCurrency(totalLoanRemaining)))
   }
 
   rows.slice(0, 3).forEach((row) => {
@@ -1524,15 +3479,15 @@ function buildStatusReply(rows, plan) {
       text:
         buildRouteForRow(row, plan).startsWith('/payment') ||
         buildRouteForRow(row, plan).startsWith('/loan-payment')
-          ? 'Buka pembayaran'
-          : 'Buka detail',
+          ? locale.actionPayment
+          : locale.actionDetail,
       path: buildRouteForRow(row, plan),
     })
   })
 
   if (buttons.length === 0) {
     buttons.push({
-      text: 'Buka Jurnal',
+      text: locale.actionLedger,
       path: '/transactions',
     })
   }
@@ -1541,67 +3496,322 @@ function buildStatusReply(rows, plan) {
     text: lines.join('\n'),
     buttons,
     needsClarification: false,
+    facts,
   }
 }
 
 function buildNavigateReply(plan) {
+  const locale = getLocaleText(plan?.language)
   const path = normalizeAssistantRoutePath(plan?.targetPath) ?? '/transactions'
   const routeLabelMap = new Map([
     ['/transactions', 'Jurnal'],
     ['/transactions?tab=history', 'Riwayat'],
     ['/transactions?tab=tagihan', 'Tagihan'],
     ['/pembayaran', 'Pembayaran'],
+    ['/payroll', 'Absensi'],
+    ['/payroll?tab=worker', 'Pekerja'],
+    ['/payroll?tab=daily', 'Harian'],
   ])
   const routeLabel = routeLabelMap.get(path) ?? 'halaman tujuan'
 
   return {
-    text: `Membuka ${routeLabel}.`,
+    text: locale.navigateIntro(routeLabel),
     buttons: [
       {
-        text: `Buka ${routeLabel}`,
+        text: locale.openRoute(routeLabel),
         path,
       },
     ],
     needsClarification: false,
+    facts: {
+      path,
+      routeLabel,
+    },
   }
 }
 
-function buildRefusalReply(reason) {
+function buildRefusalReply(language = 'id') {
+  const locale = getLocaleText(language)
+
   return {
-    text:
-      reason ||
-      'Saya hanya melayani finance core read-only: jurnal, tagihan, pembayaran, dan pinjaman. Permintaan ini berada di luar scope v1 atau bersifat mutasi.',
+    text: locale.refusal,
     buttons: [],
     needsClarification: false,
+    facts: {
+      reason: locale.refusal,
+    },
   }
 }
 
-function buildClarifyReply(question, fallbackText = null) {
+function buildClarifyReply(plan) {
+  const locale = getLocaleText(plan?.language)
+  const normalizedClarificationCode = normalizeText(plan?.clarificationCode, '')
+  const clarificationCode = normalizedClarificationCode === 'followup_context'
+    ? 'clarifyFollowUp'
+    : normalizedClarificationCode === 'analytics_metric'
+      ? 'clarifyAnalyticsMetric'
+      : normalizedClarificationCode === 'analytics_entity'
+        ? 'clarifyAnalyticsEntity'
+        : normalizedClarificationCode === 'analytics_window'
+          ? 'clarifyAnalyticsWindow'
+          : 'clarifySpecific'
+
   return {
-    text:
-      normalizeText(question, null) ||
-      normalizeText(fallbackText, null) ||
-      'Saya butuh filter yang lebih spesifik: ID, nama proyek/supplier, nominal, tanggal, atau status.',
+    text: locale[clarificationCode] ?? locale.clarifySpecific,
     buttons: [],
     needsClarification: true,
+    facts: {
+      clarificationCode: normalizedClarificationCode || 'specific_filter',
+      question: locale[clarificationCode] ?? locale.clarifySpecific,
+    },
   }
 }
 
-function buildReplyMarkup(botUsername, buttons = []) {
-  const rows = buttons
-    .map((button) => {
-      const link = buildTelegramAssistantLink(botUsername, button.path)
+function buildAssistantCallbackData(prefix, value) {
+  const normalizedPrefix = normalizeText(prefix, '')
+  const normalizedValue = normalizeText(value, '')
 
-      return link
-        ? [
-            {
-              text: normalizeText(button.text, 'Buka detail'),
-              url: link,
-            },
-          ]
-        : null
-    })
-    .filter(Boolean)
+  return normalizedPrefix && normalizedValue ? `${normalizedPrefix}${normalizedValue}` : ''
+}
+
+function buildAssistantQuickActionRows(language = 'id') {
+  const locale = getLocaleText(language)
+
+  return [
+    [
+      {
+        text: locale.quickStatus,
+        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'status'),
+      },
+      {
+        text: locale.quickSearch,
+        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'cari'),
+      },
+      {
+        text: locale.quickAnalytics,
+        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'analytics'),
+      },
+    ],
+    [
+      {
+        text: locale.quickHistory,
+        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'riwayat'),
+      },
+      {
+        text: locale.quickMenu,
+        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'menu'),
+      },
+    ],
+  ]
+}
+
+function buildAssistantRouteRows(language = 'id') {
+  const locale = getLocaleText(language)
+
+  return [
+    [
+      {
+        text: locale.openRoute(locale.routeLedger),
+        path: '/transactions',
+      },
+      {
+        text: locale.openRoute(locale.routeHistory),
+        path: '/transactions?tab=history',
+      },
+    ],
+    [
+      {
+        text: locale.openRoute(locale.routePayment),
+        path: '/pembayaran',
+      },
+      {
+        text: locale.openRoute(locale.routeAttendance),
+        path: '/payroll?tab=worker',
+      },
+    ],
+  ]
+}
+
+function buildAssistantClarificationRows(clarificationCode, language = 'id', facts = {}) {
+  const locale = getLocaleText(language)
+  const normalizedClarificationCode = normalizeText(clarificationCode, '')
+
+  if (normalizedClarificationCode === 'analytics_metric') {
+    return [
+      [
+        {
+          text: locale.analyticsMetricBillSummary,
+          callbackData: buildAssistantCallbackData(
+            assistantCallbackPrefixes.metric,
+            'bill_summary'
+          ),
+        },
+        {
+          text: locale.analyticsMetricCashOutflow,
+          callbackData: buildAssistantCallbackData(
+            assistantCallbackPrefixes.metric,
+            'cash_outflow'
+          ),
+        },
+      ],
+      [
+        {
+          text: locale.analyticsMetricAttendance,
+          callbackData: buildAssistantCallbackData(
+            assistantCallbackPrefixes.metric,
+            'attendance_present'
+          ),
+        },
+        {
+          text: locale.analyticsMetricRanking,
+          callbackData: buildAssistantCallbackData(
+            assistantCallbackPrefixes.metric,
+            'obligation_ranking'
+          ),
+        },
+      ],
+    ]
+  }
+
+  if (normalizedClarificationCode === 'analytics_entity') {
+    const candidateTypes = Array.isArray(facts?.candidateTypes) && facts.candidateTypes.length > 0
+      ? facts.candidateTypes
+      : ['supplier', 'worker', 'creditor']
+    const entityLabels = {
+      supplier: locale.analyticsEntitySupplier,
+      worker: locale.analyticsEntityWorker,
+      creditor: locale.analyticsEntityCreditor,
+    }
+
+    return [
+      candidateTypes
+        .filter((candidateType) => allowedAnalyticsEntityTypes.has(candidateType))
+        .map((candidateType) => ({
+          text: entityLabels[candidateType] ?? candidateType,
+          callbackData: buildAssistantCallbackData(
+            assistantCallbackPrefixes.entity,
+            candidateType
+          ),
+        })),
+    ].filter((row) => row.length > 0)
+  }
+
+  if (normalizedClarificationCode === 'analytics_window') {
+    return [
+      [
+        {
+          text: locale.analyticsWindowToday,
+          callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.window, 'today'),
+        },
+        {
+          text: locale.analyticsWindowYesterday,
+          callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.window, 'yesterday'),
+        },
+      ],
+      [
+        {
+          text: locale.analyticsWindowWeekCurrent,
+          callbackData: buildAssistantCallbackData(
+            assistantCallbackPrefixes.window,
+            'week_current'
+          ),
+        },
+        {
+          text: locale.analyticsWindowMonthCurrent,
+          callbackData: buildAssistantCallbackData(
+            assistantCallbackPrefixes.window,
+            'month_current'
+          ),
+        },
+      ],
+    ]
+  }
+
+  return []
+}
+
+function buildCommandMenuReply(language = 'id') {
+  const locale = getLocaleText(language)
+
+  return {
+    text: [locale.menuIntro, locale.menuHint].join('\n'),
+    buttonRows: [
+      ...buildAssistantQuickActionRows(language),
+      ...buildAssistantRouteRows(language),
+    ],
+    buttons: [],
+    needsClarification: false,
+    appendQuickActions: false,
+    facts: {
+      surface: 'command_menu',
+    },
+  }
+}
+
+function buildOpenRouteReply(language = 'id') {
+  const locale = getLocaleText(language)
+
+  return {
+    text: locale.openRoutePrompt,
+    buttonRows: buildAssistantRouteRows(language),
+    buttons: [],
+    needsClarification: true,
+    appendQuickActions: false,
+    facts: {
+      clarificationCode: 'specific_filter',
+      surface: 'route_picker',
+    },
+  }
+}
+
+function buildInlineKeyboardButton(botUsername, button) {
+  const buttonText = normalizeText(button?.text, '')
+
+  if (!buttonText) {
+    return null
+  }
+
+  const callbackData = normalizeText(button?.callbackData, '')
+
+  if (callbackData) {
+    return {
+      text: buttonText,
+      callback_data: callbackData,
+    }
+  }
+
+  const path = normalizeAssistantRoutePath(button?.path)
+  const link = buildTelegramAssistantLink(botUsername, path)
+
+  if (!link) {
+    return null
+  }
+
+  return {
+    text: buttonText,
+    url: link,
+  }
+}
+
+function buildReplyMarkup(botUsername, reply, plan = null) {
+  const replyRows = Array.isArray(reply?.buttonRows) && reply.buttonRows.length > 0
+    ? reply.buttonRows
+    : Array.isArray(reply?.buttons)
+      ? reply.buttons.map((button) => [button])
+      : []
+  const clarificationRows = reply?.needsClarification
+    ? buildAssistantClarificationRows(
+        reply?.facts?.clarificationCode ?? plan?.clarificationCode,
+        plan?.language,
+        reply?.facts
+      )
+    : []
+  const quickActionRows = reply?.appendQuickActions === false
+    ? []
+    : buildAssistantQuickActionRows(plan?.language)
+  const rows = [...replyRows, ...clarificationRows, ...quickActionRows]
+    .map((row) => row.map((button) => buildInlineKeyboardButton(botUsername, button)).filter(Boolean))
+    .filter((row) => row.length > 0)
 
   return rows.length > 0 ? { inline_keyboard: rows } : null
 }
@@ -1638,11 +3848,142 @@ function isCancelText(text) {
   )
 }
 
-function buildPendingSessionPayload(text, plan) {
-  return {
-    original_text: normalizeText(text, ''),
-    original_plan: plan,
+async function processAssistantCommand({
+  adminClient,
+  botToken,
+  chatId,
+  replyToMessageId,
+  telegramUserId,
+  rawText,
+  command,
+  session,
+  memberships,
+  forcedMembership = null,
+}) {
+  const sessionPayload = session?.pending_payload ?? {}
+  const responseLanguage = getLocaleTemplate(
+    getAssistantLanguageFromText(command?.args || rawText, session)
+  )
+  const selectedMembership =
+    forcedMembership ??
+    memberships.find((membership) => membership.team_id === session?.team_id) ??
+    memberships.find((membership) => membership.is_default) ??
+    memberships[0] ??
+    null
+  const workspaceName =
+    selectedMembership?.team_name ?? normalizeText(sessionPayload.last_workspace_name, null)
+  const commandInput = buildAssistantCommandInput(command?.command, command?.args)
+
+  if (command?.command === 'menu') {
+    if (chatId && telegramUserId) {
+      await saveAssistantSession(adminClient, {
+        chatId,
+        telegramUserId,
+        teamId: selectedMembership?.team_id ?? session?.team_id ?? null,
+        state: 'idle',
+        pendingIntent: null,
+        pendingPayload: sessionPayload,
+      })
+    }
+
+    const menuReply = buildCommandMenuReply(responseLanguage)
+
+    await sendTelegramMessage({
+      botToken,
+      chatId,
+      text: menuReply.text,
+      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), menuReply, {
+        language: responseLanguage,
+      }),
+      replyToMessageId,
+    })
+
+    return { processed: true }
   }
+
+  if (commandInput) {
+    return processTelegramMessage({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId,
+      telegramUserId,
+      messageText: commandInput,
+      session: session
+        ? {
+            ...session,
+            state: 'idle',
+          }
+        : null,
+      memberships,
+      forcedMembership,
+      forcedOriginalText: commandInput,
+      skipCommandParsing: true,
+    })
+  }
+
+  if (!chatId || !telegramUserId) {
+    return { processed: true }
+  }
+
+  const clarificationCode =
+    command?.command === 'analytics' ? 'analytics_metric' : 'specific_filter'
+  const commandPlan = {
+    intent: 'clarify',
+    targetPath: null,
+    search: {},
+    analytics: {
+      metricKey: null,
+      entityType: null,
+      entityQuery: null,
+      windowKey: 'none',
+      entityHints: [],
+      requiresEntity: false,
+      requiresWindow: false,
+      metricCandidates: [],
+      needsClarification: command?.command === 'analytics',
+    },
+    language: responseLanguage,
+    clarificationCode,
+  }
+  const commandReply =
+    command?.command === 'buka'
+      ? buildOpenRouteReply(responseLanguage)
+      : buildClarifyReply(commandPlan)
+  const turnData = buildAssistantTurnData({
+    text: rawText,
+    plan: commandPlan,
+    language: responseLanguage,
+    workspaceName,
+  })
+  const writtenText =
+    command?.command === 'buka'
+      ? commandReply.text
+      : await rewriteAssistantReply({
+          plan: commandPlan,
+          reply: commandReply,
+          workspaceName,
+          session,
+        })
+
+  await saveAssistantSession(adminClient, {
+    chatId,
+    telegramUserId,
+    teamId: selectedMembership?.team_id ?? session?.team_id ?? null,
+    state: 'awaiting_clarification',
+    pendingIntent: commandPlan.intent,
+    pendingPayload: buildPendingSessionPayload(rawText, commandPlan, sessionPayload, turnData),
+  })
+
+  await sendTelegramMessage({
+    botToken,
+    chatId,
+    text: writtenText || commandReply.text,
+    replyMarkup: buildReplyMarkup(getTelegramBotUsername(), commandReply, commandPlan),
+    replyToMessageId,
+  })
+
+  return { processed: true }
 }
 
 async function handleWorkspaceChoice({
@@ -1655,11 +3996,15 @@ async function handleWorkspaceChoice({
   incomingText,
   callbackQueryId = null,
 }) {
+  const replyLanguage = getLocaleTemplate(
+    session?.pending_payload?.last_language ?? getAssistantLanguageFromText(incomingText, session)
+  )
+
   if (callbackQueryId) {
     await answerTelegramCallback({
       botToken,
       callbackQueryId,
-      text: 'Workspace dipilih.',
+      text: getLocaleText(replyLanguage).workspaceSelected,
     })
   }
 
@@ -1669,7 +4014,7 @@ async function handleWorkspaceChoice({
     await sendTelegramMessage({
       botToken,
       chatId,
-      text: 'Pilihan workspace dibatalkan.',
+      text: getLocaleText(replyLanguage).workspaceChoiceCancelled,
       replyToMessageId,
     })
 
@@ -1679,7 +4024,7 @@ async function handleWorkspaceChoice({
   const selectedMembership = buildRouteChoiceFromText(incomingText, memberships)
 
   if (!selectedMembership) {
-    const choiceMessage = buildWorkspaceChoiceMessage(memberships)
+    const choiceMessage = buildWorkspaceChoiceMessage(memberships, replyLanguage)
     const choiceMarkup = buildWorkspaceChoiceMarkup(memberships)
 
     await sendTelegramMessage({
@@ -1695,7 +4040,13 @@ async function handleWorkspaceChoice({
 
   const pendingPayload = session?.pending_payload ?? {}
   const originalText = normalizeText(pendingPayload.original_text, '')
-  const originalPlan = pendingPayload.original_plan ?? null
+  const choiceTurnData = buildAssistantTurnData({
+    text: incomingText,
+    plan: { intent: 'clarify', search: {}, targetPath: null },
+    language: replyLanguage,
+    workspaceName: selectedMembership.team_name,
+  })
+  const updatedPendingPayload = buildAssistantMemoryPayload(pendingPayload, choiceTurnData)
 
   await saveAssistantSession(adminClient, {
     chatId,
@@ -1703,15 +4054,30 @@ async function handleWorkspaceChoice({
     teamId: selectedMembership.team_id,
     state: 'idle',
     pendingIntent: null,
-    pendingPayload: {},
+    pendingPayload: updatedPendingPayload,
   })
 
-  return {
-    processed: false,
-    forcedMembership: selectedMembership,
-    originalText,
-    originalPlan,
+  if (!originalText) {
+    return { processed: true }
   }
+
+  return processTelegramMessage({
+    adminClient,
+    botToken,
+    chatId,
+    replyToMessageId,
+    telegramUserId: session.telegram_user_id,
+    messageText: originalText,
+    session: {
+      ...session,
+      team_id: selectedMembership.team_id,
+      state: 'idle',
+      pending_payload: updatedPendingPayload,
+    },
+    memberships,
+    forcedMembership: selectedMembership,
+    forcedOriginalText: originalText,
+  })
 }
 
 async function processTelegramMessage({
@@ -1725,9 +4091,17 @@ async function processTelegramMessage({
   memberships,
   forcedMembership = null,
   forcedOriginalText = null,
-  forcedOriginalPlan = null,
+  skipCommandParsing = false,
 }) {
   const effectiveText = normalizeText(forcedOriginalText ?? messageText, '')
+  const sessionPayload = session?.pending_payload ?? {}
+  const responseLanguage = getLocaleTemplate(
+    getAssistantLanguageFromText(effectiveText, session)
+  )
+  const responseLocale = getLocaleText(responseLanguage)
+  const explicitCommand = skipCommandParsing
+    ? null
+    : extractAssistantCommand(effectiveText, getTelegramBotUsername())
 
   if (!effectiveText) {
     return {
@@ -1735,8 +4109,23 @@ async function processTelegramMessage({
     }
   }
 
+  if (explicitCommand) {
+    return processAssistantCommand({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId,
+      telegramUserId,
+      rawText: effectiveText,
+      command: explicitCommand,
+      session,
+      memberships,
+      forcedMembership,
+    })
+  }
+
   if (session?.state === 'awaiting_clarification' && !forcedMembership) {
-    const pendingPayload = session.pending_payload ?? {}
+    const pendingPayload = sessionPayload
     const combinedText = [
       normalizeText(pendingPayload.original_text, ''),
       effectiveText,
@@ -1761,11 +4150,14 @@ async function processTelegramMessage({
       replyToMessageId,
       telegramUserId,
       messageText: combinedText,
-      session: null,
+      session: {
+        ...session,
+        state: 'idle',
+        pending_payload: pendingPayload,
+      },
       memberships,
       forcedMembership: memberships.find((membership) => membership.team_id === session.team_id) ?? null,
       forcedOriginalText: combinedText,
-      forcedOriginalPlan: pendingPayload.original_plan ?? null,
     })
   }
 
@@ -1779,8 +4171,7 @@ async function processTelegramMessage({
     await sendTelegramMessage({
       botToken,
       chatId,
-      text:
-        'Saya tidak menemukan workspace aktif untuk akun ini. Hubungi admin untuk membership yang aktif.',
+      text: responseLocale.workspaceMissing,
       replyToMessageId,
     })
 
@@ -1799,8 +4190,7 @@ async function processTelegramMessage({
     await sendTelegramMessage({
       botToken,
       chatId,
-      text:
-        'Saya tidak menemukan membership aktif yang bisa dipakai untuk workspace ini.',
+      text: responseLocale.membershipMissing,
       replyToMessageId,
     })
 
@@ -1814,13 +4204,25 @@ async function processTelegramMessage({
     !selectedMembership.is_default &&
     session?.state !== 'awaiting_workspace_choice'
   ) {
+    const choiceTurnData = buildAssistantTurnData({
+      text: effectiveText,
+      plan: { intent: 'clarify', search: {}, targetPath: null },
+      language: responseLanguage,
+      workspaceName: selectedMembership.team_name,
+    })
+
     await saveAssistantSession(adminClient, {
       chatId,
       telegramUserId,
       teamId: null,
       state: 'awaiting_workspace_choice',
       pendingIntent: null,
-      pendingPayload: buildPendingSessionPayload(effectiveText, null),
+      pendingPayload: buildPendingSessionPayload(
+        effectiveText,
+        null,
+        sessionPayload,
+        choiceTurnData
+      ),
     })
 
     const choiceMarkup = buildWorkspaceChoiceMarkup(activeMemberships)
@@ -1828,7 +4230,7 @@ async function processTelegramMessage({
     await sendTelegramMessage({
       botToken,
       chatId,
-      text: buildWorkspaceChoiceMessage(activeMemberships),
+      text: buildWorkspaceChoiceMessage(activeMemberships, responseLanguage),
       replyMarkup: choiceMarkup,
       replyToMessageId,
     })
@@ -1836,31 +4238,46 @@ async function processTelegramMessage({
     return { processed: true }
   }
 
-  const plan =
-    forcedOriginalPlan ??
-    (session?.state === 'awaiting_workspace_choice'
-      ? session.pending_payload?.original_plan ?? null
-      : null)
-
-  const normalizedPlan =
-    plan && typeof plan === 'object'
-      ? normalizePlannerObject(plan, effectiveText)
-      : await classifyAssistantMessage({
-          text: effectiveText,
-          workspaceName: selectedMembership.team_name,
-          role: selectedMembership.role,
-          membershipsCount: activeMemberships.length,
-        })
+  const normalizedPlan = await classifyAssistantMessage({
+    text: effectiveText,
+    workspaceName: selectedMembership.team_name,
+    role: selectedMembership.role,
+    membershipsCount: activeMemberships.length,
+    languageHint: responseLanguage,
+    contextSummary: normalizeText(sessionPayload.context_summary, ''),
+    lastTurn: normalizeText(sessionPayload.last_turn?.user_text, ''),
+    session,
+  })
+  const turnData = buildAssistantTurnData({
+    text: effectiveText,
+    plan: normalizedPlan,
+    language: normalizedPlan.language ?? responseLanguage,
+    workspaceName: selectedMembership.team_name,
+  })
 
   if (normalizedPlan.intent === 'refuse') {
-    await clearAssistantSession(adminClient, chatId)
+    const refusalReply = buildRefusalReply(normalizedPlan.language ?? responseLanguage)
+    const writtenText = await rewriteAssistantReply({
+      plan: normalizedPlan,
+      reply: refusalReply,
+      workspaceName: selectedMembership.team_name,
+      session,
+    })
 
-    const refusalReply = buildRefusalReply(normalizedPlan.reason)
+    await saveAssistantSession(adminClient, {
+      chatId,
+      telegramUserId,
+      teamId: selectedMembership.team_id,
+      state: 'idle',
+      pendingIntent: null,
+      pendingPayload: buildAssistantMemoryPayload(sessionPayload, turnData),
+    })
 
     await sendTelegramMessage({
       botToken,
       chatId,
-      text: refusalReply.text,
+      text: writtenText || refusalReply.text,
+      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), refusalReply, normalizedPlan),
       replyToMessageId,
     })
 
@@ -1868,15 +4285,28 @@ async function processTelegramMessage({
   }
 
   if (normalizedPlan.intent === 'navigate') {
-    await clearAssistantSession(adminClient, chatId)
-
     const navigateReply = buildNavigateReply(normalizedPlan)
+    const writtenText = await rewriteAssistantReply({
+      plan: normalizedPlan,
+      reply: navigateReply,
+      workspaceName: selectedMembership.team_name,
+      session,
+    })
+
+    await saveAssistantSession(adminClient, {
+      chatId,
+      telegramUserId,
+      teamId: selectedMembership.team_id,
+      state: 'idle',
+      pendingIntent: null,
+      pendingPayload: buildAssistantMemoryPayload(sessionPayload, turnData),
+    })
 
     await sendTelegramMessage({
       botToken,
       chatId,
-      text: navigateReply.text,
-      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), navigateReply.buttons),
+      text: writtenText || navigateReply.text,
+      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), navigateReply, normalizedPlan),
       replyToMessageId,
     })
 
@@ -1884,21 +4314,82 @@ async function processTelegramMessage({
   }
 
   if (normalizedPlan.intent === 'clarify') {
+    const clarifyReply = buildClarifyReply(normalizedPlan)
+    const writtenText = await rewriteAssistantReply({
+      plan: normalizedPlan,
+      reply: clarifyReply,
+      workspaceName: selectedMembership.team_name,
+      session,
+    })
+
     await saveAssistantSession(adminClient, {
       chatId,
       telegramUserId,
       teamId: selectedMembership.team_id,
       state: 'awaiting_clarification',
       pendingIntent: normalizedPlan.intent,
-      pendingPayload: buildPendingSessionPayload(effectiveText, normalizedPlan),
+      pendingPayload: buildPendingSessionPayload(
+        effectiveText,
+        normalizedPlan,
+        sessionPayload,
+        turnData
+      ),
     })
-
-    const clarifyReply = buildClarifyReply(normalizedPlan.question)
 
     await sendTelegramMessage({
       botToken,
       chatId,
-      text: clarifyReply.text,
+      text: writtenText || clarifyReply.text,
+      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), clarifyReply, normalizedPlan),
+      replyToMessageId,
+    })
+
+    return { processed: true }
+  }
+
+  if (normalizedPlan.intent === 'analytics') {
+    const analyticsReply = await buildAnalyticsReply(
+      adminClient,
+      selectedMembership.team_id,
+      normalizedPlan
+    )
+    const writtenText = await rewriteAssistantReply({
+      plan: normalizedPlan,
+      reply: analyticsReply,
+      workspaceName: selectedMembership.team_name,
+      session,
+    })
+
+    if (analyticsReply.needsClarification) {
+      await saveAssistantSession(adminClient, {
+        chatId,
+        telegramUserId,
+        teamId: selectedMembership.team_id,
+        state: 'awaiting_clarification',
+        pendingIntent: normalizedPlan.intent,
+        pendingPayload: buildPendingSessionPayload(
+          effectiveText,
+          normalizedPlan,
+          sessionPayload,
+          turnData
+        ),
+      })
+    } else {
+      await saveAssistantSession(adminClient, {
+        chatId,
+        telegramUserId,
+        teamId: selectedMembership.team_id,
+        state: 'idle',
+        pendingIntent: null,
+        pendingPayload: buildAssistantMemoryPayload(sessionPayload, turnData),
+      })
+    }
+
+    await sendTelegramMessage({
+      botToken,
+      chatId,
+      text: writtenText || analyticsReply.text,
+      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), analyticsReply, normalizedPlan),
       replyToMessageId,
     })
 
@@ -1917,6 +4408,12 @@ async function processTelegramMessage({
     normalizedPlan.intent === 'status'
       ? buildStatusReply(rows, normalizedPlan)
       : buildSearchReply(rows, normalizedPlan)
+  const writtenText = await rewriteAssistantReply({
+    plan: normalizedPlan,
+    reply,
+    workspaceName: selectedMembership.team_name,
+    session,
+  })
 
   if (reply.needsClarification) {
     await saveAssistantSession(adminClient, {
@@ -1925,17 +4422,29 @@ async function processTelegramMessage({
       teamId: selectedMembership.team_id,
       state: 'awaiting_clarification',
       pendingIntent: normalizedPlan.intent,
-      pendingPayload: buildPendingSessionPayload(effectiveText, normalizedPlan),
+      pendingPayload: buildPendingSessionPayload(
+        effectiveText,
+        normalizedPlan,
+        sessionPayload,
+        turnData
+      ),
     })
   } else {
-    await clearAssistantSession(adminClient, chatId)
+    await saveAssistantSession(adminClient, {
+      chatId,
+      telegramUserId,
+      teamId: selectedMembership.team_id,
+      state: 'idle',
+      pendingIntent: null,
+      pendingPayload: buildAssistantMemoryPayload(sessionPayload, turnData),
+    })
   }
 
   await sendTelegramMessage({
     botToken,
     chatId,
-    text: reply.text,
-    replyMarkup: buildReplyMarkup(getTelegramBotUsername(), reply.buttons),
+    text: writtenText || reply.text,
+    replyMarkup: buildReplyMarkup(getTelegramBotUsername(), reply, normalizedPlan),
     replyToMessageId,
   })
 
@@ -1948,20 +4457,25 @@ async function handleCallbackQuery({
   callbackQuery,
 }) {
   const callbackData = normalizeText(callbackQuery?.data, '')
+  const callbackAction = resolveAssistantCallbackAction(callbackData)
 
-  if (!callbackData.startsWith('ws:')) {
+  if (!callbackAction) {
     return { processed: false }
   }
 
   const chatId = normalizeTelegramId(callbackQuery?.message?.chat?.id)
   const telegramUserId = normalizeTelegramId(callbackQuery?.from?.id)
   const session = await loadAssistantSession(adminClient, chatId)
+  const callbackLanguage = getLocaleTemplate(
+    session?.pending_payload?.last_language ??
+      getAssistantLanguageFromText(callbackQuery?.message?.text ?? '', session)
+  )
 
-  if (!session) {
+  if (callbackAction.requiresSession && !session) {
     await answerTelegramCallback({
       botToken,
       callbackQueryId: callbackQuery.id,
-      text: 'Sesi sudah kedaluwarsa. Kirim ulang pesan.',
+      text: getLocaleText(callbackLanguage).callbackSessionExpired,
       showAlert: true,
     })
 
@@ -1969,43 +4483,96 @@ async function handleCallbackQuery({
   }
 
   const memberships = await loadActiveMemberships(adminClient, telegramUserId)
-  const selectedTeamId = callbackData.slice(3)
-  const selectedMembership =
-    memberships.find((membership) => membership.team_id === selectedTeamId) ?? null
+  const activeMemberships = memberships.filter((membership) => membership.team_is_active)
 
-  if (!selectedMembership) {
+  if (activeMemberships.length === 0) {
+    await clearAssistantSession(adminClient, chatId)
+
     await answerTelegramCallback({
       botToken,
       callbackQueryId: callbackQuery.id,
-      text: 'Workspace tidak ditemukan.',
+      text: getLocaleText(callbackLanguage).noActiveMembership,
       showAlert: true,
     })
 
     return { processed: true }
   }
 
-  const pendingPayload = session.pending_payload ?? {}
-  const originalText = normalizeText(pendingPayload.original_text, '')
-  const originalPlan = pendingPayload.original_plan ?? null
+  if (callbackAction.type === 'workspace') {
+    const selectedMembership =
+      activeMemberships.find((membership) => membership.team_id === callbackAction.teamId) ?? null
 
-  await saveAssistantSession(adminClient, {
-    chatId,
-    telegramUserId,
-    teamId: selectedMembership.team_id,
-    state: 'idle',
-    pendingIntent: null,
-    pendingPayload: {},
-  })
+    if (!selectedMembership) {
+      await answerTelegramCallback({
+        botToken,
+        callbackQueryId: callbackQuery.id,
+        text: getLocaleText(session?.pending_payload?.last_language).callbackWorkspaceNotFound,
+        showAlert: true,
+      })
+
+      return { processed: true }
+    }
+
+    const pendingPayload = session.pending_payload ?? {}
+    const originalText = normalizeText(pendingPayload.original_text, '')
+    const callbackTurnData = {
+      userText: originalText,
+      intent: 'clarify',
+      language: callbackLanguage,
+      workspaceName: selectedMembership.team_name,
+      targetPath: null,
+      query: null,
+      summary: buildTurnSummary({
+        text: originalText,
+        plan: { intent: 'clarify', search: {}, targetPath: null },
+        language: callbackLanguage,
+        workspaceName: selectedMembership.team_name,
+      }),
+    }
+    const updatedPendingPayload = buildAssistantMemoryPayload(pendingPayload, callbackTurnData)
+
+    await saveAssistantSession(adminClient, {
+      chatId,
+      telegramUserId,
+      teamId: selectedMembership.team_id,
+      state: 'idle',
+      pendingIntent: null,
+      pendingPayload: updatedPendingPayload,
+    })
+
+    await answerTelegramCallback({
+      botToken,
+      callbackQueryId: callbackQuery.id,
+      text: getLocaleText(callbackLanguage).workspacePicked(selectedMembership.team_name),
+    })
+
+    if (!originalText) {
+      return { processed: true }
+    }
+
+    return processTelegramMessage({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId: callbackQuery?.message?.message_id ?? null,
+      telegramUserId,
+      messageText: originalText,
+      session: {
+        ...session,
+        team_id: selectedMembership.team_id,
+        state: 'idle',
+        pending_payload: updatedPendingPayload,
+      },
+      memberships: activeMemberships,
+      forcedMembership: selectedMembership,
+      forcedOriginalText: originalText,
+    })
+  }
 
   await answerTelegramCallback({
     botToken,
     callbackQueryId: callbackQuery.id,
-    text: `${selectedMembership.team_name ?? 'Workspace'} dipilih.`,
   })
-
-  if (!originalText) {
-    return { processed: true }
-  }
 
   return processTelegramMessage({
     adminClient,
@@ -2013,12 +4580,10 @@ async function handleCallbackQuery({
     chatId,
     replyToMessageId: callbackQuery?.message?.message_id ?? null,
     telegramUserId,
-    messageText: originalText,
-    session: null,
-    memberships,
-    forcedMembership: selectedMembership,
-    forcedOriginalText: originalText,
-    forcedOriginalPlan: originalPlan,
+    messageText: callbackAction.messageText,
+    session,
+    memberships: activeMemberships,
+    forcedOriginalText: callbackAction.messageText,
   })
 }
 
@@ -2039,15 +4604,30 @@ async function processTelegramUpdate(adminClient, botToken, update) {
 
   const chatId = normalizeTelegramId(message?.chat?.id)
   const telegramUserId = normalizeTelegramId(message?.from?.id)
-  const messageText = normalizeText(message?.text ?? message?.caption, '')
+  const messageText = getTelegramMessageText(message)
+  const botUsername = getTelegramBotUsername()
 
   if (!chatId || !telegramUserId) {
     return { processed: false }
   }
 
   const session = await loadAssistantSession(adminClient, chatId)
+
+  if (
+    !shouldProcessTelegramMessage({
+      message,
+      session,
+      botUsername,
+      messageText,
+    })
+  ) {
+    return { processed: false }
+  }
+
   const memberships = await loadActiveMemberships(adminClient, telegramUserId)
   const activeMemberships = memberships.filter((membership) => membership.team_is_active)
+  const updateLanguage = getLocaleTemplate(getAssistantLanguageFromText(messageText, session))
+  const updateLocale = getLocaleText(updateLanguage)
 
   if (activeMemberships.length === 0) {
     await clearAssistantSession(adminClient, chatId)
@@ -2055,8 +4635,7 @@ async function processTelegramUpdate(adminClient, botToken, update) {
     await sendTelegramMessage({
       botToken,
       chatId,
-      text:
-        'Akun ini belum punya membership workspace aktif. Hubungi admin untuk akses workspace yang valid.',
+      text: updateLocale.noActiveMembership,
       replyToMessageId: message?.message_id ?? null,
     })
 
@@ -2147,4 +4726,21 @@ export default async function handler(req, res) {
           : 'Terjadi kesalahan saat memproses assistant Telegram.',
     })
   }
+}
+
+export {
+  answerTelegramCallback,
+  buildAssistantCommandInput,
+  buildAssistantCommandRawText,
+  buildAssistantMemoryPayload,
+  buildAssistantResponseFactPacket,
+  buildAssistantResponsePrompt,
+  buildPendingSessionPayload,
+  extractAssistantCommand,
+  isAssistantResponseSafe,
+  normalizeAssistantPendingPayload,
+  postAssistantModelPrompt,
+  postAssistantWriterPrompt,
+  resolveAssistantCallbackAction,
+  rewriteAssistantReply,
 }
