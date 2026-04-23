@@ -133,7 +133,9 @@ function buildNotificationReplyMarkup(
         return [
           buildButton(
             'Review pembayaran',
-            payload.billId ? `/payment/${payload.billId}` : '/pembayaran'
+            payload.billId
+              ? `/transactions/${payload.billId}?surface=riwayat`
+              : '/transactions?tab=history'
           ),
           buildButton('Buka riwayat', '/transactions?tab=history'),
         ]

@@ -2667,3 +2667,13 @@ Saat ada brief baru yang masih terkait stream ini, update dokumen dengan format:
   - Scope target: `api/telegram-assistant.js`, `api/telegram-assistant-handoff.js`, `src/lib/telegram-assistant-links.js`, `src/lib/telegram-assistant-routing.js`, `supabase/migrations/20260423120000_create_telegram_assistant_handoffs.sql`, `tests/unit/telegram-assistant-routing.test.js`, `tests/unit/telegram-assistant-handoff.test.js`, `docs/progress/unified-crud-workspace-progress-log.md`.
   - Dependensi: `UCW-321`.
   - Addendum audit: group fallback tetap read-only; tombol DM sekarang mengarah ke `/start <handoff-token>` dan token hanya boleh dipakai oleh akun yang dituju.
+- [x] UCW-326 - Polish UI halaman Tim invite agar lebih rapih dan brand-consistent
+  - Halaman `Tim` harus lebih jelas secara hierarchy: composer invite, kartu link terbaru, dan list anggota aktif tetap terbaca mobile-first tanpa mengubah contract invite.
+  - Scope target: `src/pages/TeamInvitePage.jsx`, `src/components/TeamInviteManager.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-124`, `UCW-125`, `UCW-324`.
+  - Addendum audit: polish ini hanya merapikan shell, card, spacing, dan brand tokens untuk flow invite yang sudah ada; tidak ada logic, schema, atau bot write boundary baru.
+- [x] UCW-327 - Arahkan review pembayaran bill ke detail transaksi surface riwayat
+  - Tombol review pembayaran bill harus mendarat ke detail transaksi canonical dengan surface riwayat, bukan ke halaman payment settlement.
+  - Scope target: `api/notify.js`, `src/lib/telegram-assistant-links.js`, `src/pages/TransactionDetailPage.jsx`, `tests/unit/telegram-notify.test.js`, `tests/unit/telegram-assistant-routing.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-242`, `UCW-252`, `UCW-320`.
+  - Addendum audit: route review harus tetap canonical untuk Telegram deep link, dan detail page perlu menegaskan surface history tanpa mengubah source of truth settlement.

@@ -23,14 +23,60 @@ Dokumen ini adalah log progres khusus untuk stream `Unified CRUD Workspace`.
 - Active stream: `Unified CRUD Workspace`
 - Referensi plan: `docs/unified-crud-workspace-plan-2026-04-18.md`
 - Primary freeze authority: `docs/freeze/00-index.md`
-- Current task: `UCW-323`
+- Current task: `UCW-327`
 - Current status: `validated`
-- Catatan fokus: audit smoke deep soft-delete, restore, dan permanent delete lintas domain; pastikan row recycle bin dan empty-state payroll tetap stabil setelah archive/restore.
-- Catatan brief terbaru: suite `payment`, `restore`, `payroll`, dan `transactions` sekarang menutup alur archive/restore/permanent-delete yang paling rapuh; `Riwayat` payroll tidak lagi snap balik ke `Summary` setelah archive, dan empty-state recycle-bin tetap muncul saat history habis.
-- Catatan audit freeze terbaru: scope tetap pada `core release + delete lifecycle`; audit ini hanya menstabilkan refresh detail, dedupe history row, dan timeout smoke lintas surface tanpa membuka surface write baru.
-- Status transitions touched: `UCW-242` tetap `audit_required`; `UCW-243`, `UCW-244`, `UCW-245`, `UCW-246`, `UCW-247`, `UCW-248`, `UCW-249`, `UCW-250`, `UCW-251`, `UCW-252`, `UCW-253`, `UCW-254`, `UCW-255`, `UCW-256`, `UCW-257`, `UCW-258`, `UCW-259`, `UCW-260`, `UCW-261`, `UCW-262`, `UCW-263`, `UCW-264`, `UCW-265`, `UCW-266`, `UCW-267`, `UCW-268`, `UCW-269`, `UCW-270`, `UCW-271`, `UCW-272`, `UCW-273`, `UCW-274`, `UCW-275`, `UCW-276`, dan `UCW-277` tetap `validated`; `UCW-278` sekarang `validated`; `UCW-279` tetap `validated`; `UCW-280` tetap `validated`; `UCW-281` tetap `validated`; `UCW-283` tetap `validated`; `UCW-284` tetap `validated`; `UCW-285` tetap `validated`; `UCW-286` sekarang `validated`; `UCW-287` sekarang `validated`; `UCW-288` sekarang `validated`; `UCW-289` sekarang `validated`; `UCW-290` sekarang `validated`; `UCW-291` sekarang `validated`; `UCW-292` sekarang `validated`; `UCW-293` sekarang `validated`; `UCW-294` sekarang `validated`; `UCW-295` sekarang `validated`; `UCW-296` sekarang `validated`; `UCW-297` sekarang `validated`; `UCW-298` sekarang `validated`; `UCW-299` sekarang `validated`; `UCW-300` sekarang `validated`; `UCW-301` tetap `validated`; `UCW-302` sekarang `validated`; `UCW-303` sekarang `validated`; `UCW-304` sekarang `validated`; `UCW-305` sekarang `validated`; `UCW-306` sekarang `validated`; `UCW-307` sekarang `validated`; `UCW-308` tetap `validated`; `UCW-309` tetap `validated`; `UCW-310` tetap `validated`; `UCW-311` tetap `validated`; `UCW-312` tetap `validated`; `UCW-313` tetap `validated`; `UCW-314` tetap `validated`; `UCW-315` tetap `validated`; `UCW-316` tetap `validated`; `UCW-317` sekarang `validated`; `UCW-318` sekarang `validated`; `UCW-319` sekarang `validated`; `UCW-320` sekarang `validated`; `UCW-321` sekarang `validated`; `UCW-322` tetap `planned`; `UCW-323` sekarang `deferred`; `UCW-324` sekarang `validated`.
-- Status transitions touched tambahan: `UCW-323` sekarang `validated`; `UCW-324` tetap `validated`; `UCW-325` tetap `validated`.
-- Review order: delete lifecycle smoke -> payment detail refresh -> transactions route timeout hardening.
+- Catatan fokus: arahkan tombol review pembayaran bill ke detail transaksi surface riwayat, bukan ke halaman payment settlement.
+- Catatan brief terbaru: user melihat tombol review pembayaran masih menuju `/payment/:id`; yang diinginkan adalah mendarat ke detail transaksi dengan tab riwayat pembayaran.
+- Catatan audit freeze terbaru: scope tetap sempit pada route/link detail pembayaran, surface history, dan helper deep link; tidak menyentuh source of truth transaksi atau schema.
+- Status transitions touched: `UCW-242` tetap `audit_required`; `UCW-243`, `UCW-244`, `UCW-245`, `UCW-246`, `UCW-247`, `UCW-248`, `UCW-249`, `UCW-250`, `UCW-251`, `UCW-252`, `UCW-253`, `UCW-254`, `UCW-255`, `UCW-256`, `UCW-257`, `UCW-258`, `UCW-259`, `UCW-260`, `UCW-261`, `UCW-262`, `UCW-263`, `UCW-264`, `UCW-265`, `UCW-266`, `UCW-267`, `UCW-268`, `UCW-269`, `UCW-270`, `UCW-271`, `UCW-272`, `UCW-273`, `UCW-274`, `UCW-275`, `UCW-276`, dan `UCW-277` tetap `validated`; `UCW-278` sekarang `validated`; `UCW-279` tetap `validated`; `UCW-280` tetap `validated`; `UCW-281` tetap `validated`; `UCW-283` tetap `validated`; `UCW-284` tetap `validated`; `UCW-285` tetap `validated`; `UCW-286` sekarang `validated`; `UCW-287` sekarang `validated`; `UCW-288` sekarang `validated`; `UCW-289` sekarang `validated`; `UCW-290` sekarang `validated`; `UCW-291` sekarang `validated`; `UCW-292` sekarang `validated`; `UCW-293` sekarang `validated`; `UCW-294` sekarang `validated`; `UCW-295` sekarang `validated`; `UCW-296` sekarang `validated`; `UCW-297` sekarang `validated`; `UCW-298` sekarang `validated`; `UCW-299` sekarang `validated`; `UCW-300` sekarang `validated`; `UCW-301` tetap `validated`; `UCW-302` sekarang `validated`; `UCW-303` sekarang `validated`; `UCW-304` sekarang `validated`; `UCW-305` sekarang `validated`; `UCW-306` sekarang `validated`; `UCW-307` sekarang `validated`; `UCW-308` tetap `validated`; `UCW-309` tetap `validated`; `UCW-310` tetap `validated`; `UCW-311` tetap `validated`; `UCW-312` tetap `validated`; `UCW-313` tetap `validated`; `UCW-314` tetap `validated`; `UCW-315` tetap `validated`; `UCW-316` tetap `validated`; `UCW-317` sekarang `validated`; `UCW-318` sekarang `validated`; `UCW-319` sekarang `validated`; `UCW-320` sekarang `validated`; `UCW-321` sekarang `validated`; `UCW-322` tetap `planned`; `UCW-323` sekarang `deferred`; `UCW-324` sekarang `validated`; `UCW-325` sekarang `validated`; `UCW-326` sekarang `validated`; `UCW-327` sekarang `validated`.
+- Review order: route helper -> notify payload -> detail tab default -> validasi struktural.
+
+### [2026-04-23] `UCW-326` - Polish UI halaman Tim invite agar lebih rapih, jelas, dan brand-consistent
+- Status: `validated`
+- Ringkasan:
+  - shell dan composer invite kini lebih jelas urutannya, sehingga alur `pilih role -> generate -> copy` terbaca tanpa perlu membaca banyak noise visual.
+  - kartu link terbaru, empty state, dan list anggota aktif tetap memakai flow yang sama, tetapi hierarchy dan brand token sudah selaras dengan sistem visual existing.
+- File target:
+  - `src/pages/TeamInvitePage.jsx`
+  - `src/components/TeamInviteManager.jsx`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - polish harus tetap menjaga action role/suspend dan copy link agar tidak mengubah contract invite yang sudah stabil.
+  - text baru harus tetap ringkas; jika terlalu banyak, halaman Tim bisa terasa lebih berat daripada page lain di shell mobile.
+- Audit hasil:
+  - `TeamInvitePage` sekarang menampilkan eyebrow `Akses Tim` dan description yang langsung menjelaskan fungsi halaman tanpa mengubah navigasi.
+  - `TeamInviteManager` merapikan composer invite dengan card utama, role selector, CTA generate, kartu link terbaru ber-tone info, empty state yang eksplisit, dan badge anggota yang lebih konsisten dengan brand.
+  - list anggota aktif kini memakai tone icon yang lebih ringan dan badge `Owner aktif`, sementara flow role/suspend/copy link tetap sama.
+- Validasi:
+  - `npx eslint src/pages/TeamInvitePage.jsx src/components/TeamInviteManager.jsx`
+  - `npm run build`
+  - `git diff --check -- src/pages/TeamInvitePage.jsx src/components/TeamInviteManager.jsx docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
+
+### [2026-04-23] `UCW-327` - Arahkan review pembayaran bill ke detail transaksi surface riwayat
+- Status: `validated`
+- Ringkasan:
+  - Tombol review pembayaran bill harus mendarat ke detail transaksi dengan surface riwayat, bukan ke halaman payment settlement.
+  - Deep link Telegram tetap canonical, tetapi membawa context history yang bisa dibaca detail page.
+- File target:
+  - `api/notify.js`
+  - `src/lib/telegram-assistant-links.js`
+  - `src/pages/TransactionDetailPage.jsx`
+  - `tests/unit/telegram-notify.test.js`
+  - `tests/unit/telegram-assistant-routing.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Query route harus tetap diterima builder deep link Telegram; jika normalization terlalu ketat, tombol bisa hilang.
+  - Default tab detail harus tetap stabil untuk route lain yang tidak membawa surface riwayat.
+- Audit hasil:
+  - tombol review pembayaran bill sekarang membuka `/transactions/:id?surface=riwayat`, bukan `/payment/:id`.
+  - `normalizeAssistantRoutePath()` menerima query `surface=riwayat|history` untuk detail transaksi dan menormalisasinya ke canonical riwayat.
+  - `TransactionDetailPage` me-reset tab aktif ke `Riwayat` saat surface history dipakai, jadi deep link review mendarat ke tab yang relevan.
+- Validasi:
+  - `node --test tests/unit/telegram-assistant-routing.test.js tests/unit/telegram-notify.test.js`
+  - `npx eslint api/notify.js src/lib/telegram-assistant-links.js src/pages/TransactionDetailPage.jsx tests/unit/telegram-assistant-routing.test.js tests/unit/telegram-notify.test.js`
+  - `npm run build`
 
 ### [2026-04-23] `UCW-324` - Stabilkan hydration `invite_link` agar link undangan owner tetap visible setelah refresh
 - Status: `validated`

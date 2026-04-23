@@ -12,7 +12,8 @@ function TeamInvitePage() {
     <AppViewportSafeArea as="main" className="min-h-screen sm:mx-auto sm:max-w-md">
       <PageShell className="px-0 py-0">
         <FormHeader
-          eyebrow="More"
+          eyebrow="Akses Tim"
+          description="Buat link undangan dan atur role anggota dari satu halaman."
           onBack={() => navigate('/more')}
           title="Tim"
         />

@@ -175,7 +175,7 @@ test('notify endpoint adds review buttons for bill payment document notification
         text: 'Review pembayaran',
         url: buildTelegramAssistantLink(
           'banplex_greenfield_bot',
-          '/payment/bill-9'
+          '/transactions/bill-9?surface=riwayat'
         ),
       },
       {

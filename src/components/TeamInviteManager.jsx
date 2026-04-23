@@ -30,6 +30,18 @@ function formatApprovedAt(value) {
   return formatAppDateTime(parsedDate)
 }
 
+function getInviteStatusChipClassName(status) {
+  if (status === 'used') {
+    return 'border-[var(--app-tone-neutral-border)] bg-[var(--app-tone-neutral-bg)] text-[var(--app-tone-neutral-text)]'
+  }
+
+  if (status === 'expired') {
+    return 'border-[var(--app-tone-warning-border)] bg-[var(--app-tone-warning-bg)] text-[var(--app-tone-warning-text)]'
+  }
+
+  return 'border-[var(--app-tone-info-border)] bg-[var(--app-tone-info-bg)] text-[var(--app-tone-info-text)]'
+}
+
 function TeamInviteManagerContent() {
   const [selectedRole, setSelectedRole] = useState(allRoles[allRoles.length - 1])
   const [copyState, setCopyState] = useState('')
@@ -42,6 +54,11 @@ function TeamInviteManagerContent() {
   const updateTeamMemberRole = useTeamStore((state) => state.updateTeamMemberRole)
   const suspendTeamMember = useTeamStore((state) => state.suspendTeamMember)
   const authUser = useAuthStore((state) => state.user)
+  const activeTeamCount = activeTeam.length
+  const activeTeamDescription =
+    activeTeamCount > 0
+      ? `${activeTeamCount} anggota aktif tersinkron. Ubah role atau suspend langsung dari list.`
+      : 'Belum ada anggota aktif di workspace ini.'
 
   useEffect(() => {
     fetchActiveTeam().catch((teamError) => {
@@ -95,13 +112,25 @@ function TeamInviteManagerContent() {
     <div className="space-y-5">
       <PageSection
         eyebrow="Magic Invite Link"
-        title="Onboarding tanpa approval manual"
+        title="Buat link undangan"
+        description="Pilih role lalu generate link yang aktif 24 jam."
       >
-        <div className="space-y-4">
-          <div className="grid gap-3 lg:max-w-sm">
+        <AppCardStrong className="space-y-4 px-4 py-4 sm:px-5 sm:py-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <p className="app-meta">Invite control</p>
+              <p className="text-sm leading-6 text-[var(--app-hint-color)]">
+                Link terbaru akan muncul di kartu bawah dan bisa langsung disalin.
+              </p>
+            </div>
+            <span className="app-chip shrink-0">Aktif 24 jam</span>
+          </div>
+
+          <div className="grid gap-3">
             <AppWrapToggleGroup
               buttonSize="sm"
               label="Role undangan"
+              description="Role ini dipakai oleh link yang baru dibuat."
               onChange={setSelectedRole}
               options={inviteRoleOptions.map((role) => ({
                 value: role,
@@ -112,6 +141,7 @@ function TeamInviteManagerContent() {
 
             <AppButton
               disabled={isLoading}
+              fullWidth
               onClick={() => {
                 void handleGenerateInvite()
               }}
@@ -123,30 +153,32 @@ function TeamInviteManagerContent() {
           </div>
 
           {latestInvite?.invite_link ? (
-            <AppCard className="mt-0 space-y-3 border border-sky-100 bg-sky-50">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
-                    Link terbaru
-                  </p>
-                  <p className="mt-2 break-all text-sm leading-6 text-sky-950">
+            <AppCard className="app-tone-info space-y-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="app-meta text-[var(--app-tone-info-text)]">Link terbaru</p>
+                    <span className="app-chip">Role {latestInvite.role}</span>
+                  </div>
+                  <p className="break-all text-sm leading-6 text-[var(--app-tone-info-text)]">
                     {latestInvite.invite_link}
                   </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-sky-700">
-                    <span className="rounded-full border border-sky-200 bg-white px-3 py-1.5">
-                      Role {latestInvite.role}
-                    </span>
-                    <span className="rounded-full border border-sky-200 bg-white px-3 py-1.5">
+                  <div className="flex flex-wrap gap-2">
+                    <span
+                      className={`inline-flex items-center rounded-full border px-3 py-1.5 text-[11px] font-semibold ${getInviteStatusChipClassName(
+                        latestInvite.lifecycle_status
+                      )}`}
+                    >
                       Status {latestInvite.lifecycle_status_label}
                     </span>
-                    <span className="rounded-full border border-sky-200 bg-white px-3 py-1.5">
+                    <span className="app-chip">
                       Berlaku sampai {formatApprovedAt(latestInvite.expires_at)}
                     </span>
                   </div>
                 </div>
 
                 <AppButton
-                  className="border-sky-200 bg-white text-sky-800"
+                  className="shrink-0 border-[var(--app-tone-info-border)] bg-white text-[var(--app-tone-info-text)]"
                   onClick={() => {
                     void handleCopyLink()
                   }}
@@ -159,22 +191,29 @@ function TeamInviteManagerContent() {
               </div>
 
               {copyState ? (
-                <p className="mt-3 text-sm text-sky-700">{copyState}</p>
+                <p className="text-sm leading-6 text-[var(--app-tone-info-text)]">
+                  {copyState}
+                </p>
               ) : null}
             </AppCard>
-          ) : null}
+          ) : (
+            <AppCardDashed className="px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
+              Belum ada link undangan aktif. Buat link baru untuk mulai onboarding.
+            </AppCardDashed>
+          )}
 
           {error ? (
-            <AppCardDashed className="app-tone-danger mt-0 text-sm leading-6 text-rose-700">
+            <AppCardDashed className="app-tone-danger mt-0 text-sm leading-6">
               {error}
             </AppCardDashed>
           ) : null}
-        </div>
+        </AppCardStrong>
       </PageSection>
 
       <PageSection
         eyebrow="Active Team"
         title="Anggota aktif di workspace"
+        description={activeTeamDescription}
         action={
           <AppButton
             disabled={isLoading}
@@ -208,7 +247,7 @@ function TeamInviteManagerContent() {
                     badge={member.status_label || member.status}
                     badges={[
                       member.is_default ? 'Workspace utama' : '',
-                      isCurrentOwner ? 'Owner Bypass' : '',
+                      isCurrentOwner ? 'Owner aktif' : '',
                     ].filter(Boolean)}
                     details={[
                       `Role saat ini: ${member.role || 'Viewer'}`,
@@ -216,7 +255,13 @@ function TeamInviteManagerContent() {
                       `Telegram: ${member.telegram_user_id || '-'}`,
                     ]}
                     leadingIcon={
-                      <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-white">
+                      <span
+                        className={`flex h-10 w-10 items-center justify-center rounded-2xl ${
+                          isCurrentOwner
+                            ? 'bg-[var(--app-tone-info-bg)] text-[var(--app-tone-info-text)]'
+                            : 'bg-[var(--app-tone-neutral-bg)] text-[var(--app-tone-neutral-text)]'
+                        }`}
+                      >
                         {member.role === allRoles[0] ? (
                           <Shield className="h-5 w-5" />
                         ) : (
@@ -226,8 +271,8 @@ function TeamInviteManagerContent() {
                         )}
                       </span>
                     }
-                      actions={[
-                        ...inviteRoleOptions
+                    actions={[
+                      ...inviteRoleOptions
                         .filter((role) => role !== member.role || role === allRoles[0])
                         .map((role) => ({
                           id: `role-${role}`,
@@ -254,7 +299,7 @@ function TeamInviteManagerContent() {
             </AppCardStrong>
           ) : (
             <AppCardDashed className="px-4 py-5 text-sm leading-6 text-[var(--app-hint-color)]">
-              Belum ada anggota aktif selain akun yang sudah berhasil masuk ke workspace.
+              Belum ada anggota aktif di workspace ini.
             </AppCardDashed>
           )}
         </div>

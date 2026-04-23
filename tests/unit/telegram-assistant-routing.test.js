@@ -169,6 +169,19 @@ test('assistant deep link builder keeps buka route canonical', () => {
   )
 })
 
+test('assistant deep link builder keeps transaction detail history canonical', () => {
+  const routePath = '/transactions/bill-9?surface=riwayat'
+  const startParam = buildTelegramAssistantStartParam(routePath)
+
+  assert.equal(startParam?.startsWith('nav_'), true)
+  assert.equal(parseTelegramAssistantStartParam(startParam), routePath)
+  assert.equal(normalizeAssistantRoutePath('/transactions/bill-9?surface=history'), routePath)
+  assert.equal(
+    buildTelegramAssistantLink('banplex_greenfield_bot', routePath),
+    `https://t.me/banplex_greenfield_bot?startapp=${encodeURIComponent(startParam)}`
+  )
+})
+
 test('assistant chat link builder opens the bot DM surface', () => {
   assert.equal(
     buildTelegramAssistantChatLink('@banplex_greenfield_bot'),

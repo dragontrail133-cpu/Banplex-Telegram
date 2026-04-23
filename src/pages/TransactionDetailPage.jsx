@@ -196,7 +196,11 @@ function TransactionDetailPage({ technicalView = false }) {
   const [expenseAttachments, setExpenseAttachments] = useState(
     Array.isArray(initialTransaction?.attachments) ? initialTransaction.attachments : []
   )
-  const [activeDetailTab, setActiveDetailTab] = useState('info')
+  const [activeDetailTab, setActiveDetailTab] = useState(() => {
+    const initialSurface = getDetailSurface(location)
+
+    return initialSurface === 'riwayat' || initialSurface === 'history' ? 'history' : 'info'
+  })
   const [editingAttachmentId, setEditingAttachmentId] = useState(null)
   const [editingAttachmentName, setEditingAttachmentName] = useState('')
   const [detailRefreshKey, setDetailRefreshKey] = useState(0)
@@ -213,6 +217,10 @@ function TransactionDetailPage({ technicalView = false }) {
     : isPaymentSurface
       ? '/pembayaran'
       : '/transactions'
+
+  useEffect(() => {
+    setActiveDetailTab(isHistorySurface ? 'history' : 'info')
+  }, [isHistorySurface, transactionId])
 
   useEffect(() => {
     let isActive = true

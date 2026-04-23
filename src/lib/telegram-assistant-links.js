@@ -115,8 +115,21 @@ function normalizeAssistantRoutePath(path) {
     return null
   }
 
-  if (/^\/transactions\/[A-Za-z0-9-]+$/.test(pathname) && !search) {
-    return pathname
+  if (/^\/transactions\/[A-Za-z0-9-]+$/.test(pathname)) {
+    if (!search) {
+      return pathname
+    }
+
+    const surface = parsedUrl.searchParams.get('surface')
+
+    if (
+      parsedUrl.searchParams.size === 1 &&
+      ['riwayat', 'history'].includes(surface)
+    ) {
+      return `${pathname}?surface=riwayat`
+    }
+
+    return null
   }
 
   if (/^\/payment\/[A-Za-z0-9-]+$/.test(pathname) && !search) {
