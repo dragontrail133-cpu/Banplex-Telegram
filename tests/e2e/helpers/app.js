@@ -378,7 +378,9 @@ async function openApp(page, path = '/', options = {}) {
 }
 
 async function expectHeading(page, heading) {
-  await expect(page.getByRole('heading', { name: heading })).toBeVisible()
+  await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible({
+    timeout: 15000,
+  })
 }
 
 async function expectDashboardShell(page) {

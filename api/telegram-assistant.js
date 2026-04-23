@@ -2,7 +2,14 @@ import { createClient } from '@supabase/supabase-js'
 import { APP_TIME_ZONE, getAppTodayKey, shiftAppDateKey, toAppDateKey } from '../src/lib/date-time.js'
 import { normalizeRole } from '../src/lib/rbac.js'
 import {
+  createTelegramAssistantHandoffToken,
+  normalizeTelegramAssistantHandoffToken,
+  redeemTelegramAssistantHandoff,
+  saveTelegramAssistantHandoff,
+} from './telegram-assistant-handoff.js'
+import {
   buildTelegramAssistantLink,
+  buildTelegramAssistantChatLink,
   normalizeAssistantRoutePath,
 } from '../src/lib/telegram-assistant-links.js'
 import {
@@ -21,6 +28,7 @@ import {
   buildAssistantCommandRawText,
   extractAssistantCommand,
   resolveAssistantCallbackAction,
+  shouldUseAssistantDmFallback,
 } from '../src/lib/telegram-assistant-routing.js'
 import {
   answerTelegramCallback,
@@ -205,6 +213,7 @@ const localeTemplates = {
     workspaceMissing: 'Saya tidak menemukan workspace aktif untuk akun ini. Hubungi admin untuk akses workspace yang valid.',
     membershipMissing: 'Saya tidak menemukan membership aktif yang bisa dipakai untuk workspace ini.',
     sessionExpired: 'Sesi sudah kedaluwarsa. Kirim ulang pesan.',
+    handoffInvalid: 'Tautan DM ini tidak valid, sudah dipakai, atau kedaluwarsa. Minta kirim ulang dari grup.',
     workspaceNotFound: 'Workspace tidak ditemukan.',
     menuIntro: 'Pilih quick action assistant atau buka halaman workspace yang dibutuhkan.',
     menuHint: 'Command assistant tetap read-only: status, cari, analytics, riwayat, dan buka.',
@@ -273,6 +282,10 @@ const localeTemplates = {
     routeHistory: 'Riwayat',
     routePayment: 'Pembayaran',
     routeAttendance: 'Absensi',
+    groupFallbackIntro: 'Untuk detail atau klarifikasi, lanjutkan di DM bot.',
+    groupFallbackHint:
+      'Review cepat tetap tersedia di Jurnal, Riwayat, Pembayaran, dan Absensi di Mini Web.',
+    groupFallbackDmButton: 'Lanjut ke DM',
     analyticsMetricBillSummary: 'Tagihan',
     analyticsMetricCashOutflow: 'Pengeluaran',
     analyticsMetricAttendance: 'Kehadiran',
@@ -295,6 +308,7 @@ const localeTemplates = {
     workspaceMissing: 'Kuring teu manggihan workspace aktip pikeun akun ieu. Hubungi admin pikeun aksés workspace nu valid.',
     membershipMissing: 'Kuring teu manggihan membership aktip nu bisa dipaké pikeun workspace ieu.',
     sessionExpired: 'Sési geus kadaluwarsa. Kirim deui pesen.',
+    handoffInvalid: 'Tautan DM ieu teu valid, geus dipaké, atawa geus kadaluwarsa. Menta kirim deui ti grup.',
     workspaceNotFound: 'Workspace teu kapanggih.',
     noResultStatus: (queryLabel) =>
       queryLabel
@@ -360,6 +374,10 @@ const localeTemplates = {
     routeHistory: 'Riwayat',
     routePayment: 'Pembayaran',
     routeAttendance: 'Absensi',
+    groupFallbackIntro: 'Pikeun detail atawa klarifikasi, lanjutkeun di DM bot.',
+    groupFallbackHint:
+      'Review gancang tetep aya di Jurnal, Riwayat, Pembayaran, jeung Absensi dina Mini Web.',
+    groupFallbackDmButton: 'Lanjut ka DM',
     analyticsMetricBillSummary: 'Tagihan',
     analyticsMetricCashOutflow: 'Pangeluaran',
     analyticsMetricAttendance: 'Kahadiran',
@@ -655,6 +673,10 @@ function shouldProcessTelegramMessage({ message, session, botUsername, messageTe
   const command = extractAssistantCommand(normalizedText, botUsername)
   const intent = determineIntentFromText(normalizedText)
   const hasClarifyHint = hasAssistantTopicHint(normalizedText) || isFollowUpLikeText(normalizedText)
+
+  if (command?.command === 'start' && chatType !== 'private') {
+    return false
+  }
 
   if (chatType === 'private') {
     if (session?.state === 'awaiting_workspace_choice' || session?.state === 'awaiting_clarification') {
@@ -3530,6 +3552,212 @@ function buildNavigateReply(plan) {
   }
 }
 
+function buildAssistantDmHandoffReply(
+  language = 'id',
+  botUsername = getTelegramBotUsername(),
+  handoffToken = null
+) {
+  const locale = getLocaleText(language)
+  const dmLink = buildTelegramAssistantChatLink(botUsername, handoffToken)
+  const buttonRows = []
+
+  if (dmLink) {
+    buttonRows.push([
+      {
+        text: locale.groupFallbackDmButton,
+        url: dmLink,
+      },
+    ])
+  }
+
+  buttonRows.push(...buildAssistantRouteRows(language))
+
+  return {
+    text: [locale.groupFallbackIntro, locale.groupFallbackHint].join('\n'),
+    buttonRows,
+    buttons: [],
+    needsClarification: false,
+    appendQuickActions: false,
+    facts: {
+      surface: 'group_dm_handoff',
+    },
+  }
+}
+
+async function sendAssistantDmHandoff({
+  adminClient,
+  botToken,
+  chatId,
+  replyToMessageId,
+  telegramUserId,
+  sessionPayload,
+  turnData,
+  language,
+  teamId = null,
+}) {
+  const handoffToken = createTelegramAssistantHandoffToken()
+  const handoffExpiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString()
+  const nextSessionPayload = buildAssistantMemoryPayload(sessionPayload, turnData)
+  const dmReply = buildAssistantDmHandoffReply(
+    language,
+    getTelegramBotUsername(),
+    handoffToken
+  )
+
+  await saveTelegramAssistantHandoff(adminClient, {
+    token: handoffToken,
+    sourceChatId: chatId,
+    sourceMessageId: replyToMessageId,
+    telegramUserId,
+    teamId,
+    sessionPayload: nextSessionPayload,
+    originalText: turnData?.userText,
+    language,
+    expiresAt: handoffExpiresAt,
+  })
+
+  try {
+    await saveAssistantSession(adminClient, {
+      chatId,
+      telegramUserId,
+      teamId,
+      state: 'idle',
+      pendingIntent: null,
+      pendingPayload: nextSessionPayload,
+      expiresAt: handoffExpiresAt,
+    })
+  } catch (error) {
+    console.warn('[api/telegram-assistant] failed to persist DM handoff session', {
+      message: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  await sendTelegramMessage({
+    botToken,
+    chatId,
+    text: dmReply.text,
+    replyMarkup: buildReplyMarkup(getTelegramBotUsername(), dmReply, {
+      language,
+    }),
+    replyToMessageId,
+  })
+
+  return { processed: true }
+}
+
+async function processAssistantStartCommand({
+  adminClient,
+  botToken,
+  chatId,
+  replyToMessageId,
+  telegramUserId,
+  chatType,
+  rawText,
+  command,
+  session,
+  memberships,
+  forcedMembership = null,
+}) {
+  if (chatType !== 'private') {
+    return { processed: false }
+  }
+
+  const fallbackLanguage = getLocaleTemplate(
+    session?.pending_payload?.last_language ??
+      getAssistantLanguageFromText(command?.args || rawText, session)
+  )
+  const startToken = normalizeTelegramAssistantHandoffToken(command?.args)
+
+  if (!startToken) {
+    return processAssistantCommand({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId,
+      telegramUserId,
+      chatType,
+      rawText,
+      command: {
+        command: 'menu',
+        args: '',
+      },
+      session,
+      memberships,
+      forcedMembership,
+    })
+  }
+
+  const handoff = await redeemTelegramAssistantHandoff(adminClient, {
+    token: startToken,
+    telegramUserId,
+    consumedChatId: chatId,
+  })
+
+  if (!handoff) {
+    await sendTelegramMessage({
+      botToken,
+      chatId,
+      text: getLocaleText(fallbackLanguage).handoffInvalid,
+      replyToMessageId,
+    })
+
+    return { processed: true }
+  }
+
+  const resumedMembership = handoff.team_id
+    ? memberships.find((membership) => membership.team_id === handoff.team_id) ?? null
+    : forcedMembership ??
+      memberships.find((membership) => membership.is_default) ??
+      memberships[0] ??
+      null
+
+  if (!resumedMembership) {
+    await sendTelegramMessage({
+      botToken,
+      chatId,
+      text: getLocaleText(handoff.language).membershipMissing,
+      replyToMessageId,
+    })
+
+    return { processed: true }
+  }
+
+  const resumedSession = {
+    chat_id: chatId,
+    telegram_user_id: telegramUserId,
+    team_id: handoff.team_id ?? resumedMembership.team_id ?? null,
+    state: 'idle',
+    pending_payload: handoff.session_payload ?? {},
+    expires_at: handoff.expires_at ?? null,
+  }
+  const originalText = normalizeText(handoff.original_text, '')
+
+  if (!originalText) {
+    await sendTelegramMessage({
+      botToken,
+      chatId,
+      text: getLocaleText(handoff.language).handoffInvalid,
+      replyToMessageId,
+    })
+
+    return { processed: true }
+  }
+
+  return processTelegramMessage({
+    adminClient,
+    botToken,
+    chatId,
+    replyToMessageId,
+    telegramUserId,
+    chatType: 'private',
+    messageText: originalText,
+    session: resumedSession,
+    memberships,
+    forcedMembership: resumedMembership,
+    forcedOriginalText: originalText,
+  })
+}
+
 function buildRefusalReply(language = 'id') {
   const locale = getLocaleText(language)
 
@@ -3780,6 +4008,15 @@ function buildInlineKeyboardButton(botUsername, button) {
     }
   }
 
+  const buttonUrl = normalizeText(button?.url, '')
+
+  if (buttonUrl) {
+    return {
+      text: buttonText,
+      url: buttonUrl,
+    }
+  }
+
   const path = normalizeAssistantRoutePath(button?.path)
   const link = buildTelegramAssistantLink(botUsername, path)
 
@@ -3854,6 +4091,7 @@ async function processAssistantCommand({
   chatId,
   replyToMessageId,
   telegramUserId,
+  chatType,
   rawText,
   command,
   session,
@@ -3901,6 +4139,22 @@ async function processAssistantCommand({
     return { processed: true }
   }
 
+  if (command?.command === 'start') {
+    return processAssistantStartCommand({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId,
+      telegramUserId,
+      chatType,
+      rawText,
+      command,
+      session,
+      memberships,
+      forcedMembership,
+    })
+  }
+
   if (commandInput) {
     return processTelegramMessage({
       adminClient,
@@ -3908,6 +4162,7 @@ async function processAssistantCommand({
       chatId,
       replyToMessageId,
       telegramUserId,
+      chatType,
       messageText: commandInput,
       session: session
         ? {
@@ -3956,6 +4211,26 @@ async function processAssistantCommand({
     language: responseLanguage,
     workspaceName,
   })
+  const shouldFallbackToDm = shouldUseAssistantDmFallback({
+    chatType,
+    sessionState: session?.state,
+    needsClarification: commandReply.needsClarification,
+  })
+
+  if (shouldFallbackToDm) {
+    return sendAssistantDmHandoff({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId,
+      telegramUserId,
+      sessionPayload,
+      turnData,
+      language: responseLanguage,
+      teamId: selectedMembership?.team_id ?? session?.team_id ?? null,
+    })
+  }
+
   const writtenText =
     command?.command === 'buka'
       ? commandReply.text
@@ -3991,6 +4266,7 @@ async function handleWorkspaceChoice({
   botToken,
   chatId,
   replyToMessageId,
+  chatType,
   session,
   memberships,
   incomingText,
@@ -4067,6 +4343,7 @@ async function handleWorkspaceChoice({
     chatId,
     replyToMessageId,
     telegramUserId: session.telegram_user_id,
+    chatType,
     messageText: originalText,
     session: {
       ...session,
@@ -4086,6 +4363,7 @@ async function processTelegramMessage({
   chatId,
   replyToMessageId,
   telegramUserId,
+  chatType,
   messageText,
   session,
   memberships,
@@ -4116,6 +4394,7 @@ async function processTelegramMessage({
       chatId,
       replyToMessageId,
       telegramUserId,
+      chatType,
       rawText: effectiveText,
       command: explicitCommand,
       session,
@@ -4125,6 +4404,31 @@ async function processTelegramMessage({
   }
 
   if (session?.state === 'awaiting_clarification' && !forcedMembership) {
+    if (
+      shouldUseAssistantDmFallback({
+        chatType,
+        sessionState: session?.state,
+        needsClarification: true,
+      })
+    ) {
+      return sendAssistantDmHandoff({
+        adminClient,
+        botToken,
+        chatId,
+        replyToMessageId,
+        telegramUserId,
+        sessionPayload,
+        turnData: {
+          userText: effectiveText,
+          intent: 'clarify',
+          language: responseLanguage,
+          workspaceName: session?.pending_payload?.last_workspace_name ?? null,
+        },
+        language: responseLanguage,
+        teamId: session.team_id ?? null,
+      })
+    }
+
     const pendingPayload = sessionPayload
     const combinedText = [
       normalizeText(pendingPayload.original_text, ''),
@@ -4149,6 +4453,7 @@ async function processTelegramMessage({
       chatId,
       replyToMessageId,
       telegramUserId,
+      chatType,
       messageText: combinedText,
       session: {
         ...session,
@@ -4197,13 +4502,39 @@ async function processTelegramMessage({
     return { processed: true }
   }
 
-  if (
+  const needsWorkspaceChoice =
     !forcedMembership &&
     multipleMemberships &&
     !session?.team_id &&
     !selectedMembership.is_default &&
     session?.state !== 'awaiting_workspace_choice'
+
+  if (
+    shouldUseAssistantDmFallback({
+      chatType,
+      sessionState: session?.state,
+      needsWorkspaceChoice,
+    })
   ) {
+    return sendAssistantDmHandoff({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId,
+      telegramUserId,
+      sessionPayload,
+      turnData: {
+        userText: effectiveText,
+        intent: 'clarify',
+        language: responseLanguage,
+        workspaceName: session?.team_id ? selectedMembership.team_name : null,
+      },
+      language: responseLanguage,
+      teamId: session?.team_id ?? null,
+    })
+  }
+
+  if (needsWorkspaceChoice) {
     const choiceTurnData = buildAssistantTurnData({
       text: effectiveText,
       plan: { intent: 'clarify', search: {}, targetPath: null },
@@ -4315,12 +4646,33 @@ async function processTelegramMessage({
 
   if (normalizedPlan.intent === 'clarify') {
     const clarifyReply = buildClarifyReply(normalizedPlan)
-    const writtenText = await rewriteAssistantReply({
-      plan: normalizedPlan,
-      reply: clarifyReply,
-      workspaceName: selectedMembership.team_name,
-      session,
+    const shouldFallbackToDm = shouldUseAssistantDmFallback({
+      chatType,
+      sessionState: session?.state,
+      needsClarification: true,
     })
+    const writtenText = shouldFallbackToDm
+      ? clarifyReply.text
+      : await rewriteAssistantReply({
+          plan: normalizedPlan,
+          reply: clarifyReply,
+          workspaceName: selectedMembership.team_name,
+          session,
+        })
+
+    if (shouldFallbackToDm) {
+      return sendAssistantDmHandoff({
+        adminClient,
+        botToken,
+        chatId,
+        replyToMessageId,
+        telegramUserId,
+        sessionPayload,
+        turnData,
+        language: normalizedPlan.language ?? responseLanguage,
+        teamId: selectedMembership.team_id,
+      })
+    }
 
     await saveAssistantSession(adminClient, {
       chatId,
@@ -4353,6 +4705,25 @@ async function processTelegramMessage({
       selectedMembership.team_id,
       normalizedPlan
     )
+    const shouldFallbackToDm = shouldUseAssistantDmFallback({
+      chatType,
+      sessionState: session?.state,
+      needsClarification: analyticsReply.needsClarification,
+    })
+    if (shouldFallbackToDm) {
+      return sendAssistantDmHandoff({
+        adminClient,
+        botToken,
+        chatId,
+        replyToMessageId,
+        telegramUserId,
+        sessionPayload,
+        turnData,
+        language: normalizedPlan.language ?? responseLanguage,
+        teamId: selectedMembership.team_id,
+      })
+    }
+
     const writtenText = await rewriteAssistantReply({
       plan: normalizedPlan,
       reply: analyticsReply,
@@ -4408,6 +4779,26 @@ async function processTelegramMessage({
     normalizedPlan.intent === 'status'
       ? buildStatusReply(rows, normalizedPlan)
       : buildSearchReply(rows, normalizedPlan)
+  const shouldFallbackToDm = shouldUseAssistantDmFallback({
+    chatType,
+    sessionState: session?.state,
+    needsClarification: reply.needsClarification,
+  })
+
+  if (shouldFallbackToDm) {
+    return sendAssistantDmHandoff({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId,
+      telegramUserId,
+      sessionPayload,
+      turnData,
+      language: normalizedPlan.language ?? responseLanguage,
+      teamId: selectedMembership.team_id,
+    })
+  }
+
   const writtenText = await rewriteAssistantReply({
     plan: normalizedPlan,
     reply,
@@ -4465,6 +4856,7 @@ async function handleCallbackQuery({
 
   const chatId = normalizeTelegramId(callbackQuery?.message?.chat?.id)
   const telegramUserId = normalizeTelegramId(callbackQuery?.from?.id)
+  const chatType = getTelegramChatType(callbackQuery?.message)
   const session = await loadAssistantSession(adminClient, chatId)
   const callbackLanguage = getLocaleTemplate(
     session?.pending_payload?.last_language ??
@@ -4556,6 +4948,7 @@ async function handleCallbackQuery({
       chatId,
       replyToMessageId: callbackQuery?.message?.message_id ?? null,
       telegramUserId,
+      chatType,
       messageText: originalText,
       session: {
         ...session,
@@ -4580,6 +4973,7 @@ async function handleCallbackQuery({
     chatId,
     replyToMessageId: callbackQuery?.message?.message_id ?? null,
     telegramUserId,
+    chatType,
     messageText: callbackAction.messageText,
     session,
     memberships: activeMemberships,
@@ -4605,6 +4999,7 @@ async function processTelegramUpdate(adminClient, botToken, update) {
   const chatId = normalizeTelegramId(message?.chat?.id)
   const telegramUserId = normalizeTelegramId(message?.from?.id)
   const messageText = getTelegramMessageText(message)
+  const chatType = getTelegramChatType(message)
   const botUsername = getTelegramBotUsername()
 
   if (!chatId || !telegramUserId) {
@@ -4648,6 +5043,7 @@ async function processTelegramUpdate(adminClient, botToken, update) {
       botToken,
       chatId,
       replyToMessageId: message?.message_id ?? null,
+      chatType,
       session,
       memberships: activeMemberships,
       incomingText: messageText,
@@ -4660,6 +5056,7 @@ async function processTelegramUpdate(adminClient, botToken, update) {
     chatId,
     replyToMessageId: message?.message_id ?? null,
     telegramUserId,
+    chatType,
     messageText,
     session,
     memberships: activeMemberships,

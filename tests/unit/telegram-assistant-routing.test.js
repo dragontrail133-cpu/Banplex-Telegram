@@ -5,6 +5,13 @@ import {
   answerTelegramCallback,
 } from '../../src/lib/telegram-assistant-transport.js'
 import {
+  buildTelegramAssistantLink,
+  buildTelegramAssistantChatLink,
+  buildTelegramAssistantStartParam,
+  normalizeAssistantRoutePath,
+  parseTelegramAssistantStartParam,
+} from '../../src/lib/telegram-assistant-links.js'
+import {
   buildAssistantMemoryPayload,
   buildPendingSessionPayload,
   normalizeAssistantPendingPayload,
@@ -14,6 +21,7 @@ import {
   buildAssistantCommandRawText,
   extractAssistantCommand,
   resolveAssistantCallbackAction,
+  shouldUseAssistantDmFallback,
 } from '../../src/lib/telegram-assistant-routing.js'
 
 test('assistant command parser recognizes supported slash commands', () => {
@@ -36,6 +44,20 @@ test('assistant command parser recognizes supported slash commands', () => {
 test('assistant command parser ignores unsupported or foreign bot commands', () => {
   assert.equal(extractAssistantCommand('/status@other_bot tagihan', 'banplex_bot'), null)
   assert.equal(extractAssistantCommand('/hapus tagihan', 'banplex_bot'), null)
+})
+
+test('assistant start command parser carries DM handoff tokens', () => {
+  assert.deepEqual(extractAssistantCommand('/start dh_abcdEFGH12345678', 'banplex_bot'), {
+    command: 'start',
+    args: 'dh_abcdEFGH12345678',
+    rawText: '/start dh_abcdEFGH12345678',
+  })
+
+  assert.equal(buildAssistantCommandRawText('start', 'dh_abcdEFGH12345678'), '/start dh_abcdEFGH12345678')
+  assert.equal(
+    buildTelegramAssistantChatLink('@banplex_greenfield_bot', 'dh_abcdEFGH12345678'),
+    'https://t.me/banplex_greenfield_bot?start=dh_abcdEFGH12345678'
+  )
 })
 
 test('assistant callback routing maps quick action and clarification callbacks', () => {
@@ -133,6 +155,59 @@ test('assistant session payload keeps summary, route, entity hints, and compact 
   assert.equal(pendingPayload.original_text, '/analytics hutang mang dindin')
   assert.equal(pendingPayload.last_intent, 'analytics')
   assert.equal(pendingPayload.last_turn.analytics.metric_key, 'bill_summary')
+})
+
+test('assistant deep link builder keeps buka route canonical', () => {
+  const routePath = '/transactions?tab=history'
+  const startParam = buildTelegramAssistantStartParam(routePath)
+
+  assert.equal(startParam?.startsWith('nav_'), true)
+  assert.equal(parseTelegramAssistantStartParam(startParam), routePath)
+  assert.equal(
+    buildTelegramAssistantLink('banplex_greenfield_bot', routePath),
+    `https://t.me/banplex_greenfield_bot?startapp=${encodeURIComponent(startParam)}`
+  )
+})
+
+test('assistant chat link builder opens the bot DM surface', () => {
+  assert.equal(
+    buildTelegramAssistantChatLink('@banplex_greenfield_bot'),
+    'https://t.me/banplex_greenfield_bot'
+  )
+})
+
+test('assistant route normalization rejects invite generation surfaces', () => {
+  assert.equal(normalizeAssistantRoutePath('/more/team-invite'), null)
+  assert.equal(
+    buildTelegramAssistantLink('banplex_greenfield_bot', '/more/team-invite'),
+    null
+  )
+})
+
+test('assistant DM fallback policy only applies to group drill-down', () => {
+  assert.equal(
+    shouldUseAssistantDmFallback({
+      chatType: 'private',
+      needsClarification: true,
+    }),
+    false
+  )
+
+  assert.equal(
+    shouldUseAssistantDmFallback({
+      chatType: 'group',
+      needsClarification: true,
+    }),
+    true
+  )
+
+  assert.equal(
+    shouldUseAssistantDmFallback({
+      chatType: 'supergroup',
+      needsWorkspaceChoice: true,
+    }),
+    true
+  )
 })
 
 test('assistant callback ack ignores invalid or expired callback query ids', async () => {

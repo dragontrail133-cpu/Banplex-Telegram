@@ -23,13 +23,226 @@ Dokumen ini adalah log progres khusus untuk stream `Unified CRUD Workspace`.
 - Active stream: `Unified CRUD Workspace`
 - Referensi plan: `docs/unified-crud-workspace-plan-2026-04-18.md`
 - Primary freeze authority: `docs/freeze/00-index.md`
-- Current task: `UCW-313`
+- Current task: `UCW-323`
 - Current status: `validated`
-- Catatan fokus: helper pure assistant dipisah ke modul session/routing/transport agar file API tidak lagi memikul seluruh boundary logic, tetapi kontrak read-only, command surface, dan payload session hybrid tetap sama.
-- Catatan brief terbaru: `api/telegram-assistant.js` sekarang mengimpor helper modular untuk session, routing, dan transport, lalu smoke live `/menu`, `/analytics`, callback metric/window/history, dan session query Supabase tetap lolos setelah deploy ulang production.
-- Catatan audit freeze terbaru: modul baru hanya memisahkan struktur kode; surface command/callback tetap read-only dan tidak menambah jalur mutasi atau source of truth baru.
-Status transitions touched: `UCW-242` tetap `audit_required`; `UCW-243`, `UCW-244`, `UCW-245`, `UCW-246`, `UCW-247`, `UCW-248`, `UCW-249`, `UCW-250`, `UCW-251`, `UCW-252`, `UCW-253`, `UCW-254`, `UCW-255`, `UCW-256`, `UCW-257`, `UCW-258`, `UCW-259`, `UCW-260`, `UCW-261`, `UCW-262`, `UCW-263`, `UCW-264`, `UCW-265`, `UCW-266`, `UCW-267`, `UCW-268`, `UCW-269`, `UCW-270`, `UCW-271`, `UCW-272`, `UCW-273`, `UCW-274`, `UCW-275`, `UCW-276`, dan `UCW-277` tetap `validated`; `UCW-278` sekarang `validated`; `UCW-279` tetap `validated`; `UCW-280` tetap `validated`; `UCW-281` tetap `validated`; `UCW-283` tetap `validated`; `UCW-284` tetap `validated`; `UCW-285` tetap `validated`; `UCW-286` sekarang `validated`; `UCW-287` sekarang `validated`; `UCW-288` sekarang `validated`; `UCW-289` sekarang `validated`; `UCW-290` sekarang `validated`; `UCW-291` sekarang `validated`; `UCW-292` sekarang `validated`; `UCW-293` sekarang `validated`; `UCW-294` sekarang `validated`; `UCW-295` sekarang `validated`; `UCW-296` sekarang `validated`; `UCW-297` sekarang `validated`; `UCW-298` sekarang `validated`; `UCW-299` sekarang `validated`; `UCW-300` sekarang `validated`; `UCW-301` tetap `validated`; `UCW-302` sekarang `validated`; `UCW-303` sekarang `validated`; `UCW-304` sekarang `validated`; `UCW-305` sekarang `validated`; `UCW-306` sekarang `validated`; `UCW-307` sekarang `validated`; `UCW-308` tetap `validated`; `UCW-309` tetap `validated`; `UCW-310` tetap `validated`; `UCW-311` tetap `validated`; `UCW-312` tetap `validated`; `UCW-313` sekarang `validated`.
-- Review order: audit monolith boundary -> extract pure helper modules -> direct module tests -> deploy production -> rerun smoke live -> cek session payload -> update docs stream.
+- Catatan fokus: audit smoke deep soft-delete, restore, dan permanent delete lintas domain; pastikan row recycle bin dan empty-state payroll tetap stabil setelah archive/restore.
+- Catatan brief terbaru: suite `payment`, `restore`, `payroll`, dan `transactions` sekarang menutup alur archive/restore/permanent-delete yang paling rapuh; `Riwayat` payroll tidak lagi snap balik ke `Summary` setelah archive, dan empty-state recycle-bin tetap muncul saat history habis.
+- Catatan audit freeze terbaru: scope tetap pada `core release + delete lifecycle`; audit ini hanya menstabilkan refresh detail, dedupe history row, dan timeout smoke lintas surface tanpa membuka surface write baru.
+- Status transitions touched: `UCW-242` tetap `audit_required`; `UCW-243`, `UCW-244`, `UCW-245`, `UCW-246`, `UCW-247`, `UCW-248`, `UCW-249`, `UCW-250`, `UCW-251`, `UCW-252`, `UCW-253`, `UCW-254`, `UCW-255`, `UCW-256`, `UCW-257`, `UCW-258`, `UCW-259`, `UCW-260`, `UCW-261`, `UCW-262`, `UCW-263`, `UCW-264`, `UCW-265`, `UCW-266`, `UCW-267`, `UCW-268`, `UCW-269`, `UCW-270`, `UCW-271`, `UCW-272`, `UCW-273`, `UCW-274`, `UCW-275`, `UCW-276`, dan `UCW-277` tetap `validated`; `UCW-278` sekarang `validated`; `UCW-279` tetap `validated`; `UCW-280` tetap `validated`; `UCW-281` tetap `validated`; `UCW-283` tetap `validated`; `UCW-284` tetap `validated`; `UCW-285` tetap `validated`; `UCW-286` sekarang `validated`; `UCW-287` sekarang `validated`; `UCW-288` sekarang `validated`; `UCW-289` sekarang `validated`; `UCW-290` sekarang `validated`; `UCW-291` sekarang `validated`; `UCW-292` sekarang `validated`; `UCW-293` sekarang `validated`; `UCW-294` sekarang `validated`; `UCW-295` sekarang `validated`; `UCW-296` sekarang `validated`; `UCW-297` sekarang `validated`; `UCW-298` sekarang `validated`; `UCW-299` sekarang `validated`; `UCW-300` sekarang `validated`; `UCW-301` tetap `validated`; `UCW-302` sekarang `validated`; `UCW-303` sekarang `validated`; `UCW-304` sekarang `validated`; `UCW-305` sekarang `validated`; `UCW-306` sekarang `validated`; `UCW-307` sekarang `validated`; `UCW-308` tetap `validated`; `UCW-309` tetap `validated`; `UCW-310` tetap `validated`; `UCW-311` tetap `validated`; `UCW-312` tetap `validated`; `UCW-313` tetap `validated`; `UCW-314` tetap `validated`; `UCW-315` tetap `validated`; `UCW-316` tetap `validated`; `UCW-317` sekarang `validated`; `UCW-318` sekarang `validated`; `UCW-319` sekarang `validated`; `UCW-320` sekarang `validated`; `UCW-321` sekarang `validated`; `UCW-322` tetap `planned`; `UCW-323` sekarang `deferred`; `UCW-324` sekarang `validated`.
+- Status transitions touched tambahan: `UCW-323` sekarang `validated`; `UCW-324` tetap `validated`; `UCW-325` tetap `validated`.
+- Review order: delete lifecycle smoke -> payment detail refresh -> transactions route timeout hardening.
+
+### [2026-04-23] `UCW-324` - Stabilkan hydration `invite_link` agar link undangan owner tetap visible setelah refresh
+- Status: `validated`
+- Ringkasan:
+  - helper invite baru menyatukan shape create dan reload, sehingga `latestInvite` tetap membawa `invite_link` setelah owner generate lalu refresh/refetch.
+  - boundary assistant tetap read-only; route canonical `'/more/team-invite'` tetap tidak dikenali oleh builder link bot.
+- File target:
+  - `src/lib/team-invite.js`
+  - `src/store/useTeamStore.js`
+  - `src/lib/supabase.js`
+  - `tests/unit/team-invite-store.test.js`
+  - `tests/unit/telegram-assistant-routing.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - invite link tetap bergantung pada `VITE_TELEGRAM_BOT_USERNAME`; jika env hilang, fallback existing tetap dipakai.
+  - helper bersama harus ikut berubah bila shape `invite_tokens` berubah di schema, supaya card tetap visible setelah reload.
+- Audit hasil:
+  - `mapInviteToken()` sekarang selalu menyusun `invite_link` dari token + bot username, dan store memakai helper yang sama untuk jalur create maupun reload.
+  - `fetchActiveTeam()` tetap refetch setelah generate, tetapi hasil reload tidak lagi men-strip card invite karena shape data sudah konsisten.
+  - `normalizeAssistantRoutePath('/more/team-invite')` tetap `null`, jadi bot boundary tetap read-only.
+- Validasi:
+  - `node --test tests/unit/team-invite-store.test.js tests/unit/telegram-assistant-routing.test.js`
+  - `npx eslint src/lib/team-invite.js src/lib/supabase.js src/store/useTeamStore.js tests/unit/team-invite-store.test.js tests/unit/telegram-assistant-routing.test.js`
+  - `npm run build`
+  - `npm run lint` *(gagal pada asset trace existing di `playwright-report/trace/assets/*`; bukan dari patch ini)*
+
+### [2026-04-23] `UCW-321` - Kunci fallback AI DM untuk user terverifikasi dan arahkan ke bot/web
+- Status: `validated`
+- Ringkasan:
+  - Assistant Telegram sekarang memindahkan klarifikasi, workspace choice, dan drill-down yang terlalu detail dari grup ke DM bot untuk user terverifikasi.
+  - Surface grup tetap ringkas: bila percakapan butuh detail, bot memberi tombol DM bot dan CTA review cepat ke Mini Web, bukan melanjutkan dialog panjang di grup.
+- File target:
+  - `api/telegram-assistant.js`
+  - `src/lib/telegram-assistant-links.js`
+  - `src/lib/telegram-assistant-routing.js`
+  - `tests/unit/telegram-assistant-routing.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Handoff DM tidak membawa context lintas chat karena session masih dipetakan per `chat_id`, jadi user bisa perlu mengulang satu prompt setelah pindah surface.
+  - Tombol DM bergantung pada `TELEGRAM_BOT_USERNAME`; kalau env itu hilang, fallback tetap berjalan lewat teks dan tombol Mini Web, tetapi CTA DM tidak muncul.
+- Audit hasil:
+  - `shouldUseAssistantDmFallback()` membedakan group/supergroup dari private dan memblokir prompt klarifikasi/workspace-choice agar tidak kembali ke grup.
+  - `buildAssistantDmHandoffReply()` menambahkan tombol `t.me/<bot>` langsung dan route Mini Web canonical, sementara `buildInlineKeyboardButton()` sekarang menerima URL button.
+  - `processTelegramMessage()` dan `processAssistantCommand()` memakai handoff yang sama untuk klarifikasi, workspace choice, dan callback follow-up.
+- Validasi:
+  - `node --check api/telegram-assistant.js`
+  - `node --check src/lib/telegram-assistant-links.js`
+  - `node --check src/lib/telegram-assistant-routing.js`
+  - `node --test tests/unit/telegram-assistant-routing.test.js`
+  - `node --test tests/unit/telegram-assistant-writer.test.js`
+  - `npx eslint api/telegram-assistant.js src/lib/telegram-assistant-links.js src/lib/telegram-assistant-routing.js tests/unit/telegram-assistant-routing.test.js tests/unit/telegram-assistant-writer.test.js`
+  - `npm run build`
+
+### [2026-04-23] `UCW-320` - Notifikasi grup operasional summary + CTA review cepat
+- Status: `validated`
+- Ringkasan:
+  - Notifikasi grup untuk event operasional sekarang memakai ringkasan singkat dan tombol review cepat ke surface canonical, supaya grup tidak dipakai untuk percakapan panjang.
+  - Link review diarahkan ke Mini Web/route yang relevan; event `attendance` dan `recap` sudah dipetakan sebagai surface lanjut, jadi jalur grup tetap read-only.
+- File target:
+  - `api/notify.js`
+  - `src/store/useIncomeStore.js`
+  - `docs/freeze/03-source-of-truth-contract-map.md`
+  - `docs/freeze/05-ai-execution-guardrails.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+  - `tests/unit/telegram-notify.test.js`
+- Risiko:
+  - Tombol review bergantung pada `TELEGRAM_BOT_USERNAME` / `VITE_TELEGRAM_BOT_USERNAME`; kalau env itu hilang di production, group CTA akan hilang dan notifikasi hanya fallback text.
+  - Jalur recap/attendance sekarang sudah dipetakan di notification layer, tetapi producer runtime untuk dua event itu masih belum ada di repo, jadi belum ada smoke live untuk keduanya.
+- Audit hasil:
+  - `api/notify.js` sekarang membangun inline URL button ke Mini Web untuk `transaction`, `material_invoice`, `bill_payment`, `project_income`, `loan`, `loan_payment`, `salary_bill`, `attendance`, dan `recap`, dengan payload summary yang lebih ringkas.
+  - `src/store/useIncomeStore.js` menambahkan `transactionId` pada notifikasi project income dan loan supaya tombol review bisa membuka detail canonical, bukan hanya daftar umum.
+  - Freeze map dan guardrail sekarang menegaskan bahwa notifikasi grup adalah publish/read-only surface dengan CTA cepat, bukan tempat percakapan bebas.
+- Validasi:
+  - `node --check api/notify.js`
+  - `node --check src/store/useIncomeStore.js`
+  - `node --test tests/unit/telegram-notify.test.js`
+  - `node --test tests/unit/telegram-assistant-routing.test.js tests/unit/telegram-notify.test.js`
+  - `npx eslint api/notify.js src/store/useIncomeStore.js tests/unit/telegram-notify.test.js`
+  - `npm run build`
+
+### [2026-04-23] `UCW-319` - Fallback laporan bisnis Telegram Mini Web ke DM user terverifikasi
+- Status: `validated`
+- Ringkasan:
+  - `ProjectReport` sekarang punya jalur `Kirim ke DM` yang hanya muncul di Telegram Mini Web, sementara unduh PDF browser tetap menjadi jalur utama.
+  - Delivery bisnis report dilakukan server-side ke DM user terverifikasi, dan jika pengiriman file gagal, bot mengirim fallback text yang mengarahkan user kembali ke browser untuk unduh langsung.
+- File target:
+  - `api/report-pdf-delivery.js`
+  - `src/lib/report-delivery-api.js`
+  - `src/store/useReportStore.js`
+  - `src/components/ProjectReport.jsx`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Delivery DM tetap bergantung pada user yang sudah terverifikasi dan pernah membuka bot; kalau Telegram menolak chat pribadi, fallback hanya sempat mengirim text bila document gagal.
+  - Report PDF server-side memakai generator yang sama dengan browser, jadi jika ada drift di helper PDF, efeknya akan terlihat di dua surface sekaligus.
+- Audit hasil:
+  - Endpoint baru memverifikasi session Supabase, membaca `telegram_user_id`, lalu mengirim PDF bisnis via `sendDocument` ke DM user terverifikasi.
+  - Store report sekarang punya aksi `sendBusinessReportToTelegramDm`, dan UI `ProjectReport` menampilkan tombol fallback hanya di Telegram.
+  - Jika delivery document gagal, route mengirim fallback text yang mengarahkan user kembali ke browser, sehingga user tidak terhenti tanpa petunjuk.
+- Validasi:
+  - `node --check api/report-pdf-delivery.js`
+  - `node --check src/lib/report-delivery-api.js`
+  - `node --check src/store/useReportStore.js`
+  - `npx eslint api/report-pdf-delivery.js src/lib/report-delivery-api.js src/store/useReportStore.js src/components/ProjectReport.jsx`
+  - `npm run build`
+- Follow-up:
+  - Task berikutnya adalah `UCW-321` untuk fallback DM assistant terverifikasi, lalu `UCW-322` untuk smoke browser/Mini Web/DM.
+
+### [2026-04-23] `UCW-318` - Tambah smoke live `income -> fee bill` dan `material invoice -> bill/stock`, lalu catat blocker lane sisa
+- Status: `validated`
+- Ringkasan:
+  - Live smoke staging sekarang menambah proof create `project-income` dan create `material invoice` unpaid, lalu merekam artifact parent-child yang dibutuhkan untuk verifier Supabase.
+  - Gate release kini menandai `income` dan `material invoice` sebagai domain yang sudah punya automation path, sambil mengunci blocker aktif untuk payroll, attachment, report/PDF, delete lifecycle, dan target staging-safe.
+- File target:
+  - `tests/live/release-smoke.spec.js`
+  - `scripts/aq/verify-live-smoke.mjs`
+  - `docs/release-aq-gate.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Smoke `income -> fee bill` mengasumsikan staging punya minimal satu staff aktif dengan `payment_type` `per_termin` atau `fixed_per_termin`; tanpa itu, bill fee tidak akan muncul dan gate harus dianggap belum siap.
+  - Smoke `material invoice` mengasumsikan staging punya project, supplier material, material, dan trigger stok/bill yang sinkron; jika seed atau trigger drift, proof parent-child ini akan gagal.
+  - Eksekusi write smoke penuh belum dijalankan di turn ini karena context repo belum membuktikan `.env` aktif aman sebagai target staging disposable.
+- Audit hasil:
+  - `tests/live/release-smoke.spec.js` sekarang membuat `project-income` dari UI create form, lalu membuat `material invoice` unpaid dan merekam artifact `project_income`, `project_income_fee_bill`, `material_invoice`, `material_invoice_bill`, `material_invoice_line_item`, serta `material_stock_transaction`.
+  - `scripts/aq/verify-live-smoke.mjs` kini memeriksa `project_incomes`, `bills` fee by `project_income_id`, `expenses` material invoice, `expense_line_items`, dan `stock_transactions`.
+  - `docs/release-aq-gate.md` sekarang menandai coverage `Income -> fee bill` dan `Material invoice / surat jalan` sebagai `sudah ada`, lalu menambahkan section `Active Blockers` untuk domain yang belum aman dijalankan.
+- Validasi:
+  - `node --check tests/live/release-smoke.spec.js`
+  - `node --check scripts/aq/verify-live-smoke.mjs`
+  - `npx playwright test --config=playwright.live.config.js --list`
+  - `npm run lint`
+  - `npm run build`
+  - `rg -n "Income -> fee bill|Material invoice / surat jalan|Active Blockers" docs/release-aq-gate.md`
+  - `rg -n "UCW-317|UCW-318" docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
+  - `git diff --check -- tests/live/release-smoke.spec.js scripts/aq/verify-live-smoke.mjs docs/release-aq-gate.md docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
+
+### [2026-04-23] `UCW-317` - Hardening lane live smoke lokal pakai `vercel dev` dan auto-load verifier env
+- Status: `validated`
+- Ringkasan:
+  - Runner live smoke lokal sekarang memakai runtime penuh `vercel dev`, sehingga jalur `/api/auth`, `/api/transactions`, dan `/api/records` bisa dilayani dari lokal tanpa base URL eksternal.
+  - Verifier Supabase kini bisa membaca `.env` lalu `.env.local` otomatis saat env shell kosong, sehingga audit DB tidak lagi bergantung pada export manual.
+- File target:
+  - `playwright.live.config.js`
+  - `scripts/aq/verify-live-smoke.mjs`
+  - `docs/release-aq-gate.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - `vercel dev` tetap bergantung pada project link `.vercel/project.json` dan env lokal yang valid; kalau link atau env rusak, lane live tetap tidak bisa start.
+  - Auto-load `.env` membantu lokal, tetapi tidak menggantikan kebutuhan memisahkan target staging-safe dari production-safe.
+- Audit hasil:
+  - `playwright.live.config.js` sekarang default menjalankan `vercel dev --listen 127.0.0.1:3000 --yes`, dengan override opsional lewat `E2E_LOCAL_SERVER_COMMAND`.
+  - `scripts/aq/verify-live-smoke.mjs` sekarang memuat `.env` lalu `.env.local` sebelum membuat service-role verifier client.
+  - `docs/release-aq-gate.md` sudah disinkronkan agar kontrak live smoke menyebut `vercel dev` sebagai runner lokal resmi.
+- Validasi:
+  - `node --check playwright.live.config.js`
+  - `node --check scripts/aq/verify-live-smoke.mjs`
+  - `vercel help dev`
+
+### [2026-04-23] `UCW-316` - Tambah smoke live `expense -> bill -> partial payment -> recalc`
+- Status: `validated`
+- Ringkasan:
+  - Live smoke staging sekarang membuktikan jalur `expense` unpaid membentuk `bill`, lalu partial `bill_payment` dari `/payment/:id` mengubah summary parent secara nyata.
+  - Verifier Supabase kini memeriksa `expenses`, `bills`, dan `bill_payments` sehingga status `partial` dan `paid_amount` parent tidak lagi hanya diasumsikan dari UI.
+- File target:
+  - `tests/live/release-smoke.spec.js`
+  - `scripts/aq/verify-live-smoke.mjs`
+  - `docs/release-aq-gate.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Smoke ini mengasumsikan staging punya seed `project`, `expense category`, dan `supplier` operasional aktif; tanpa seed itu, create expense akan gagal dan gate harus dianggap belum siap.
+  - Belum ada automation untuk edit expense, full payment, atau delete/restore; domain `expense/tagihan` masih butuh AQ lanjutan walau write proof partial sudah ada.
+- Audit hasil:
+  - `tests/live/release-smoke.spec.js` sekarang memilih master seed staging dari picker, membuat `expense` unpaid, lalu membuka `/payment/:billId` untuk menyimpan partial payment dan merekam artifact `expense`, `bill_payment`, serta `expense_bill_after_payment`.
+  - `scripts/aq/verify-live-smoke.mjs` kini memverifikasi row `expenses`, row `bills` parent dengan status `partial`, dan row `bill_payments` child dengan nominal/tanggal/catatan yang sesuai artifact.
+  - `docs/release-aq-gate.md` sekarang menyebut write proof minimum baru, coverage matrix `Expense -> bill -> payment` sebagai `sudah ada`, dan menggeser prioritas smoke berikutnya ke `income -> fee bill visibility`.
+- Validasi:
+  - `node --check tests/live/release-smoke.spec.js`
+  - `node --check scripts/aq/verify-live-smoke.mjs`
+  - `node scripts/aq/verify-live-smoke.mjs --help`
+  - `npx playwright test --config=playwright.live.config.js --list`
+  - `npm run lint`
+  - `npm run build`
+  - `rg -n "Expense -> bill -> payment|income -> fee bill visibility" docs/release-aq-gate.md`
+  - `rg -n "UCW-316" docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
+  - `git diff --check -- tests/live/release-smoke.spec.js scripts/aq/verify-live-smoke.mjs docs/release-aq-gate.md docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
+
+### [2026-04-23] `UCW-315` - Petakan readiness staging dan coverage matrix AQ per domain
+- Status: `validated`
+- Ringkasan:
+  - Gate release sekarang punya matrix readiness staging yang menegaskan env, akun uji, workspace seed, artifact, verifier, dan safety boundary sebelum live smoke dijalankan.
+  - Dokumen gate juga sekarang memetakan coverage per domain: mana yang sudah dibuktikan otomatis, mana yang baru punya AQ manual, dan mana yang masih blocker release karena belum punya smoke proof.
+- File target:
+  - `docs/release-aq-gate.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - Matrix ini masih bergantung pada asumsi schema dan seed staging mirror setara production; kalau staging drift, status coverage bisa tampak lebih siap daripada kondisi runtime sebenarnya.
+  - Domain yang ditandai `belum ada` masih perlu implementasi smoke lane baru; dokumen ini hanya mengunci urutan dan definisi gap, bukan menutup gap itu sendiri.
+- Audit hasil:
+  - `docs/release-aq-gate.md` sekarang memiliki `Staging Readiness Matrix` yang mengunci parity Supabase, auth bootstrap, verifier access, akun uji, prefix disposable, cleanup owner, dan production safety.
+  - `docs/release-aq-gate.md` juga sekarang memiliki `Coverage Matrix` yang membedakan domain yang sudah punya smoke proof (`funding_creditor`, `loan`, `invite_token`) dari domain blocker yang belum punya automation (`expense`, `income`, `material invoice`, `attendance/payroll`, `attachment`, `report/PDF`, `delete lifecycle`).
+  - `docs/release-aq-gate.md` menutup dengan urutan `Next Smoke Priority` agar eksekusi setelah ini dimulai dari `expense -> bill -> partial payment -> recalc`, bukan lompat ke domain yang lebih mahal.
+- Validasi:
+  - `rg -n "Staging Readiness Matrix|Coverage Matrix|Next Smoke Priority" docs/release-aq-gate.md`
+  - `rg -n "UCW-315" docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
+  - `git diff --check -- docs/release-aq-gate.md docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
 
 ### [2026-04-23] `UCW-312` - Bangun AQ gate staging dan harness live smoke release
 - Status: `validated`
@@ -276,6 +489,25 @@ Status transitions touched: `UCW-242` tetap `audit_required`; `UCW-243`, `UCW-24
   - `vercel deploy --prod --yes --force --format json` berhasil mempromosikan build terbaru ke alias `https://banplex-telegram.vercel.app`.
   - Smoke live ke alias production mengembalikan `ok=true processed=true` untuk `/menu`, `/analytics`, callback `ta:am:cash_outflow`, callback `ta:aw:month_current`, dan callback `ta:cmd:riwayat`.
   - Query SQL ke `public.telegram_assistant_sessions` menunjukkan row terbaru berstatus `idle`, `pending_payload ? 'summary' = true`, `jsonb_array_length(transcript) = 4`, dan `last_route = '/transactions?tab=history'`.
+
+### [2026-04-23] `UCW-314` - Runbook verifikasi tombol `buka` Telegram dan deep-link canonical
+- Status: `validated`
+- Ringkasan:
+  - checklist debug `buka` sekarang terdokumentasi sebagai runbook yang memisahkan pesan lama, deploy terbaru, dan konfigurasi BotFather/Telegram Mini App.
+  - unit test deep-link mengunci format canonical `https://t.me/<bot>?startapp=...` supaya tombol `buka` tidak bergeser dari target resmi.
+- File target:
+  - `docs/telegram-assistant-buka-debug-checklist.md`
+  - `tests/unit/telegram-assistant-routing.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - runbook tidak mengubah client Telegram, jadi bila masalah ada di device/client lama, langkah manual tetap diperlukan.
+- Audit hasil:
+  - baseline produksi sudah terverifikasi: username bot aktif `banplex_greenfield_bot` dan webhook production mengarah ke `https://banplex-telegram.vercel.app/api/telegram-assistant`.
+  - guard test deep-link sekarang menangkap regresi format URL `buka` sebelum deployment berikutnya.
+  - production redeploy terbaru sudah selesai dan alias `https://banplex-telegram.vercel.app` kembali aktif untuk build yang memakai format deep-link tanpa short_name `/app`.
+- Validasi:
+  - `node --test tests/unit/telegram-assistant-routing.test.js`
 - Validasi:
   - `node --check api/telegram-assistant.js`
   - `node --check src/lib/telegram-assistant-session.js`
@@ -5652,6 +5884,70 @@ Status transitions touched: `UCW-242` tetap `audit_required`; `UCW-243`, `UCW-24
 ## Follow-up Brief Audit Log
 
 Gunakan section ini setiap ada brief baru sebelum memulai task berikutnya.
+
+### [2026-04-23] `UCW-323` - Audit smoke deep soft-delete, restore, dan permanent delete lintas domain
+
+- Status: `validated`
+- Ringkasan:
+  - suite e2e untuk `payment`, `restore`, `payroll`, dan `transactions` sekarang menutup archive/restore/permanent-delete yang paling rapuh.
+  - detail payroll tetap berada di tab `Riwayat` setelah archive, deleted row tidak duplikat, dan empty-state recycle-bin/payroll tetap muncul saat history kosong.
+- File berubah:
+  - `src/pages/PaymentsPage.jsx`
+  - `src/lib/transaction-presentation.js`
+  - `tests/e2e/payment.spec.js`
+  - `tests/e2e/restore.spec.js`
+  - `tests/e2e/payroll.spec.js`
+  - `tests/e2e/transactions.spec.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - `PaymentsPage` tidak lagi me-reset tab detail pada initial team hydrate, jadi `Riwayat` tidak snap balik ke `Summary` setelah archive/permanent-delete.
+  - `getPayrollBillGroupHistoryRows()` sekarang men-de-duplicate payment aktif/terhapus dengan preferensi row deleted, sehingga warning key ganda hilang dan deleted row tetap tampil saat state overlap.
+  - `transactions.spec` sekarang punya timeout level task yang cukup untuk route `/transactions`, `/transactions/history`, dan `/transactions/recycle-bin`, jadi smoke journal/history/recycle-bin tidak gagal karena timeout 30 detik.
+- Risiko:
+  - coverage ini masih memakai mock/unit-e2e harness; live staging smoke tetap perlu dipisah agar parity data nyata tetap terukur.
+  - timeout transaksi dibuat lebih longgar; bila route regresi lagi, failure akan muncul sebagai timeout yang jelas, bukan false green.
+- Validasi:
+  - `npx playwright test tests/e2e/payment.spec.js --reporter=line`
+  - `npx playwright test tests/e2e/restore.spec.js tests/e2e/payroll.spec.js --reporter=line`
+  - `npx playwright test tests/e2e/transactions.spec.js --reporter=line`
+  - `npm run lint`
+  - `npm run build`
+
+### [2026-04-23] `UCW-325` - Kunci DM handoff Telegram assistant dengan token sekali pakai
+
+- Status: `validated`
+- Ringkasan:
+  - grup fallback Telegram sekarang mengirim tombol DM bertoken sekali pakai yang terikat ke `telegram_user_id` target
+  - DM `/start <token>` memvalidasi token, expiry, dan target user sebelum context grup dipindahkan ke private chat
+- File berubah:
+  - `api/telegram-assistant.js`
+  - `api/telegram-assistant-handoff.js`
+  - `src/lib/telegram-assistant-links.js`
+  - `src/lib/telegram-assistant-routing.js`
+  - `supabase/migrations/20260423120000_create_telegram_assistant_handoffs.sql`
+  - `tests/unit/telegram-assistant-routing.test.js`
+  - `tests/unit/telegram-assistant-handoff.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+- Audit hasil:
+  - tombol DM grup sekarang membawa token yang hanya bisa ditebus sekali oleh user yang dituju, bukan link generik
+  - DM start tanpa token tetap jatuh ke menu, sementara token invalid/expired/wrong user ditolak dengan pesan aman
+  - session grup tetap dipertahankan lewat payload snapshot, jadi handoff tidak membuat source of truth baru
+- Validasi:
+  - `node --check api/telegram-assistant.js`
+  - `node --check api/telegram-assistant-handoff.js`
+  - `node --check src/lib/telegram-assistant-links.js`
+  - `node --check src/lib/telegram-assistant-routing.js`
+  - `node --check tests/unit/telegram-assistant-routing.test.js`
+  - `node --check tests/unit/telegram-assistant-handoff.test.js`
+  - `node --test tests/unit/telegram-assistant-routing.test.js`
+  - `node --test tests/unit/telegram-assistant-handoff.test.js`
+  - `node --test tests/unit/telegram-assistant-writer.test.js`
+  - `npx eslint api/telegram-assistant.js api/telegram-assistant-handoff.js src/lib/telegram-assistant-links.js src/lib/telegram-assistant-routing.js tests/unit/telegram-assistant-routing.test.js tests/unit/telegram-assistant-handoff.test.js tests/unit/telegram-assistant-writer.test.js`
+  - `npm run build`
+- Risiko/regresi:
+  - token DM bergantung pada `TELEGRAM_BOT_USERNAME` dan table handoff baru; jika env atau migration belum ada, tombol DM bertoken akan gagal dibuat
+  - user yang membuka link lama setelah expiry akan mendapat penolakan dan perlu minta ulang dari grup
 
 ### [2026-04-18]
 

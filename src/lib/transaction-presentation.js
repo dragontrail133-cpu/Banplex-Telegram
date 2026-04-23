@@ -578,13 +578,32 @@ export function getPayrollBillGroupHistoryRows(bills = [], deletedPayments = [])
     normalizedBills.map((bill) => [String(bill?.id ?? ''), bill]).filter(([billId]) => Boolean(billId))
   )
   const historyRows = []
+  const rowIndexByPaymentId = new Map()
+
+  function upsertHistoryRow(row, paymentId, shouldReplaceExisting = false) {
+    if (paymentId) {
+      if (rowIndexByPaymentId.has(paymentId)) {
+        if (shouldReplaceExisting) {
+          historyRows[rowIndexByPaymentId.get(paymentId)] = row
+        }
+
+        return
+      }
+
+      rowIndexByPaymentId.set(paymentId, historyRows.length)
+    }
+
+    historyRows.push(row)
+  }
 
   for (const bill of normalizedBills) {
     const billLabel = getBillSummaryTitle(bill)
     const workerLabel = getBillSummaryWorkerLabel(bill)
 
     for (const payment of getBillPaymentRows(bill)) {
-      historyRows.push({
+      const paymentId = String(payment?.id ?? '')
+
+      upsertHistoryRow({
         kind: 'active',
         id: `${bill?.id ?? 'bill'}:${payment?.id ?? payment?.createdAt ?? historyRows.length}`,
         billId: bill?.id ?? null,
@@ -599,7 +618,7 @@ export function getPayrollBillGroupHistoryRows(bills = [], deletedPayments = [])
         canRestore: false,
         canPermanentDelete: false,
         sortKey: payment?.paymentDate ?? payment?.createdAt ?? payment?.updatedAt ?? bill?.dueDate ?? bill?.created_at ?? '',
-      })
+      }, paymentId)
     }
   }
 
@@ -608,8 +627,9 @@ export function getPayrollBillGroupHistoryRows(bills = [], deletedPayments = [])
     const bill = billById.get(billId) ?? null
     const billLabel = getBillSummaryTitle(bill ?? payment)
     const workerLabel = getBillSummaryWorkerLabel(bill ?? payment)
+    const paymentId = String(payment?.id ?? '')
 
-    historyRows.push({
+    upsertHistoryRow({
       kind: 'deleted',
       id: `${billId || 'deleted'}:${payment?.id ?? payment?.createdAt ?? historyRows.length}`,
       billId: billId || null,
@@ -625,7 +645,7 @@ export function getPayrollBillGroupHistoryRows(bills = [], deletedPayments = [])
       canPermanentDelete: Boolean(payment?.canPermanentDelete ?? payment?.deleted_at ?? payment?.deletedAt),
       deletedAt: payment?.deleted_at ?? payment?.deletedAt ?? null,
       sortKey: payment?.paymentDate ?? payment?.createdAt ?? payment?.updatedAt ?? '',
-    })
+    }, paymentId, true)
   }
 
   return historyRows.sort((left, right) => {

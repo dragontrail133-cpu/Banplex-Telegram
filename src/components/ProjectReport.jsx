@@ -8,10 +8,12 @@ import {
   RefreshCcw,
   Receipt,
   SlidersHorizontal,
+  Send,
   WalletCards,
 } from 'lucide-react'
 import useAuthStore from '../store/useAuthStore'
 import useReportStore from '../store/useReportStore'
+import useTelegram from '../hooks/useTelegram'
 import {
   REPORT_KIND_OPTIONS,
   formatDateInputValue,
@@ -97,6 +99,7 @@ function getProjectLabel(summary) {
 
 function ProjectReport() {
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false)
+  const { tg } = useTelegram()
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
   const reportKind = useReportStore((state) => state.reportKind)
   const reportPeriod = useReportStore((state) => state.reportPeriod)
@@ -106,14 +109,19 @@ function ProjectReport() {
   const isLoading = useReportStore((state) => state.isLoading)
   const isReportLoading = useReportStore((state) => state.isReportLoading)
   const isPdfGenerating = useReportStore((state) => state.isPdfGenerating)
+  const isPdfDelivering = useReportStore((state) => state.isPdfDelivering)
   const error = useReportStore((state) => state.error)
   const reportError = useReportStore((state) => state.reportError)
   const pdfSettingsError = useReportStore((state) => state.pdfSettingsError)
   const pdfError = useReportStore((state) => state.pdfError)
+  const pdfDeliveryError = useReportStore((state) => state.pdfDeliveryError)
   const fetchProjectSummaries = useReportStore((state) => state.fetchProjectSummaries)
   const fetchPdfSettings = useReportStore((state) => state.fetchPdfSettings)
   const fetchBusinessReportData = useReportStore((state) => state.fetchBusinessReportData)
   const downloadBusinessReportPdf = useReportStore((state) => state.downloadBusinessReportPdf)
+  const sendBusinessReportToTelegramDm = useReportStore(
+    (state) => state.sendBusinessReportToTelegramDm
+  )
   const setReportKind = useReportStore((state) => state.setReportKind)
   const setReportPeriod = useReportStore((state) => state.setReportPeriod)
   const setSelectedProjectId = useReportStore((state) => state.setSelectedProjectId)
@@ -147,8 +155,14 @@ function ProjectReport() {
     () => projectSummaries.find((summary) => String(summary.project_id ?? '').trim() === String(selectedProjectId ?? '').trim()) ?? null,
     [projectSummaries, selectedProjectId]
   )
+  const isTelegramMiniWeb = tg != null
   const canDownloadPdf =
     !isPdfGenerating && !isReportLoading && (reportKind !== 'project_pl' || Boolean(selectedProjectId))
+  const canSendPdfToDm =
+    isTelegramMiniWeb &&
+    !isPdfDelivering &&
+    !isReportLoading &&
+    (reportKind !== 'project_pl' || Boolean(selectedProjectId))
   const reportTabOptions = useMemo(
     () => REPORT_KIND_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
     []
@@ -163,6 +177,12 @@ function ProjectReport() {
   const handleDownloadPdf = () => {
     void downloadBusinessReportPdf().catch((downloadError) => {
       console.error('Gagal mengunduh PDF bisnis:', downloadError)
+    })
+  }
+
+  const handleSendPdfToDm = () => {
+    void sendBusinessReportToTelegramDm().catch((deliveryError) => {
+      console.error('Gagal mengirim PDF bisnis ke DM:', deliveryError)
     })
   }
 
@@ -229,6 +249,18 @@ function ProjectReport() {
             </AppButton>
           </div>
         </div>
+        {isTelegramMiniWeb ? (
+          <AppButton
+            variant="secondary"
+            fullWidth
+            disabled={!canSendPdfToDm}
+            leadingIcon={<Send className={`h-4 w-4 ${isPdfDelivering ? 'animate-pulse' : ''}`} />}
+            onClick={handleSendPdfToDm}
+            type="button"
+          >
+            {isPdfDelivering ? 'Mengirim ke DM...' : 'Kirim ke DM'}
+          </AppButton>
+        ) : null}
       </AppCardStrong>
 
       <AppSheet
@@ -280,6 +312,10 @@ function ProjectReport() {
 
       {pdfSettingsError || pdfError ? (
         <AppErrorState title="Pengaturan PDF gagal diproses" description={pdfSettingsError ?? pdfError} />
+      ) : null}
+
+      {pdfDeliveryError ? (
+        <AppErrorState title="Laporan PDF gagal dikirim ke DM" description={pdfDeliveryError} />
       ) : null}
 
       {error || reportError ? (

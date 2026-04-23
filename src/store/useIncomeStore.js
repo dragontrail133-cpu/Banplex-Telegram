@@ -67,9 +67,14 @@ const loanSelectColumns =
 const billSelectColumns =
   'id, expense_id, project_income_id, team_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, supplier_name_snapshot, project_name_snapshot, worker_name_snapshot, created_at, updated_at, deleted_at'
 
-function buildProjectIncomeNotificationPayload(data = {}, projectName = '-') {
+function buildProjectIncomeNotificationPayload(
+  data = {},
+  projectName = '-',
+  transactionId = null
+) {
   return {
     notificationType: 'project_income',
+    transactionId: normalizeText(transactionId, ''),
     userName: normalizeText(data.userName, 'Pengguna Telegram'),
     projectName: normalizeText(projectName, '-'),
     transactionDate: normalizeText(
@@ -81,7 +86,7 @@ function buildProjectIncomeNotificationPayload(data = {}, projectName = '-') {
   }
 }
 
-function buildLoanNotificationPayload(data = {}, creditorName = '-') {
+function buildLoanNotificationPayload(data = {}, creditorName = '-', transactionId = null) {
   const repaymentAmount =
     Number(data.repayment_amount ?? data.repaymentAmount ?? data.loan_terms_snapshot?.repayment_amount) || 0
   const principalAmount =
@@ -94,6 +99,7 @@ function buildLoanNotificationPayload(data = {}, creditorName = '-') {
 
   return {
     notificationType: 'loan',
+    transactionId: normalizeText(transactionId, ''),
     userName: normalizeText(data.userName, 'Pengguna Telegram'),
     creditorName: normalizeText(creditorName, normalizeText(data.creditor_name_snapshot, '-')),
     transactionDate: normalizeText(
@@ -564,7 +570,16 @@ const useIncomeStore = create((set) => ({
         throw new Error('Server tidak mengembalikan data pemasukan proyek.')
       }
 
-      void notifyTelegram(buildProjectIncomeNotificationPayload(data, projectName)).catch(
+      void notifyTelegram(
+        buildProjectIncomeNotificationPayload(
+          {
+            ...data,
+            transaction_date: apiRecord.transaction_date ?? data.transaction_date,
+          },
+          projectName,
+          apiRecord.id
+        )
+      ).catch(
         (notifyError) => {
           console.error('Notifikasi termin proyek gagal dikirim:', notifyError)
           showToast({
@@ -902,7 +917,16 @@ const useIncomeStore = create((set) => ({
       let notificationError = null
 
       try {
-        await notifyTelegram(buildLoanNotificationPayload(apiRecord, creditorName))
+        await notifyTelegram(
+          buildLoanNotificationPayload(
+            {
+              ...apiRecord,
+              userName: data.userName,
+            },
+            creditorName,
+            apiRecord.id
+          )
+        )
       } catch (notifyError) {
         notificationError =
           notifyError instanceof Error

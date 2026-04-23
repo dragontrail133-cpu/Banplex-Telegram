@@ -19,6 +19,8 @@ Runtime reconciliation: `2026-04-23`
 12. `Referensi` / `Master` adalah core-release fondasional untuk semua form inti; boundary implementasi yang masih transitional tidak mengubah status domain ini sebagai release inti.
 13. Task yang menyentuh `api/telegram-assistant.js` harus mempertahankan urutan runtime: deterministic intent gate -> Gemini/xAI writer untuk balasan natural-language -> backend verifier fact packet -> xAI fallback/deterministic fallback; model boleh menulis respons user-facing, tetapi hanya dari fakta yang sudah diverifikasi backend dan tidak boleh mengarang angka, nama, atau aksi baru.
 14. Surface command bot, inline callback, dan teks bebas untuk `Telegram assistant` wajib memakai planner, verifier, dan read boundary yang sama; command/inline tidak boleh membuka jalur mutasi atau source of truth baru.
+15. PDF bisnis dari `ProjectReport` boleh memakai DM Telegram user terverifikasi sebagai fallback delivery saat Mini Web tidak bisa mengunduh file; itu hanya transport delivery, bukan source of truth baru.
+16. Notifikasi grup operasional harus tetap summary + CTA review cepat; detail follow-up harus diarahkan ke bot/web/DM terverifikasi, bukan percakapan panjang di grup.
 
 ## 2. What AI must never assume
 
@@ -43,6 +45,7 @@ Runtime reconciliation: `2026-04-23`
 - `pdf_settings` adalah boundary konfigurasi PDF bisnis yang berbeda dari `Payment Receipt PDF`; jangan mencampur konfigurasi report dengan receipt settlement.
 - `telegram_assistant_sessions` boleh menyimpan memory ringkas dalam bentuk summary, last turn, last route, entity hints, dan hybrid transcript pendek; ia bukan transcript panjang atau state bisnis baru.
 - `Telegram assistant` hanya read-only finance core; jangan memperluasnya menjadi chatbot umum, mutasi, atau kanal support bebas.
+- `PDF bisnis` boleh punya fallback delivery ke DM Telegram user terverifikasi ketika Mini Web gagal mengunduh file; itu tetap transport, bukan source of truth.
 - Dokumen lama atau brief chat lama boleh mengalahkan freeze package.
 - Supporting module seperti `HRD` atau `Penerima Manfaat` boleh dijadikan blocker core release tanpa keputusan baru.
 

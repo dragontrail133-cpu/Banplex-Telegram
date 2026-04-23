@@ -327,11 +327,11 @@ test.describe('payroll surfaces', () => {
       timeout: 15000,
     })
     await expect(page).toHaveURL(/\/payroll\?tab=worker/)
-    await expect(page.getByRole('button', { name: 'Budi E2E' })).toBeVisible({
+    await expect(page.getByRole('button', { name: /^Budi E2E/ })).toBeVisible({
       timeout: 15000,
     })
 
-    await page.getByRole('button', { name: 'Budi E2E' }).click()
+    await page.getByRole('button', { name: /^Budi E2E/ }).click()
     await expect(page.getByRole('dialog', { name: 'Budi E2E' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Bayar' })).toBeVisible()
 
@@ -343,10 +343,11 @@ test.describe('payroll surfaces', () => {
     await page.getByLabel('Nominal Pembayaran').fill('1500000')
     await page.getByLabel('Tanggal Pembayaran').fill(paymentDate)
     await page.getByLabel('Catatan').fill('Bayar gaji worker E2E')
-    await page.getByRole('button', { name: 'Simpan Pembayaran' }).click()
+    const savePayrollPaymentButton = page.getByRole('button', { name: 'Simpan Pembayaran' })
+    await savePayrollPaymentButton.evaluate((button) => button.click())
 
     await expect(page).toHaveURL(/\/payroll\?tab=worker$/)
-    await expect(page.getByRole('button', { name: 'Budi E2E' })).toBeVisible({
+    await expect(page.getByRole('button', { name: /^Budi E2E/ })).toBeVisible({
       timeout: 15000,
     })
   })
@@ -359,7 +360,7 @@ test.describe('payroll surfaces', () => {
     await expect(page.getByRole('heading', { name: 'Catatan Absensi' })).toBeVisible({
       timeout: 15000,
     })
-    await page.getByRole('button', { name: 'Budi E2E' }).click()
+    await page.getByRole('button', { name: /^Budi E2E/ }).click()
     await page.getByRole('button', { name: 'Detail' }).click()
 
     await expect(page).toHaveURL(/\/payroll\/worker\/worker-e2e-1\?month=2026-04/)

@@ -2607,3 +2607,63 @@ Saat ada brief baru yang masih terkait stream ini, update dokumen dengan format:
   - Scope target: `api/telegram-assistant.js`, `src/lib/telegram-assistant-session.js`, `src/lib/telegram-assistant-routing.js`, `src/lib/telegram-assistant-transport.js`, `tests/unit/telegram-assistant-routing.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
   - Dependensi: `UCW-312`.
   - Addendum audit: helper session, routing, dan transport sekarang dipisah ke modul terpisah; routing test langsung memverifikasi modul baru; production deploy terbaru tetap lolos smoke live `/menu`, `/analytics`, callback metric/window/history, dan row `telegram_assistant_sessions` tetap menyimpan summary/transcript hybrid plus `last_route`.
+- [x] UCW-314 - Runbook verifikasi tombol `buka` Telegram dan deep-link canonical
+  - Checklist troubleshooting harus membedakan pesan lama, deploy production terbaru, dan konfigurasi BotFather/Telegram Mini App, lalu mengunci format deep-link `https://t.me/<bot>?startapp=...` sebagai target resmi tombol `buka`.
+  - Scope target: `docs/telegram-assistant-buka-debug-checklist.md`, `tests/unit/telegram-assistant-routing.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-313`.
+  - Addendum audit: username bot lokal dan production sama-sama konsisten (`banplex_greenfield_bot`), webhook production sudah aktif ke `https://banplex-telegram.vercel.app/api/telegram-assistant`, production redeploy terbaru sudah aktif di alias `https://banplex-telegram.vercel.app`, dan unit test deep-link menjaga format URL `buka` tetap canonical tanpa short_name `/app`.
+- [x] UCW-315 - Petakan readiness staging dan coverage matrix AQ per domain
+  - Gate release perlu matrix operasional yang menegaskan precondition staging, bukti automation yang sudah ada, verifier DB, manual AQ wajib, dan domain blocker yang belum terbukti, supaya eksekusi smoke berikutnya tidak lagi ad-hoc.
+  - Scope target: `docs/release-aq-gate.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-312`.
+  - Addendum audit: `docs/release-aq-gate.md` sekarang memuat staging readiness matrix, coverage matrix per domain, dan urutan prioritas smoke backlog mulai dari `expense/bill/payment` sampai `delete lifecycle`.
+- [x] UCW-316 - Tambah smoke live `expense -> bill -> partial payment -> recalc`
+  - Lane AQ staging perlu membuktikan bahwa pengeluaran unpaid benar-benar membuat bill, lalu partial payment dari `/payment/:id` mengubah `bill.paid_amount`, `remaining`, dan `status` secara sinkron tanpa mock.
+  - Scope target: `tests/live/release-smoke.spec.js`, `scripts/aq/verify-live-smoke.mjs`, `docs/release-aq-gate.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-315`.
+  - Addendum audit: live smoke sekarang membuat `expense` unpaid, melakukan `bill_payment` partial, merekam artifact `expense/bill_payment/bill_after_payment`, dan verifier service-role memeriksa row `expenses`, `bills`, `bill_payments`, serta status `partial` hasil recalc.
+- [x] UCW-317 - Hardening lane live smoke lokal pakai `vercel dev` dan auto-load verifier env
+  - Lane AQ live harus menjalankan runtime penuh yang melayani `/api/auth`, `/api/transactions`, dan `/api/records`, bukan hanya shell Vite; verifier DB juga harus bisa membaca `.env` lokal tanpa export manual.
+  - Scope target: `playwright.live.config.js`, `scripts/aq/verify-live-smoke.mjs`, `docs/release-aq-gate.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-312`.
+  - Addendum audit: local runner sekarang default ke `vercel dev`, command lokal bisa dioverride via env bila perlu, dan verifier live smoke otomatis membaca `.env` lalu `.env.local` saat env shell kosong.
+- [x] UCW-318 - Tambah smoke live `income -> fee bill` dan `material invoice -> bill/stock`, lalu catat blocker lane sisa
+  - Lane AQ staging perlu membuktikan bahwa create `project-income` benar-benar membentuk `fee bill`, dan create `material invoice` unpaid benar-benar membentuk `bill`, `expense_line_items`, serta `stock_transactions`, lalu blocker domain sisa harus dibekukan di gate docs.
+  - Scope target: `tests/live/release-smoke.spec.js`, `scripts/aq/verify-live-smoke.mjs`, `docs/release-aq-gate.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-317`.
+  - Addendum audit: live smoke sekarang merekam artifact `project_income`, `project_income_fee_bill`, `material_invoice`, `material_invoice_bill`, `material_invoice_line_item`, dan `material_stock_transaction`; gate docs juga kini memuat blocker aktif untuk target staging-safe, payroll seed, attachment/storage, report/PDF, dan delete lifecycle.
+- [x] UCW-319 - Fallback laporan bisnis Telegram Mini Web ke DM user terverifikasi
+  - Jika `Unduh PDF` di `ProjectReport` gagal di Telegram Mini Web, surface report harus menyediakan tombol `Kirim ke DM` yang mengirim PDF bisnis ke chat privat bot milik user terverifikasi; browser download tetap menjadi jalur utama.
+  - Scope target: `api/report-pdf-delivery.js`, `src/lib/report-delivery-api.js`, `src/store/useReportStore.js`, `src/components/ProjectReport.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-88`, `UCW-309`, `UCW-313`.
+  - Addendum audit: endpoint baru men-generate PDF bisnis server-side lalu mengirimnya ke DM Telegram user terverifikasi; kalau delivery file gagal, bot mengirim fallback text yang mengarahkan user kembali ke browser untuk unduh langsung.
+- [x] UCW-320 - Petakan notifikasi grup operasional menjadi summary + CTA review cepat
+  - Grup harus tetap ringkas: event `create`, `payment`, `recap`, dan `attendance` hanya mengirim summary singkat + tombol review data, tanpa balasan AI panjang di grup.
+  - Scope target: docs freeze/backlog Telegram, surface group notification terkait, dan jika perlu helper CTA yang mengarah ke Mini Web / DM.
+  - Dependensi: `UCW-319`.
+  - Addendum audit: event grup diperlakukan sebagai publish/read-only surface; detail review pindah ke tombol atau DM, bukan percakapan panjang di grup. Notifikasi sekarang mengirim summary ringkas + CTA review cepat ke surface canonical, dan jalur recap/attendance sudah dipetakan sebagai surface lanjut.
+- [x] UCW-321 - Kunci fallback AI DM untuk user terverifikasi dan arahkan ke bot/web
+  - DM assistant harus menjadi tempat klarifikasi dan drill-down untuk user yang terverifikasi, lalu hasil akhirnya tetap diarahkan ke bot/web jika membutuhkan detail atau review data.
+  - Scope target: `api/telegram-assistant.js`, `src/lib/telegram-assistant-links.js`, `src/lib/telegram-assistant-routing.js`, `tests/unit/telegram-assistant-routing.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-319`, `UCW-320`.
+  - Addendum audit: fallback conversational state tetap read-only, membedakan grup vs DM, dan DM pribadi dipakai untuk follow-up terverifikasi tanpa membuat source of truth baru.
+- [ ] UCW-322 - Smoke browser, Mini Web Telegram, dan fallback DM untuk laporan bisnis
+  - Harus ada bukti smoke bahwa browser tetap bisa unduh PDF, Telegram Mini Web menyediakan jalur `Kirim ke DM`, dan delivery DM benar-benar memanggil endpoint server-side untuk user terverifikasi.
+  - Scope target: `tests/live/*` atau smoke yang setara, `docs/progress/unified-crud-workspace-progress-log.md`, `docs/release-aq-gate.md`.
+  - Dependensi: `UCW-319`.
+  - Addendum audit: smoke ini fokus ke report/PDF surface dan menjadi gate sebelum fallback DM dianggap production-ready.
+- [x] UCW-323 - Audit smoke deep soft-delete, restore, dan permanent delete lintas domain
+  - Browser/unit smoke harus membuktikan label UI aktual (`Jurnal`, `Arsip`, `Arsip Master`) dan policy recycle-bin untuk document restore-only, master restore-only, attendance permanent delete, serta payment leaf restore/permanent delete.
+  - Scope target: `tests/e2e/transactions.spec.js`, `tests/e2e/restore.spec.js`, `tests/e2e/payment.spec.js`, `tests/unit/attachment-permissions.test.js`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-85`, `UCW-90`, `UCW-238`.
+  - Addendum audit: task ini menjembatani gap test stale label vs policy final, tanpa mengubah runtime source of truth.
+- [x] UCW-324 - Stabilkan hydration `invite_link` agar link undangan owner tidak hilang setelah refresh
+  - `latestInvite` dari generate dan reload harus memakai shape yang sama, sehingga card invite tetap tampil setelah owner membuat link lalu halaman/refetch berjalan.
+  - Scope target: `src/store/useTeamStore.js`, `src/lib/supabase.js`, `tests/unit/team-invite-store.test.js`, `tests/unit/telegram-assistant-routing.test.js`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-124`, `UCW-125`, `UCW-321`.
+  - Addendum audit: task ini hanya menghidupkan kembali `invite_link` di read/hydration path dan memastikan bot tetap read-only; tidak ada surface invite write baru di assistant.
+- [x] UCW-325 - Kunci DM handoff Telegram assistant dengan token sekali pakai
+  - Link DM dari grup harus membawa token handoff yang terikat ke `telegram_user_id` target, berlaku sekali, dan kedaluwarsa supaya user lain tidak bisa mengambil alih context yang sama.
+  - Scope target: `api/telegram-assistant.js`, `api/telegram-assistant-handoff.js`, `src/lib/telegram-assistant-links.js`, `src/lib/telegram-assistant-routing.js`, `supabase/migrations/20260423120000_create_telegram_assistant_handoffs.sql`, `tests/unit/telegram-assistant-routing.test.js`, `tests/unit/telegram-assistant-handoff.test.js`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-321`.
+  - Addendum audit: group fallback tetap read-only; tombol DM sekarang mengarah ke `/start <handoff-token>` dan token hanya boleh dipakai oleh akun yang dituju.

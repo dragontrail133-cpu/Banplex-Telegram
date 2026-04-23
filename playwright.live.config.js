@@ -6,6 +6,9 @@ const configuredBaseURL = String(process.env.E2E_BASE_URL ?? '').trim()
 const baseURL = configuredBaseURL || defaultBaseURL
 const isCI = Boolean(globalThis.process?.env?.CI)
 const shouldStartLocalServer = !configuredBaseURL || baseURL === defaultBaseURL
+const localServerCommand =
+  String(process.env.E2E_LOCAL_SERVER_COMMAND ?? '').trim() ||
+  'vercel dev --listen 127.0.0.1:3000 --yes'
 
 export default defineConfig({
   testDir: './tests/live',
@@ -25,7 +28,7 @@ export default defineConfig({
   },
   webServer: shouldStartLocalServer
     ? {
-        command: 'node node_modules/vite/bin/vite.js --configLoader native --host 127.0.0.1 --port 3000',
+        command: localServerCommand,
         url: defaultBaseURL,
         reuseExistingServer: !isCI,
         timeout: 120000,

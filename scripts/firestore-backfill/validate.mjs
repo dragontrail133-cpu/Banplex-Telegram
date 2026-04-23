@@ -6,8 +6,9 @@ const CANONICAL_LOAD_SEQUENCE = [
   { section: 'workspace', tables: ['teams'] },
   {
     section: 'reference',
-    tables: ['projects', 'suppliers', 'expense_categories', 'funding_creditors', 'professions', 'staff', 'materials', 'worker_wage_rates'],
+    tables: ['projects', 'suppliers', 'expense_categories', 'funding_creditors', 'professions', 'staff', 'materials', 'workers'],
   },
+  { section: 'reference', tables: ['worker_wage_rates'] },
   { section: 'storage', tables: ['file_assets'] },
   { section: 'hrd', tables: ['beneficiaries', 'hrd_applicants', 'hrd_applicant_documents'] },
   {
@@ -20,6 +21,36 @@ const CANONICAL_LOAD_SEQUENCE = [
 ]
 
 const SIDECAR_BRIDGE_SEQUENCE = [{ section: 'identity', tables: ['users', 'team_members', 'profiles'] }]
+
+const EXPECTED_CANONICAL_TABLES = [
+  'teams',
+  'projects',
+  'suppliers',
+  'expense_categories',
+  'funding_creditors',
+  'professions',
+  'staff',
+  'materials',
+  'workers',
+  'worker_wage_rates',
+  'file_assets',
+  'beneficiaries',
+  'hrd_applicants',
+  'hrd_applicant_documents',
+  'project_incomes',
+  'expenses',
+  'expense_line_items',
+  'expense_attachments',
+  'bills',
+  'bill_payments',
+  'loans',
+  'loan_payments',
+  'attendance_records',
+  'stock_transactions',
+  'pdf_settings',
+]
+
+const EXPECTED_SIDECAR_TABLES = ['users', 'team_members', 'profiles']
 
 function parseArgs(argv) {
   const options = {
@@ -87,6 +118,27 @@ What it checks:
   - import ordering for canonical tables
   - sidecar identity bridge ordering
 `)
+}
+
+function assertLoadSequenceCoverage() {
+  const canonicalSequenceTables = CANONICAL_LOAD_SEQUENCE.flatMap((group) => group.tables)
+  const sidecarSequenceTables = SIDECAR_BRIDGE_SEQUENCE.flatMap((group) => group.tables)
+  const missingCanonicalTables = EXPECTED_CANONICAL_TABLES.filter((tableName) => !canonicalSequenceTables.includes(tableName))
+  const missingSidecarTables = EXPECTED_SIDECAR_TABLES.filter((tableName) => !sidecarSequenceTables.includes(tableName))
+
+  if (missingCanonicalTables.length > 0 || missingSidecarTables.length > 0) {
+    const messages = []
+
+    if (missingCanonicalTables.length > 0) {
+      messages.push(`canonical: ${missingCanonicalTables.join(', ')}`)
+    }
+
+    if (missingSidecarTables.length > 0) {
+      messages.push(`sidecar: ${missingSidecarTables.join(', ')}`)
+    }
+
+    throw new Error(`Load sequence belum mencakup semua tabel transform: ${messages.join(' | ')}`)
+  }
 }
 
 async function fileExists(filePath) {
@@ -297,6 +349,7 @@ async function writeJson(filePath, value) {
 }
 
 async function main() {
+  assertLoadSequenceCoverage()
   const options = parseArgs(process.argv.slice(2))
 
   if (options.help) {

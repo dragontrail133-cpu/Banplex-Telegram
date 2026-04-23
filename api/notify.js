@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf'
 import { APP_TIME_ZONE } from '../src/lib/date-time.js'
 import { createPaymentReceiptPdf } from '../src/lib/report-pdf.js'
+import { buildTelegramAssistantLink } from '../src/lib/telegram-assistant-links.js'
 
 function normalizeText(value, fallback = '-') {
   const normalizedValue = String(value ?? '').trim()
@@ -77,6 +78,134 @@ function getDocumentFileName(prefix, identifier) {
     .replace(/^-|-$/g, '')
 
   return `${prefix}-${safeIdentifier || 'dokumen'}.pdf`
+}
+
+function getTelegramBotUsername() {
+  return normalizeText(
+    globalThis.process?.env?.TELEGRAM_BOT_USERNAME ??
+      globalThis.process?.env?.VITE_TELEGRAM_BOT_USERNAME ??
+      '',
+    ''
+  )
+}
+
+function buildTelegramReviewButton(telegramBotUsername, label, path) {
+  const normalizedLabel = normalizeText(label, '')
+  const link = buildTelegramAssistantLink(telegramBotUsername, path)
+
+  if (!normalizedLabel || !link) {
+    return null
+  }
+
+  return {
+    text: normalizedLabel,
+    url: link,
+  }
+}
+
+function buildNotificationReplyMarkup(
+  telegramBotUsername,
+  notificationType,
+  payload
+) {
+  const buildButton = (label, path) =>
+    buildTelegramReviewButton(telegramBotUsername, label, path)
+
+  const buttons = (() => {
+    switch (notificationType) {
+      case 'transaction':
+        return [
+          buildButton(
+            'Review transaksi',
+            payload.transactionId ? `/transactions/${payload.transactionId}` : '/transactions'
+          ),
+          buildButton('Buka jurnal', '/transactions'),
+        ]
+      case 'material_invoice':
+        return [
+          buildButton(
+            'Review faktur',
+            payload.expenseId ? `/transactions/${payload.expenseId}` : '/transactions'
+          ),
+          buildButton('Buka jurnal', '/transactions'),
+        ]
+      case 'bill_payment':
+        return [
+          buildButton(
+            'Review pembayaran',
+            payload.billId ? `/payment/${payload.billId}` : '/pembayaran'
+          ),
+          buildButton('Buka riwayat', '/transactions?tab=history'),
+        ]
+      case 'project_income':
+        return [
+          buildButton(
+            'Review termin',
+            payload.transactionId ? `/transactions/${payload.transactionId}` : '/transactions'
+          ),
+          buildButton('Buka jurnal', '/transactions'),
+        ]
+      case 'loan':
+        return [
+          buildButton(
+            'Review pinjaman',
+            payload.transactionId ? `/transactions/${payload.transactionId}` : '/transactions'
+          ),
+          buildButton('Buka jurnal', '/transactions'),
+        ]
+      case 'loan_payment':
+        return [
+          buildButton(
+            'Review pembayaran',
+            payload.loanId ? `/loan-payment/${payload.loanId}` : '/pembayaran'
+          ),
+          buildButton('Buka riwayat', '/transactions?tab=history'),
+        ]
+      case 'salary_bill':
+        return [
+          buildButton(
+            'Review tagihan',
+            payload.billId ? `/transactions/${payload.billId}` : '/transactions'
+          ),
+          buildButton('Buka payroll', '/payroll?tab=worker'),
+        ]
+      case 'attendance':
+        return [
+          buildButton('Review absensi', payload.routePath || '/payroll?tab=daily'),
+          buildButton('Buka payroll', '/payroll?tab=worker'),
+        ]
+      case 'recap':
+        return [
+          buildButton('Review recap', payload.routePath || '/transactions?tab=history'),
+          buildButton('Buka workspace', '/transactions'),
+        ]
+      default:
+        return []
+    }
+  })().filter(Boolean)
+
+  const uniqueButtons = []
+
+  for (const button of buttons) {
+    if (
+      uniqueButtons.some(
+        (existingButton) =>
+          existingButton.text === button.text || existingButton.url === button.url
+      )
+    ) {
+      continue
+    }
+
+    uniqueButtons.push(button)
+  }
+
+  if (uniqueButtons.length === 0) {
+    return null
+  }
+
+  return {
+    inline_keyboard: [uniqueButtons],
+  }
 }
 
 function createTelegramError(message, status = null, data = null) {
@@ -446,63 +575,53 @@ function generateMaterialInvoicePdf(payload) {
 function buildTransactionMessage(payload) {
   return [
     '<b>Transaksi Baru Dicatat</b>',
-    `<i>ID: ${escapeHtml(normalizeText(payload.transactionId, '-'))}</i>`,
-    `Tanggal: <b>${escapeHtml(formatDate(payload.transactionDate))}</b>`,
-    `Oleh: <b>${escapeHtml(normalizeText(payload.userName, 'Pengguna Telegram'))}</b>`,
     `Tipe: ${escapeHtml(getTypeLabel(payload.type))}`,
     `Kategori: <b>${escapeHtml(normalizeText(payload.category))}</b>`,
     `Nominal: <b>${escapeHtml(formatCurrency(payload.amount))}</b>`,
-    `Deskripsi: <i>${escapeHtml(normalizeText(payload.description))}</i>`,
+    `Tanggal: <b>${escapeHtml(formatDate(payload.transactionDate))}</b>`,
   ].join('\n')
 }
 
 function buildTransactionCaption(payload) {
   return [
     '<b>Kwitansi Digital Banplex</b>',
-    `<i>ID: ${escapeHtml(normalizeText(payload.transactionId, '-'))}</i>`,
-    `Tanggal: <b>${escapeHtml(formatDate(payload.transactionDate))}</b>`,
-    `Oleh: <b>${escapeHtml(normalizeText(payload.userName, 'Pengguna Telegram'))}</b>`,
     `Tipe: ${escapeHtml(getTypeLabel(payload.type))}`,
+    `Kategori: <b>${escapeHtml(normalizeText(payload.category))}</b>`,
     `Nominal: <b>${escapeHtml(formatCurrency(payload.amount))}</b>`,
+    `Tanggal: <b>${escapeHtml(formatDate(payload.transactionDate))}</b>`,
   ].join('\n')
 }
 
 function buildMaterialInvoiceMessage(payload) {
   return [
     '<b>Faktur Material Baru Dicatat</b>',
-    `<i>Expense ID: ${escapeHtml(normalizeText(payload.expenseId, '-'))}</i>`,
-    `Tanggal: <b>${escapeHtml(formatDate(payload.invoiceDate))}</b>`,
     `Proyek: <b>${escapeHtml(normalizeText(payload.projectName))}</b>`,
     `Supplier: <b>${escapeHtml(normalizeText(payload.supplierName))}</b>`,
-    `Oleh: <b>${escapeHtml(normalizeText(payload.userName, 'Pengguna Telegram'))}</b>`,
     `Jumlah Item: <b>${escapeHtml(String(payload.items.length))}</b>`,
     `Total: <b>${escapeHtml(formatCurrency(payload.totalAmount))}</b>`,
-    `Catatan: <i>${escapeHtml(normalizeText(payload.description))}</i>`,
+    `Tanggal: <b>${escapeHtml(formatDate(payload.invoiceDate))}</b>`,
   ].join('\n')
 }
 
 function buildMaterialInvoiceCaption(payload) {
   return [
     '<b>Faktur Material Banplex</b>',
-    `<i>Expense ID: ${escapeHtml(normalizeText(payload.expenseId, '-'))}</i>`,
-    `Supplier: <b>${escapeHtml(normalizeText(payload.supplierName))}</b>`,
     `Proyek: <b>${escapeHtml(normalizeText(payload.projectName))}</b>`,
-    `Tanggal: <b>${escapeHtml(formatDate(payload.invoiceDate))}</b>`,
+    `Supplier: <b>${escapeHtml(normalizeText(payload.supplierName))}</b>`,
+    `Jumlah Item: <b>${escapeHtml(String(payload.items.length))}</b>`,
     `Total: <b>${escapeHtml(formatCurrency(payload.totalAmount))}</b>`,
+    `Tanggal: <b>${escapeHtml(formatDate(payload.invoiceDate))}</b>`,
   ].join('\n')
 }
 
 function buildBillPaymentMessage(payload) {
   return [
     '<b>Pembayaran Tagihan Berhasil Dicatat</b>',
-    `<i>Bill ID: ${escapeHtml(normalizeText(payload.billId, '-'))}</i>`,
-    `Tanggal: <b>${escapeHtml(formatDate(payload.paymentDate))}</b>`,
     `Supplier: <b>${escapeHtml(normalizeText(payload.supplierName))}</b>`,
     `Proyek: <b>${escapeHtml(normalizeText(payload.projectName))}</b>`,
-    `Oleh: <b>${escapeHtml(normalizeText(payload.userName, 'Pengguna Telegram'))}</b>`,
     `Nominal Bayar: <b>${escapeHtml(formatCurrency(payload.amount))}</b>`,
     `Sisa Tagihan: <b>${escapeHtml(formatCurrency(payload.remainingAmount))}</b>`,
-    `Catatan: <i>${escapeHtml(normalizeText(payload.description))}</i>`,
+    `Tanggal: <b>${escapeHtml(formatDate(payload.paymentDate))}</b>`,
   ].join('\n')
 }
 
@@ -513,45 +632,61 @@ function getInterestLabel(value) {
 function buildProjectIncomeMessage(payload) {
   return [
     `<b>Dana Masuk: Termin Proyek ${escapeHtml(normalizeText(payload.projectName))} sebesar ${escapeHtml(formatCurrency(payload.amount))}</b>`,
-    `Tanggal: <b>${escapeHtml(formatDate(payload.transactionDate))}</b>`,
     `Oleh: <b>${escapeHtml(normalizeText(payload.userName, 'Pengguna Telegram'))}</b>`,
-    `Keterangan: <i>${escapeHtml(normalizeText(payload.description))}</i>`,
+    `Tanggal: <b>${escapeHtml(formatDate(payload.transactionDate))}</b>`,
   ].join('\n')
 }
 
 function buildLoanMessage(payload) {
   return [
     `<b>Dana Masuk: Pinjaman dari ${escapeHtml(normalizeText(payload.creditorName))} sebesar ${escapeHtml(formatCurrency(payload.principalAmount))}</b>`,
-    `Tanggal: <b>${escapeHtml(formatDate(payload.transactionDate))}</b>`,
     `Oleh: <b>${escapeHtml(normalizeText(payload.userName, 'Pengguna Telegram'))}</b>`,
     `Total Pengembalian: <b>${escapeHtml(formatCurrency(payload.repaymentAmount))}</b>`,
     `Tipe Bunga: <b>${escapeHtml(getInterestLabel(payload.interestType))}</b>`,
-    `Catatan: <i>${escapeHtml(normalizeText(payload.description))}</i>`,
+    `Tanggal: <b>${escapeHtml(formatDate(payload.transactionDate))}</b>`,
   ].join('\n')
 }
 
 function buildLoanPaymentMessage(payload) {
   return [
     '<b>Pembayaran Pinjaman Berhasil Dicatat</b>',
-    `<i>Loan ID: ${escapeHtml(normalizeText(payload.loanId, '-'))}</i>`,
-    `Tanggal: <b>${escapeHtml(formatDate(payload.paymentDate))}</b>`,
     `Kreditur: <b>${escapeHtml(normalizeText(payload.creditorName))}</b>`,
-    `Oleh: <b>${escapeHtml(normalizeText(payload.userName, 'Pengguna Telegram'))}</b>`,
     `Nominal Bayar: <b>${escapeHtml(formatCurrency(payload.amount))}</b>`,
     `Sisa Pinjaman: <b>${escapeHtml(formatCurrency(payload.remainingAmount))}</b>`,
-    `Catatan: <i>${escapeHtml(normalizeText(payload.description))}</i>`,
+    `Tanggal: <b>${escapeHtml(formatDate(payload.paymentDate))}</b>`,
   ].join('\n')
 }
 
 function buildSalaryBillMessage(payload) {
   return [
     `<b>Tagihan Gaji untuk ${escapeHtml(normalizeText(payload.workerName))} sebesar ${escapeHtml(formatCurrency(payload.amount))} telah dibuat.</b>`,
-    `Tanggal: <b>${escapeHtml(formatDate(payload.transactionDate ?? payload.dueDate))}</b>`,
     `Oleh: <b>${escapeHtml(normalizeText(payload.userName, 'Pengguna Telegram'))}</b>`,
     `Jumlah Absensi: <b>${escapeHtml(String(payload.recordCount ?? 0))}</b>`,
     `Jatuh Tempo: <b>${escapeHtml(formatDate(payload.dueDate))}</b>`,
-    `Keterangan: <i>${escapeHtml(normalizeText(payload.description, '-'))}</i>`,
+    `Tanggal: <b>${escapeHtml(formatDate(payload.transactionDate ?? payload.dueDate))}</b>`,
   ].join('\n')
+}
+
+function buildAttendanceMessage(payload) {
+  return [
+    '<b>Absensi Baru Dicatat</b>',
+    `Pekerja: <b>${escapeHtml(normalizeText(payload.workerName))}</b>`,
+    `Proyek: <b>${escapeHtml(normalizeText(payload.projectName))}</b>`,
+    `Status: <b>${escapeHtml(normalizeText(payload.status))}</b>`,
+    `Tanggal: <b>${escapeHtml(formatDate(payload.attendanceDate))}</b>`,
+  ].join('\n')
+}
+
+function buildRecapMessage(payload) {
+  return [
+    '<b>Rekap Baru Tersedia</b>',
+    `Judul: <b>${escapeHtml(normalizeText(payload.title))}</b>`,
+    `Periode: <b>${escapeHtml(normalizeText(payload.periodLabel || '-'))}</b>`,
+    `Tanggal: <b>${escapeHtml(formatDate(payload.generatedAt))}</b>`,
+    payload.summary ? `Ringkasan: <i>${escapeHtml(normalizeText(payload.summary))}</i>` : null,
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 async function sendTelegramTextNotification({
@@ -559,18 +694,25 @@ async function sendTelegramTextNotification({
   telegramChatId,
   message,
   prefixMessage = null,
+  replyMarkup = null,
 }) {
   const url = `https://api.telegram.org/bot${telegramBotToken}/sendMessage`
   const text = prefixMessage
     ? `${escapeHtml(prefixMessage)}\n\n${message}`
     : message
+  const payload = {
+    chat_id: telegramChatId,
+    text,
+    parse_mode: 'HTML',
+  }
+
+  if (replyMarkup) {
+    payload.reply_markup = replyMarkup
+  }
+
   const response = await postTelegram(
     url,
-    JSON.stringify({
-      chat_id: telegramChatId,
-      text,
-      parse_mode: 'HTML',
-    })
+    JSON.stringify(payload)
   )
 
   assertTelegramSuccess(response, 'Gagal mengirim notifikasi teks Telegram.')
@@ -590,6 +732,7 @@ async function sendTelegramDocumentNotification({
   caption,
   fallbackMessage,
   fallbackPrefix,
+  replyMarkup = null,
 }) {
   const url = `https://api.telegram.org/bot${telegramBotToken}/sendDocument`
 
@@ -601,6 +744,10 @@ async function sendTelegramDocumentNotification({
     formData.append('document', pdfBlob, fileName)
     formData.append('caption', caption)
     formData.append('parse_mode', 'HTML')
+
+    if (replyMarkup) {
+      formData.append('reply_markup', JSON.stringify(replyMarkup))
+    }
 
     const response = await postTelegram(url, formData)
 
@@ -630,6 +777,7 @@ async function sendTelegramDocumentNotification({
       telegramChatId,
       message: fallbackMessage,
       prefixMessage: fallbackPrefix,
+      replyMarkup,
     })
 
     return {
@@ -661,6 +809,37 @@ function isLoanPaymentPayload(body) {
 
 function isSalaryBillPayload(body) {
   return normalizeText(body.notificationType, '') === 'salary_bill'
+}
+
+function isAttendancePayload(body) {
+  return normalizeText(body.notificationType, '') === 'attendance'
+}
+
+function isRecapPayload(body) {
+  return normalizeText(body.notificationType, '') === 'recap'
+}
+
+function parseAttendancePayload(body) {
+  return {
+    workerName: normalizeText(body.workerName ?? body.worker_name, 'Pekerja'),
+    projectName: normalizeText(body.projectName ?? body.project_name, 'Workspace'),
+    attendanceDate: normalizeText(
+      body.attendanceDate ?? body.attendance_date ?? body.date,
+      new Date().toISOString()
+    ),
+    status: normalizeText(body.status ?? body.attendanceStatus, 'full_day'),
+    routePath: normalizeText(body.routePath ?? body.route, ''),
+  }
+}
+
+function parseRecapPayload(body) {
+  return {
+    title: normalizeText(body.title ?? body.summaryTitle ?? body.recapTitle, 'Rekap baru tersedia'),
+    periodLabel: normalizeText(body.periodLabel ?? body.period ?? body.windowLabel, ''),
+    summary: normalizeText(body.summary ?? body.description ?? body.notes, ''),
+    generatedAt: normalizeText(body.generatedAt ?? body.generated_at ?? body.date, new Date().toISOString()),
+    routePath: normalizeText(body.routePath ?? body.route, ''),
+  }
 }
 
 function parseTransactionPayload(body) {
@@ -765,6 +944,7 @@ function parseBillPaymentPayload(body) {
 
 function parseProjectIncomePayload(body) {
   const payload = {
+    transactionId: normalizeText(body.transactionId ?? body.transaction_id, ''),
     projectName: normalizeText(body.projectName, ''),
     transactionDate: normalizeText(body.transactionDate ?? body.transaction_date ?? body.date, new Date().toISOString()),
     userName: normalizeText(body.userName, 'Pengguna Telegram'),
@@ -781,6 +961,7 @@ function parseProjectIncomePayload(body) {
 
 function parseLoanPayload(body) {
   const payload = {
+    transactionId: normalizeText(body.transactionId ?? body.transaction_id, ''),
     creditorName: normalizeText(body.creditorName, ''),
     transactionDate: normalizeText(body.transactionDate ?? body.transaction_date ?? body.date, new Date().toISOString()),
     userName: normalizeText(body.userName, 'Pengguna Telegram'),
@@ -949,7 +1130,12 @@ function buildPaymentReceiptDocument(paymentType, payload) {
   }
 }
 
-async function sendTransactionNotification(payload, telegramBotToken, telegramChatId) {
+async function sendTransactionNotification(
+  payload,
+  telegramBotToken,
+  telegramChatId,
+  telegramBotUsername
+) {
   return sendTelegramDocumentNotification({
     telegramBotToken,
     telegramChatId,
@@ -959,13 +1145,19 @@ async function sendTransactionNotification(payload, telegramBotToken, telegramCh
     fallbackMessage: buildTransactionMessage(payload),
     fallbackPrefix:
       'PDF kwitansi gagal dibuat atau gagal dikirim. Notifikasi teks dikirim sebagai cadangan.',
+    replyMarkup: buildNotificationReplyMarkup(
+      telegramBotUsername,
+      'transaction',
+      payload
+    ),
   })
 }
 
 async function sendMaterialInvoiceNotification(
   payload,
   telegramBotToken,
-  telegramChatId
+  telegramChatId,
+  telegramBotUsername
 ) {
   return sendTelegramDocumentNotification({
     telegramBotToken,
@@ -976,10 +1168,20 @@ async function sendMaterialInvoiceNotification(
     fallbackMessage: buildMaterialInvoiceMessage(payload),
     fallbackPrefix:
       'PDF faktur material gagal dibuat atau gagal dikirim. Notifikasi teks dikirim sebagai cadangan.',
+    replyMarkup: buildNotificationReplyMarkup(
+      telegramBotUsername,
+      'material_invoice',
+      payload
+    ),
   })
 }
 
-async function sendBillPaymentNotification(payload, telegramBotToken, telegramChatId) {
+async function sendBillPaymentNotification(
+  payload,
+  telegramBotToken,
+  telegramChatId,
+  telegramBotUsername
+) {
   const { pdfBytes, fileName } = buildPaymentReceiptDocument('bill', payload)
 
   return sendTelegramDocumentNotification({
@@ -991,26 +1193,56 @@ async function sendBillPaymentNotification(payload, telegramBotToken, telegramCh
     fallbackMessage: buildBillPaymentMessage(payload),
     fallbackPrefix:
       'PDF kwitansi pembayaran tagihan gagal dibuat atau gagal dikirim. Notifikasi teks dikirim sebagai cadangan.',
+    replyMarkup: buildNotificationReplyMarkup(
+      telegramBotUsername,
+      'bill_payment',
+      payload
+    ),
   })
 }
 
-async function sendProjectIncomeNotification(payload, telegramBotToken, telegramChatId) {
+async function sendProjectIncomeNotification(
+  payload,
+  telegramBotToken,
+  telegramChatId,
+  telegramBotUsername
+) {
   return sendTelegramTextNotification({
     telegramBotToken,
     telegramChatId,
     message: buildProjectIncomeMessage(payload),
+    replyMarkup: buildNotificationReplyMarkup(
+      telegramBotUsername,
+      'project_income',
+      payload
+    ),
   })
 }
 
-async function sendLoanNotification(payload, telegramBotToken, telegramChatId) {
+async function sendLoanNotification(
+  payload,
+  telegramBotToken,
+  telegramChatId,
+  telegramBotUsername
+) {
   return sendTelegramTextNotification({
     telegramBotToken,
     telegramChatId,
     message: buildLoanMessage(payload),
+    replyMarkup: buildNotificationReplyMarkup(
+      telegramBotUsername,
+      'loan',
+      payload
+    ),
   })
 }
 
-async function sendLoanPaymentNotification(payload, telegramBotToken, telegramChatId) {
+async function sendLoanPaymentNotification(
+  payload,
+  telegramBotToken,
+  telegramChatId,
+  telegramBotUsername
+) {
   const { pdfBytes, fileName } = buildPaymentReceiptDocument('loan', payload)
 
   return sendTelegramDocumentNotification({
@@ -1022,14 +1254,65 @@ async function sendLoanPaymentNotification(payload, telegramBotToken, telegramCh
     fallbackMessage: buildLoanPaymentMessage(payload),
     fallbackPrefix:
       'PDF kwitansi pembayaran pinjaman gagal dibuat atau gagal dikirim. Notifikasi teks dikirim sebagai cadangan.',
+    replyMarkup: buildNotificationReplyMarkup(
+      telegramBotUsername,
+      'loan_payment',
+      payload
+    ),
   })
 }
 
-async function sendSalaryBillNotification(payload, telegramBotToken, telegramChatId) {
+async function sendSalaryBillNotification(
+  payload,
+  telegramBotToken,
+  telegramChatId,
+  telegramBotUsername
+) {
   return sendTelegramTextNotification({
     telegramBotToken,
     telegramChatId,
     message: buildSalaryBillMessage(payload),
+    replyMarkup: buildNotificationReplyMarkup(
+      telegramBotUsername,
+      'salary_bill',
+      payload
+    ),
+  })
+}
+
+async function sendAttendanceNotification(
+  payload,
+  telegramBotToken,
+  telegramChatId,
+  telegramBotUsername
+) {
+  return sendTelegramTextNotification({
+    telegramBotToken,
+    telegramChatId,
+    message: buildAttendanceMessage(payload),
+    replyMarkup: buildNotificationReplyMarkup(
+      telegramBotUsername,
+      'attendance',
+      payload
+    ),
+  })
+}
+
+async function sendRecapNotification(
+  payload,
+  telegramBotToken,
+  telegramChatId,
+  telegramBotUsername
+) {
+  return sendTelegramTextNotification({
+    telegramBotToken,
+    telegramChatId,
+    message: buildRecapMessage(payload),
+    replyMarkup: buildNotificationReplyMarkup(
+      telegramBotUsername,
+      'recap',
+      payload
+    ),
   })
 }
 
@@ -1049,6 +1332,7 @@ export default async function handler(req, res) {
   const TELEGRAM_CHAT_ID = String(
     globalThis.process?.env?.TELEGRAM_CHAT_ID ?? ''
   ).trim()
+  const TELEGRAM_BOT_USERNAME = getTelegramBotUsername()
 
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
     return res.status(500).json({
@@ -1065,43 +1349,64 @@ export default async function handler(req, res) {
       telegramResult = await sendMaterialInvoiceNotification(
         parseMaterialInvoicePayload(body),
         TELEGRAM_BOT_TOKEN,
-        TELEGRAM_CHAT_ID
+        TELEGRAM_CHAT_ID,
+        TELEGRAM_BOT_USERNAME
       )
     } else if (isBillPaymentPayload(body)) {
       telegramResult = await sendBillPaymentNotification(
         parseBillPaymentPayload(body),
         TELEGRAM_BOT_TOKEN,
-        TELEGRAM_CHAT_ID
+        TELEGRAM_CHAT_ID,
+        TELEGRAM_BOT_USERNAME
       )
     } else if (isProjectIncomePayload(body)) {
       telegramResult = await sendProjectIncomeNotification(
         parseProjectIncomePayload(body),
         TELEGRAM_BOT_TOKEN,
-        TELEGRAM_CHAT_ID
+        TELEGRAM_CHAT_ID,
+        TELEGRAM_BOT_USERNAME
       )
     } else if (isLoanPayload(body)) {
       telegramResult = await sendLoanNotification(
         parseLoanPayload(body),
         TELEGRAM_BOT_TOKEN,
-        TELEGRAM_CHAT_ID
+        TELEGRAM_CHAT_ID,
+        TELEGRAM_BOT_USERNAME
       )
     } else if (isLoanPaymentPayload(body)) {
       telegramResult = await sendLoanPaymentNotification(
         parseLoanPaymentPayload(body),
         TELEGRAM_BOT_TOKEN,
-        TELEGRAM_CHAT_ID
+        TELEGRAM_CHAT_ID,
+        TELEGRAM_BOT_USERNAME
       )
     } else if (isSalaryBillPayload(body)) {
       telegramResult = await sendSalaryBillNotification(
         parseSalaryBillPayload(body),
         TELEGRAM_BOT_TOKEN,
-        TELEGRAM_CHAT_ID
+        TELEGRAM_CHAT_ID,
+        TELEGRAM_BOT_USERNAME
+      )
+    } else if (isAttendancePayload(body)) {
+      telegramResult = await sendAttendanceNotification(
+        parseAttendancePayload(body),
+        TELEGRAM_BOT_TOKEN,
+        TELEGRAM_CHAT_ID,
+        TELEGRAM_BOT_USERNAME
+      )
+    } else if (isRecapPayload(body)) {
+      telegramResult = await sendRecapNotification(
+        parseRecapPayload(body),
+        TELEGRAM_BOT_TOKEN,
+        TELEGRAM_CHAT_ID,
+        TELEGRAM_BOT_USERNAME
       )
     } else {
       telegramResult = await sendTransactionNotification(
         parseTransactionPayload(body),
         TELEGRAM_BOT_TOKEN,
-        TELEGRAM_CHAT_ID
+        TELEGRAM_CHAT_ID,
+        TELEGRAM_BOT_USERNAME
       )
     }
 

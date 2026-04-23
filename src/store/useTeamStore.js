@@ -5,6 +5,7 @@ import {
   assertCapabilityAccess,
   capabilityContracts,
 } from '../lib/capabilities'
+import { mapInviteToken } from '../lib/team-invite'
 import { resolveProfileId, resolveTeamId } from '../lib/auth-context'
 import { normalizeRole } from '../lib/rbac'
 
@@ -30,34 +31,6 @@ function getMemberStatusLabel(status) {
   }
 
   return normalizedStatus
-}
-
-function getInviteLifecycleStatus(invite) {
-  if (invite?.is_used) {
-    return 'used'
-  }
-
-  const expiresAt = invite?.expires_at ? new Date(invite.expires_at) : null
-
-  if (expiresAt && !Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() < Date.now()) {
-    return 'expired'
-  }
-
-  return 'active'
-}
-
-function getInviteLifecycleLabel(invite) {
-  const lifecycleStatus = getInviteLifecycleStatus(invite)
-
-  if (lifecycleStatus === 'used') {
-    return 'Dipakai'
-  }
-
-  if (lifecycleStatus === 'expired') {
-    return 'Kedaluwarsa'
-  }
-
-  return 'Aktif'
 }
 
 function normalizeText(value, fallback = null) {
@@ -103,12 +76,8 @@ function randomTokenSegment(length = 10) {
 
 function getBotUsername() {
   return (
-    normalizeText(import.meta.env.VITE_TELEGRAM_BOT_USERNAME, null) ?? 'NamaBotAnda'
+    normalizeText(import.meta.env?.VITE_TELEGRAM_BOT_USERNAME, null) ?? 'NamaBotAnda'
   )
-}
-
-function buildInviteLink(token) {
-  return `https://t.me/${getBotUsername()}/app?startapp=${encodeURIComponent(token)}`
 }
 
 function mapTeamMember(member) {
@@ -131,19 +100,6 @@ function mapTeamMember(member) {
   }
 }
 
-function mapInviteToken(invite) {
-  return {
-    id: invite?.id ?? null,
-    team_id: normalizeText(invite?.team_id, null),
-    token: normalizeText(invite?.token, null),
-    role: normalizeRole(invite?.role),
-    expires_at: normalizeText(invite?.expires_at, null),
-    is_used: Boolean(invite?.is_used),
-    created_at: normalizeText(invite?.created_at, null),
-    lifecycle_status: getInviteLifecycleStatus(invite),
-    lifecycle_status_label: getInviteLifecycleLabel(invite),
-  }
-}
 
 async function loadActiveTeam(teamId) {
   if (!supabase) {
@@ -195,7 +151,7 @@ async function loadLatestInvite(teamId) {
     throw error
   }
 
-  return data ? mapInviteToken(data) : null
+  return data ? mapInviteToken(data, getBotUsername()) : null
 }
 
 const useTeamStore = create((set, get) => ({
@@ -276,10 +232,7 @@ const useTeamStore = create((set, get) => ({
         throw error
       }
 
-      const nextInvite = {
-        ...mapInviteToken(data),
-        invite_link: buildInviteLink(token),
-      }
+      const nextInvite = mapInviteToken(data, getBotUsername())
 
       set({
         latestInvite: nextInvite,

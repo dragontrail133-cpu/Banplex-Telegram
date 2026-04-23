@@ -177,17 +177,19 @@ function PayrollGroupDetail({
   onOpenBill,
   onPermanentDeletePayment,
   onRestorePayment,
+  tabOptions: tabOptionsProp = null,
 }) {
   const summary = getPayrollBillGroupSummary(group)
-  const hasHistory = historyRows.length > 0
   const tabOptions = useMemo(
     () =>
-      [
-        { value: 'summary', label: 'Summary' },
-        { value: 'rekap', label: 'Rekap' },
-        hasHistory ? { value: 'history', label: 'Riwayat' } : null,
-      ].filter(Boolean),
-    [hasHistory]
+      Array.isArray(tabOptionsProp) && tabOptionsProp.length > 0
+        ? tabOptionsProp
+        : [
+            { value: 'summary', label: 'Summary' },
+            { value: 'rekap', label: 'Rekap' },
+            { value: 'history', label: 'Riwayat' },
+          ],
+    [tabOptionsProp]
   )
 
   useEffect(() => {
@@ -408,6 +410,7 @@ function PaymentsPage() {
   const [deletedBillPayments, setDeletedBillPayments] = useState([])
   const [deletedBillPaymentsTeamId, setDeletedBillPaymentsTeamId] = useState(null)
   const [isGroupLoading, setIsGroupLoading] = useState(false)
+  const didInitTeamRef = useRef(false)
   const [groupRevision, setGroupRevision] = useState(0)
   const selectedGroupKey = useMemo(() => {
     return new URLSearchParams(location.search).get('group')?.trim() ?? ''
@@ -437,6 +440,11 @@ function PaymentsPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') {
+      return
+    }
+
+    if (!didInitTeamRef.current) {
+      didInitTeamRef.current = true
       return
     }
 
@@ -513,14 +521,11 @@ function PaymentsPage() {
     const options = [
       { value: 'summary', label: 'Summary' },
       { value: 'rekap', label: 'Rekap' },
+      { value: 'history', label: 'Riwayat' },
     ]
 
-    if (selectedGroupHistoryRows.length > 0) {
-      options.push({ value: 'history', label: 'Riwayat' })
-    }
-
     return options
-  }, [selectedGroup, selectedGroupHistoryRows.length])
+  }, [selectedGroup])
 
   useEffect(() => {
     const frameId = window.requestAnimationFrame(() => {
@@ -716,6 +721,8 @@ function PaymentsPage() {
           payment_id: entry.payment.id,
           team_id: currentTeamId,
         })
+        setBillDetailById({})
+        setDeletedBillPaymentsTeamId(null)
         setGroupRevision((value) => value + 1)
       } catch (error) {
         showToast({
@@ -741,6 +748,8 @@ function PaymentsPage() {
           entry.payment.updatedAt ?? entry.payment.updated_at ?? null
         )
         await fetchUnpaidBills({ teamId: currentTeamId, silent: true })
+        setBillDetailById({})
+        setDeletedBillPaymentsTeamId(null)
         setGroupRevision((value) => value + 1)
         showToast({
           tone: 'success',
@@ -767,6 +776,8 @@ function PaymentsPage() {
       try {
         await permanentDeleteBillPaymentFromApi(entry.payment.id, currentTeamId)
         await fetchUnpaidBills({ teamId: currentTeamId, silent: true })
+        setBillDetailById({})
+        setDeletedBillPaymentsTeamId(null)
         setGroupRevision((value) => value + 1)
         showToast({
           tone: 'success',
@@ -832,12 +843,12 @@ function PaymentsPage() {
             isReadOnly={isReadOnly}
             onArchivePayment={handleArchivePayment}
             onChangeTab={handleChangeGroupTab}
-            onDownloadReceipt={handleDownloadReceipt}
-            onOpenBill={handleOpenBillPayment}
-            onPermanentDeletePayment={handlePermanentDeletePayment}
-            onRestorePayment={handleRestorePayment}
-            tabOptions={selectedGroupTabOptions}
-          />
+          onDownloadReceipt={handleDownloadReceipt}
+          onOpenBill={handleOpenBillPayment}
+          onPermanentDeletePayment={handlePermanentDeletePayment}
+          onRestorePayment={handleRestorePayment}
+          tabOptions={selectedGroupTabOptions}
+        />
         ) : isBillsLoading || isGroupLoading ? (
           <section className="grid min-h-[calc(100dvh-18rem)] place-items-center px-4 text-center">
             <div className="flex flex-col items-center gap-5">

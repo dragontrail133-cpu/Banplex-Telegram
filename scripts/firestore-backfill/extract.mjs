@@ -21,6 +21,7 @@ const CANONICAL_OUTPUT = {
   professions: { group: 'reference', table: 'professions' },
   staff: { group: 'reference', table: 'staff' },
   materials: { group: 'reference', table: 'materials' },
+  workers: { group: 'reference', table: 'workers' },
   worker_wage_rates: { group: 'reference', table: 'worker_wage_rates' },
   project_incomes: { group: 'finance', table: 'project_incomes' },
   expenses: { group: 'finance', table: 'expenses' },
@@ -44,6 +45,36 @@ const SIDECAR_OUTPUT = {
   team_members: { group: 'identity', table: 'team_members' },
   profiles: { group: 'identity', table: 'profiles' },
 }
+
+const TRANSFORMED_CANONICAL_TABLES = [
+  'teams',
+  'projects',
+  'suppliers',
+  'expense_categories',
+  'funding_creditors',
+  'professions',
+  'staff',
+  'materials',
+  'workers',
+  'worker_wage_rates',
+  'project_incomes',
+  'expenses',
+  'expense_line_items',
+  'expense_attachments',
+  'bills',
+  'bill_payments',
+  'loans',
+  'loan_payments',
+  'attendance_records',
+  'stock_transactions',
+  'file_assets',
+  'beneficiaries',
+  'hrd_applicants',
+  'hrd_applicant_documents',
+  'pdf_settings',
+]
+
+const TRANSFORMED_SIDECAR_TABLES = ['users', 'team_members', 'profiles']
 
 const NAME_FIELDS_BY_COLLECTION = {
   teams: ['name', 'teamName', 'team_name', 'workspaceName', 'workspace_name', 'slug'],
@@ -372,6 +403,25 @@ const __dirname = path.dirname(__filename)
 
 function isMainModule() {
   return pathToFileURL(process.argv[1] ?? '').href === pathToFileURL(__filename).href
+}
+
+function assertOutputTableCoverage() {
+  const missingCanonicalMeta = TRANSFORMED_CANONICAL_TABLES.filter((tableName) => !CANONICAL_OUTPUT[tableName])
+  const missingSidecarMeta = TRANSFORMED_SIDECAR_TABLES.filter((tableName) => !SIDECAR_OUTPUT[tableName])
+
+  if (missingCanonicalMeta.length > 0 || missingSidecarMeta.length > 0) {
+    const messages = []
+
+    if (missingCanonicalMeta.length > 0) {
+      messages.push(`canonical: ${missingCanonicalMeta.join(', ')}`)
+    }
+
+    if (missingSidecarMeta.length > 0) {
+      messages.push(`sidecar: ${missingSidecarMeta.join(', ')}`)
+    }
+
+    throw new Error(`Output metadata belum lengkap untuk tabel transform: ${messages.join(' | ')}`)
+  }
 }
 
 function normalizeText(value, fallback = null) {
@@ -3570,6 +3620,7 @@ function deriveDefaultTeamPath(context) {
 }
 
 async function main() {
+  assertOutputTableCoverage()
   const options = createCliParser(process.argv.slice(2))
 
   if (options.help) {

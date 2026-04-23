@@ -7,6 +7,7 @@ import {
   savePdfSettingsFromApi,
 } from '../lib/reports-api'
 import { saveBusinessReportPdf } from '../lib/report-pdf'
+import { sendBusinessReportPdfToTelegramDm } from '../lib/report-delivery-api'
 import {
   formatDateInputValue,
   getDefaultBusinessReportPeriod,
@@ -66,6 +67,8 @@ const useReportStore = create((set, get) => ({
   detailError: null,
   pdfSettingsError: null,
   pdfError: null,
+  pdfDeliveryError: null,
+  isPdfDelivering: false,
   lastUpdatedAt: null,
   clearError: () =>
     set({
@@ -74,6 +77,7 @@ const useReportStore = create((set, get) => ({
       reportError: null,
       pdfSettingsError: null,
       pdfError: null,
+      pdfDeliveryError: null,
     }),
   setReportKind: (reportKind) =>
     set((state) => ({
@@ -319,7 +323,7 @@ const useReportStore = create((set, get) => ({
       return null
     }
 
-    set({ isPdfGenerating: true, pdfError: null })
+    set({ isPdfGenerating: true, pdfError: null, pdfDeliveryError: null })
 
     try {
       const nextReportData = reportData ?? (await fetchBusinessReportData({ force: true }))
@@ -343,6 +347,55 @@ const useReportStore = create((set, get) => ({
       set({
         isPdfGenerating: false,
         pdfError: normalizedError.message,
+      })
+
+      throw normalizedError
+    }
+  },
+  sendBusinessReportToTelegramDm: async () => {
+    const {
+      fetchBusinessReportData,
+      pdfSettings,
+      reportData,
+      isPdfDelivering,
+    } = get()
+
+    if (isPdfDelivering) {
+      return null
+    }
+
+    set({ isPdfDelivering: true, pdfDeliveryError: null, pdfError: null })
+
+    try {
+      const nextReportData =
+        reportData ?? (await fetchBusinessReportData({ force: true }))
+
+      if (!nextReportData) {
+        set({
+          isPdfDelivering: false,
+          pdfDeliveryError: 'Data laporan belum tersedia.',
+        })
+
+        return null
+      }
+
+      const result = await sendBusinessReportPdfToTelegramDm({
+        reportData: nextReportData,
+        pdfSettings,
+      })
+
+      set({
+        isPdfDelivering: false,
+        pdfDeliveryError: result.pdfError ?? null,
+      })
+
+      return result
+    } catch (error) {
+      const normalizedError = toError(error, 'Gagal mengirim laporan PDF ke DM.')
+
+      set({
+        isPdfDelivering: false,
+        pdfDeliveryError: normalizedError.message,
       })
 
       throw normalizedError

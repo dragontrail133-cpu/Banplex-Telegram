@@ -1,4 +1,5 @@
 const assistantCommandNames = new Set([
+  'start',
   'menu',
   'status',
   'cari',
@@ -191,6 +192,28 @@ function resolveAssistantCallbackAction(callbackData) {
   return null
 }
 
+function shouldUseAssistantDmFallback({
+  chatType,
+  sessionState = 'idle',
+  needsClarification = false,
+  needsWorkspaceChoice = false,
+} = {}) {
+  const normalizedChatType = normalizeText(chatType, '').toLowerCase()
+  const isGroupChat = normalizedChatType === 'group' || normalizedChatType === 'supergroup'
+
+  if (!isGroupChat) {
+    return false
+  }
+
+  if (needsClarification || needsWorkspaceChoice) {
+    return true
+  }
+
+  return ['awaiting_workspace_choice', 'awaiting_clarification'].includes(
+    normalizeText(sessionState, '')
+  )
+}
+
 export {
   allowedAnalyticsEntityTypes,
   allowedAnalyticsMetricKeys,
@@ -201,4 +224,5 @@ export {
   buildAssistantCommandRawText,
   extractAssistantCommand,
   resolveAssistantCallbackAction,
+  shouldUseAssistantDmFallback,
 }

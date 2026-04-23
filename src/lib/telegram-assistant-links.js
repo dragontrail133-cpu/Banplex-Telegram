@@ -168,11 +168,27 @@ function buildTelegramAssistantLink(botUsername, path) {
     return null
   }
 
-  return `https://t.me/${normalizedBotUsername}/app?startapp=${encodeURIComponent(startParam)}`
+  return `https://t.me/${normalizedBotUsername}?startapp=${encodeURIComponent(startParam)}`
+}
+
+function buildTelegramAssistantChatLink(botUsername, startParam = null) {
+  const normalizedBotUsername = normalizeText(botUsername, '').replace(/^@/, '')
+  const normalizedStartParam = normalizeText(startParam, '')
+
+  if (!normalizedBotUsername) {
+    return null
+  }
+
+  if (!normalizedStartParam) {
+    return `https://t.me/${normalizedBotUsername}`
+  }
+
+  return `https://t.me/${normalizedBotUsername}?start=${encodeURIComponent(normalizedStartParam)}`
 }
 
 export {
   ASSISTANT_START_PARAM_PREFIX,
+  buildTelegramAssistantChatLink,
   buildTelegramAssistantLink,
   buildTelegramAssistantStartParam,
   normalizeAssistantRoutePath,
