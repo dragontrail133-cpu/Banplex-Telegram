@@ -48,6 +48,24 @@ function formatMonthValue(value) {
   return getAppTodayKey().slice(0, 7)
 }
 
+function buildPayrollHistorySearch({ tab = 'daily', month = '' } = {}) {
+  const searchParams = new URLSearchParams()
+  const normalizedTab = tab === 'worker' ? 'worker' : 'daily'
+  const normalizedMonth = formatMonthValue(month)
+
+  if (normalizedTab === 'worker') {
+    searchParams.set('tab', normalizedTab)
+  }
+
+  if (normalizedMonth) {
+    searchParams.set('month', normalizedMonth)
+  }
+
+  const searchString = searchParams.toString()
+
+  return searchString ? `?${searchString}` : ''
+}
+
 function getStatusLabel(status) {
   const normalizedStatus = String(status ?? '').trim().toLowerCase()
 
@@ -393,13 +411,20 @@ function PayrollAttendanceHistory({
   const location = useLocation()
   const navigate = useNavigate()
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
+  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search])
   const requestedTab = useMemo(() => {
-    const nextTab = new URLSearchParams(location.search).get('tab')
+    const nextTab = searchParams.get('tab')
 
     return nextTab === 'worker' ? 'worker' : 'daily'
-  }, [location.search])
+  }, [searchParams])
+  const requestedMonth = useMemo(
+    () => formatMonthValue(searchParams.get('month')),
+    [searchParams]
+  )
+  const hasExplicitMonth = useMemo(() => searchParams.has('month'), [searchParams])
+  const defaultMonth = useMemo(() => formatMonthValue(''), [])
   const [activeTab, setActiveTab] = useState(requestedTab)
-  const [selectedMonth] = useState(() => formatMonthValue(''))
+  const [selectedMonth, setSelectedMonth] = useState(requestedMonth)
   const [dailyGroups, setDailyGroups] = useState([])
   const [workerGroups, setWorkerGroups] = useState([])
   const [isLoading, setIsLoading] = useState(false)
@@ -417,6 +442,10 @@ function PayrollAttendanceHistory({
   useEffect(() => {
     setActiveTab(requestedTab)
   }, [requestedTab])
+
+  useEffect(() => {
+    setSelectedMonth(requestedMonth)
+  }, [requestedMonth])
 
   useEffect(() => {
     if (!currentTeamId) {
@@ -452,6 +481,38 @@ function PayrollAttendanceHistory({
           month: selectedMonth,
         })
 
+        if (
+          isActive &&
+          !hasExplicitMonth &&
+          selectedMonth === defaultMonth &&
+          (nextSummary.dailyGroups ?? []).length === 0 &&
+          (nextSummary.workerGroups ?? []).length === 0
+        ) {
+          const fallbackSummary = await fetchAttendanceHistorySummaryFromApi({
+            teamId: currentTeamId,
+          })
+          const latestDateKey =
+            fallbackSummary.dailyGroups?.[0]?.dateKey ??
+            fallbackSummary.workerGroups?.[0]?.lastDate ??
+            null
+          const fallbackMonth = latestDateKey ? formatMonthValue(latestDateKey) : null
+
+          if (fallbackMonth && fallbackMonth !== selectedMonth) {
+            setSelectedMonth(fallbackMonth)
+            navigate(
+              {
+                pathname: location.pathname,
+                search: buildPayrollHistorySearch({
+                  tab: activeTab,
+                  month: fallbackMonth,
+                }),
+              },
+              { replace: true }
+            )
+            return
+          }
+        }
+
         if (isActive) {
           setDailyGroups(
             (nextSummary.dailyGroups ?? []).map((group) => ({
@@ -486,7 +547,16 @@ function PayrollAttendanceHistory({
     return () => {
       isActive = false
     }
-  }, [currentTeamId, refreshToken, selectedMonth])
+  }, [
+    activeTab,
+    currentTeamId,
+    defaultMonth,
+    hasExplicitMonth,
+    location.pathname,
+    navigate,
+    refreshToken,
+    selectedMonth,
+  ])
 
   const activeGroups = activeTab === 'daily' ? dailyGroups : workerGroups
   const activeRecapGroup = sheetState.mode === 'recap-confirm' ? sheetState.group : null
@@ -541,7 +611,28 @@ function PayrollAttendanceHistory({
     navigate(
       {
         pathname: location.pathname,
-        search: nextTab === 'worker' ? '?tab=worker' : '',
+        search: buildPayrollHistorySearch({
+          tab: nextTab,
+          month: selectedMonth,
+        }),
+      },
+      { replace: true }
+    )
+  }
+
+  const handleMonthChange = (event) => {
+    const nextMonth = formatMonthValue(event.target.value)
+
+    setSelectedMonth(nextMonth)
+    handleCloseActionMenu()
+
+    navigate(
+      {
+        pathname: location.pathname,
+        search: buildPayrollHistorySearch({
+          tab: activeTab,
+          month: nextMonth,
+        }),
       },
       { replace: true }
     )
@@ -736,25 +827,39 @@ function PayrollAttendanceHistory({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-2 rounded-[24px] bg-[var(--app-surface-low-color)] p-1">
-        <AppButton
-          fullWidth
-          onClick={() => handleTabChange('daily')}
-          size="sm"
-          type="button"
-          variant={activeTab === 'daily' ? 'primary' : 'secondary'}
-        >
-          Harian
-        </AppButton>
-        <AppButton
-          fullWidth
-          onClick={() => handleTabChange('worker')}
-          size="sm"
-          type="button"
-          variant={activeTab === 'worker' ? 'primary' : 'secondary'}
-        >
-          Pekerja
-        </AppButton>
+      <div className="space-y-2 rounded-[24px] bg-[var(--app-surface-low-color)] p-2">
+        <div className="grid grid-cols-2 gap-2 rounded-[20px] bg-[var(--app-surface-low-color)] p-1">
+          <AppButton
+            fullWidth
+            onClick={() => handleTabChange('daily')}
+            size="sm"
+            type="button"
+            variant={activeTab === 'daily' ? 'primary' : 'secondary'}
+          >
+            Harian
+          </AppButton>
+          <AppButton
+            fullWidth
+            onClick={() => handleTabChange('worker')}
+            size="sm"
+            type="button"
+            variant={activeTab === 'worker' ? 'primary' : 'secondary'}
+          >
+            Pekerja
+          </AppButton>
+        </div>
+
+        <label className="block space-y-1 px-1">
+          <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--app-hint-color)]">
+            Bulan
+          </span>
+          <input
+            className="w-full rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-4 py-3 text-sm text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+            onChange={handleMonthChange}
+            type="month"
+            value={selectedMonth}
+          />
+        </label>
       </div>
 
       {error ? (

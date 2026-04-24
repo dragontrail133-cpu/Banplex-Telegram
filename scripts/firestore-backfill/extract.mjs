@@ -2117,6 +2117,7 @@ function transformExpenseDoc(context, doc) {
       null,
     notes: pickText(data, 'notes', null),
     amount,
+    total_amount: amount,
     telegram_user_id:
       pickText(data, 'telegramUserId', null) ??
       pickText(data, 'telegram_user_id', null) ??

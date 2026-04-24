@@ -12,6 +12,8 @@ import {
 import {
   isUuid,
   remapRowTeamId,
+  resolveBackfillAttendanceTotalPay,
+  resolveBackfillExpenseTotalAmount,
   resolveLoanNominalAmounts,
   shouldBackfillAttendanceRecord,
 } from '../../scripts/firestore-backfill/helpers.mjs'
@@ -97,6 +99,55 @@ test('firestore backfill helper only falls back to repayment amount for non-inte
       amount: 0,
       repayment_amount: 620000,
     }
+  )
+})
+
+test('firestore backfill helper falls back expense total amount to amount', () => {
+  assert.equal(
+    resolveBackfillExpenseTotalAmount({
+      amount: 325000,
+      totalAmount: 0,
+      total_amount: 0,
+    }),
+    325000
+  )
+
+  assert.equal(
+    resolveBackfillExpenseTotalAmount({
+      amount: 325000,
+      totalAmount: 450000,
+      total_amount: 0,
+    }),
+    450000
+  )
+})
+
+test('firestore backfill helper derives attendance pay from wage rates when legacy total pay is empty', () => {
+  assert.equal(
+    resolveBackfillAttendanceTotalPay({
+      attendanceStatus: 'half_day',
+      totalPay: 0,
+      baseWage: 100000,
+    }),
+    50000
+  )
+
+  assert.equal(
+    resolveBackfillAttendanceTotalPay({
+      attendanceStatus: 'full_day',
+      totalPay: 150000,
+      baseWage: 200000,
+    }),
+    150000
+  )
+
+  assert.equal(
+    resolveBackfillAttendanceTotalPay({
+      attendanceStatus: 'absent',
+      totalPay: 0,
+      baseWage: 100000,
+    }),
+    0
   )
 })
 

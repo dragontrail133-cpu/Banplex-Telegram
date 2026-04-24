@@ -1,3 +1,5 @@
+import { resolveAttendanceEffectiveTotalPay } from '../../src/lib/attendance-payroll.js'
+
 export function isUuid(value) {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
@@ -90,6 +92,45 @@ export function resolveLoanNominalAmounts({
     amount: resolvedAmount,
     repayment_amount: resolvedRepaymentAmount,
   }
+}
+
+export function resolveBackfillExpenseTotalAmount({
+  amount,
+  totalAmount,
+  total_amount,
+} = {}) {
+  return (
+    normalizePositiveNumber(total_amount) ??
+    normalizePositiveNumber(totalAmount) ??
+    normalizePositiveNumber(amount) ??
+    0
+  )
+}
+
+export function resolveBackfillAttendanceTotalPay({
+  attendanceStatus,
+  totalPay,
+  total_pay,
+  baseWage,
+  wageAmount,
+  overtimeFee,
+  overtime_fee,
+} = {}) {
+  return resolveAttendanceEffectiveTotalPay({
+    attendanceStatus,
+    totalPay:
+      normalizePositiveNumber(total_pay) ??
+      normalizePositiveNumber(totalPay) ??
+      0,
+    baseWage:
+      normalizePositiveNumber(baseWage) ??
+      normalizePositiveNumber(wageAmount) ??
+      0,
+    overtimeFee:
+      normalizePositiveNumber(overtime_fee) ??
+      normalizePositiveNumber(overtimeFee) ??
+      0,
+  })
 }
 
 export function shouldBackfillAttendanceRecord({ projectId } = {}) {

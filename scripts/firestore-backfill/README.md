@@ -116,9 +116,12 @@ Loader ini:
 
 - hanya memuat artifact `canonical/*`
 - tidak memuat `sidecar/identity/*` ke `profiles` atau `team_members`
+- menormalkan `expenses.total_amount` dari `amount` legacy bila artifact lama belum membawa field `total_amount`
 - menormalisasi nominal loan dari `totalAmount` legacy ke `principal_amount` / `amount`, dan memakai `repayment_amount` hanya sebagai fallback untuk loan non-interest yang masih belum punya pokok
 - mempertahankan `repayment_amount` sebagai total kewajiban pengembalian; `base_repayment_amount` tetap dihitung terpisah di snapshot loan
 - hanya memuat `attendance_records` yang memang punya `projectId` legacy; row legacy tanpa `projectId` (umumnya `absent`) dilewati dari backfill agar selaras dengan aturan repo
+- mewariskan `attendance_records.total_pay` dari `worker_wage_rates` bila row canonical attendance masih `0` tetapi tarif kerja proyek tersedia di artifact
+- saat live load ke workspace existing, meng-soft-delete row `attendance_records` legacy aktif yang punya `legacy_firebase_id` tetapi sudah tidak lagi ada di artifact canonical agar rerun benar-benar konvergen dan membersihkan row backfill lama yang kini invalid
 - jika masih ada row attendance hasil backfill yang memakai `attendance_status = absent`, apply migration `supabase/migrations/20260421120000_allow_absent_attendance_status.sql` sebelum live load
 - reconcile row yang auto-generated oleh trigger aktif:
   - `expenses -> bills / bill_payments`

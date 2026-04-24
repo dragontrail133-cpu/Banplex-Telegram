@@ -6,6 +6,7 @@ import {
 import {
   getAllowedAttendanceStatusValues,
   getAttendanceDayWeight,
+  resolveAttendanceEffectiveTotalPay,
 } from '../src/lib/attendance-payroll.js'
 import { assertCapabilityAccess } from '../src/lib/capabilities.js'
 import { nowMs } from '../src/lib/timing.js'
@@ -656,6 +657,144 @@ function toNumber(value) {
   return Number.isFinite(parsedValue) ? parsedValue : NaN
 }
 
+function resolveExpenseTotalAmount(row) {
+  const normalizedTotalAmount = toNumber(row?.total_amount)
+
+  if (Number.isFinite(normalizedTotalAmount) && normalizedTotalAmount > 0) {
+    return normalizedTotalAmount
+  }
+
+  const normalizedAmount = toNumber(row?.amount)
+
+  return Number.isFinite(normalizedAmount) && normalizedAmount > 0 ? normalizedAmount : 0
+}
+
+function isAttendanceCompensationRepairCandidate(attendance) {
+  const attendanceStatus = normalizeText(attendance?.attendance_status, '').toLowerCase()
+  const totalPay = toNumber(attendance?.total_pay)
+
+  return (
+    ['full_day', 'half_day', 'overtime'].includes(attendanceStatus) &&
+    (!Number.isFinite(totalPay) || totalPay <= 0)
+  )
+}
+
+function buildWorkerWageRateLookup(rows = []) {
+  const lookup = new Map()
+
+  for (const row of rows) {
+    const workerId = normalizeText(row?.worker_id, null)
+
+    if (!workerId) {
+      continue
+    }
+
+    const nextRows = lookup.get(workerId) ?? []
+    nextRows.push({
+      ...row,
+      wage_amount: toNumber(row?.wage_amount),
+      is_default: Boolean(row?.is_default),
+    })
+    lookup.set(workerId, nextRows)
+  }
+
+  return lookup
+}
+
+function resolveAttendanceBaseWage(attendance, wageRateLookup) {
+  const workerId = normalizeText(attendance?.worker_id, null)
+  const projectId = normalizeText(attendance?.project_id, null)
+  const rateRows = workerId ? wageRateLookup.get(workerId) ?? [] : []
+
+  if (rateRows.length === 0) {
+    return 0
+  }
+
+  const sortedRateRows = [...rateRows].sort((left, right) => {
+    const leftProjectMatch = normalizeText(left?.project_id, null) === projectId ? 1 : 0
+    const rightProjectMatch = normalizeText(right?.project_id, null) === projectId ? 1 : 0
+
+    if (leftProjectMatch !== rightProjectMatch) {
+      return rightProjectMatch - leftProjectMatch
+    }
+
+    const leftDefault = Number(Boolean(left?.is_default))
+    const rightDefault = Number(Boolean(right?.is_default))
+
+    if (leftDefault !== rightDefault) {
+      return rightDefault - leftDefault
+    }
+
+    const createdAtComparison = compareText(left?.created_at, right?.created_at)
+
+    if (createdAtComparison !== 0) {
+      return createdAtComparison
+    }
+
+    return compareText(left?.id, right?.id)
+  })
+
+  return sortedRateRows.reduce((resolvedBaseWage, row) => {
+    if (resolvedBaseWage > 0) {
+      return resolvedBaseWage
+    }
+
+    const wageAmount = toNumber(row?.wage_amount)
+    return Number.isFinite(wageAmount) && wageAmount > 0 ? wageAmount : resolvedBaseWage
+  }, 0)
+}
+
+async function repairAttendanceRowsCompensation(readClient, rows = []) {
+  const normalizedRows = Array.isArray(rows) ? rows : []
+  const candidates = normalizedRows.filter(isAttendanceCompensationRepairCandidate)
+
+  if (candidates.length === 0) {
+    return normalizedRows
+  }
+
+  const workerIds = [...new Set(candidates.map((row) => normalizeText(row?.worker_id, null)).filter(Boolean))]
+
+  if (workerIds.length === 0) {
+    return normalizedRows
+  }
+
+  const { data, error } = await readClient
+    .from('worker_wage_rates')
+    .select('id, worker_id, project_id, role_name, wage_amount, is_default, created_at')
+    .in('worker_id', workerIds)
+    .is('deleted_at', null)
+
+  if (error) {
+    throw error
+  }
+
+  const wageRateLookup = buildWorkerWageRateLookup(data ?? [])
+
+  return normalizedRows.map((row) => {
+    if (!isAttendanceCompensationRepairCandidate(row)) {
+      return row
+    }
+
+    const baseWage = resolveAttendanceBaseWage(row, wageRateLookup)
+    const resolvedTotalPay = resolveAttendanceEffectiveTotalPay({
+      attendanceStatus: row?.attendance_status,
+      totalPay: row?.total_pay,
+      baseWage,
+      overtimeFee: row?.overtime_fee,
+    })
+
+    if (resolvedTotalPay <= 0) {
+      return row
+    }
+
+    return {
+      ...row,
+      total_pay: resolvedTotalPay,
+      overtime_fee: row?.overtime_fee ?? null,
+    }
+  })
+}
+
 function compareText(left, right) {
   return String(left ?? '').localeCompare(String(right ?? ''), 'id', {
     sensitivity: 'base',
@@ -1227,7 +1366,7 @@ function normalizeIncomeRow(row) {
 function normalizeExpenseRow(row) {
   return {
     ...row,
-    total_amount: toNumber(row?.total_amount),
+    total_amount: resolveExpenseTotalAmount(row),
   }
 }
 
@@ -1367,7 +1506,7 @@ function mapExpenseRow(expense, bill = null, attachments = []) {
   return {
     ...expense,
     amount: toNumber(expense?.amount),
-    total_amount: toNumber(expense?.total_amount),
+    total_amount: resolveExpenseTotalAmount(expense),
     status: normalizeText(expense?.status, 'unpaid'),
     expense_type: normalizeText(expense?.expense_type, 'operasional'),
     document_type: normalizeText(expense?.document_type, 'faktur'),
@@ -3484,7 +3623,9 @@ async function loadAttendanceEntries(adminClient, teamId, date, projectId) {
     return { data: nextData, error }
   })
 
-  return (data ?? []).map(normalizeAttendanceRow)
+  const repairedData = await repairAttendanceRowsCompensation(adminClient, data ?? [])
+
+  return repairedData.map(normalizeAttendanceRow)
 }
 
 function resolveAttendanceMonthRange(monthValue) {
@@ -3666,11 +3807,12 @@ async function loadAttendanceHistorySummary(adminClient, teamId, { month = null 
     return { data: nextData, error }
   })
 
-  const summaries = buildAttendanceHistorySummary(data ?? [])
+  const repairedData = await repairAttendanceRowsCompensation(adminClient, data ?? [])
+  const summaries = buildAttendanceHistorySummary(repairedData)
 
   return {
     month: normalizeText(month, null),
-    attendanceCount: (data ?? []).length,
+    attendanceCount: repairedData.length,
     dailyGroups: summaries.dailyGroups,
     workerGroups: summaries.workerGroups,
   }
@@ -3726,7 +3868,9 @@ async function loadAttendanceHistory(
     return { data: nextData, error }
   })
 
-  return (data ?? []).map(normalizeAttendanceDetailRow)
+  const repairedData = await repairAttendanceRowsCompensation(adminClient, data ?? [])
+
+  return repairedData.map(normalizeAttendanceDetailRow)
 }
 
 async function loadAttendanceRowsByIds(adminClient, attendanceIds = []) {
@@ -3747,7 +3891,9 @@ async function loadAttendanceRowsByIds(adminClient, attendanceIds = []) {
     return { data: nextData, error }
   })
 
-  return new Map((data ?? []).map((row) => [row.id, row]))
+  const repairedData = await repairAttendanceRowsCompensation(adminClient, data ?? [])
+
+  return new Map(repairedData.map((row) => [row.id, row]))
 }
 
 async function createAttendanceRecap(adminClient, body, telegramUserId) {
@@ -3867,7 +4013,10 @@ async function loadAttendanceById(adminClient, attendanceId, { includeDeleted = 
     return { data: nextData, error }
   })
 
-  return data ? normalizeAttendanceDetailRow(data) : null
+  const repairedRows = await repairAttendanceRowsCompensation(adminClient, data ? [data] : [])
+  const repairedAttendance = repairedRows[0] ?? null
+
+  return repairedAttendance ? normalizeAttendanceDetailRow(repairedAttendance) : null
 }
 
 async function loadUnbilledAttendances(adminClient, teamId) {
@@ -3892,7 +4041,9 @@ async function loadUnbilledAttendances(adminClient, teamId) {
     return { data: nextData, error }
   })
 
-  return (data ?? []).map(normalizeAttendanceRow)
+  const repairedData = await repairAttendanceRowsCompensation(adminClient, data ?? [])
+
+  return repairedData.map(normalizeAttendanceRow)
 }
 
 async function persistAttendanceSheet(adminClient, body, telegramUserId, teamId) {
@@ -4355,7 +4506,7 @@ async function loadProjectDetail(
         readClient
           .from('expenses')
           .select(
-            'id, project_id, team_id, expense_date, expense_type, document_type, status, total_amount, description, supplier_name_snapshot, created_at'
+            'id, project_id, team_id, expense_date, expense_type, document_type, status, amount, total_amount, description, supplier_name_snapshot, created_at'
           )
           .eq('project_id', normalizedProjectId)
           .is('deleted_at', null)
@@ -4403,20 +4554,22 @@ async function loadProjectDetail(
   })
 
   const summaryBaseRow = summaries.length > 0 ? summaries[0] : null
+  const normalizedExpenses = expenses.map(normalizeExpenseRow)
+  const repairedSalaries = await repairAttendanceRowsCompensation(readClient, salaries)
   const summary = summaryBaseRow
     ? normalizeSummaryRow({
         ...summaryBaseRow,
         total_income: incomes.reduce((sum, row) => sum + toNumber(row.amount), 0),
-        material_expense: expenses.reduce((sum, row) => {
+        material_expense: normalizedExpenses.reduce((sum, row) => {
           const expenseType = normalizeText(row?.expense_type, '').toLowerCase()
 
           if (expenseType === 'material' || expenseType === 'material_invoice') {
-            return sum + toNumber(row.total_amount)
+            return sum + resolveExpenseTotalAmount(row)
           }
 
           return sum
         }, 0),
-        operating_expense: expenses.reduce((sum, row) => {
+        operating_expense: normalizedExpenses.reduce((sum, row) => {
           const expenseType = normalizeText(row?.expense_type, '').toLowerCase()
 
           if (
@@ -4425,19 +4578,19 @@ async function loadProjectDetail(
             expenseType === 'lainnya' ||
             expenseType === 'other'
           ) {
-            return sum + toNumber(row.total_amount)
+            return sum + resolveExpenseTotalAmount(row)
           }
 
           return sum
         }, 0),
-        salary_expense: salaries.reduce((sum, row) => sum + toNumber(row.total_pay), 0),
+        salary_expense: repairedSalaries.reduce((sum, row) => sum + toNumber(row.total_pay), 0),
         gross_profit:
           incomes.reduce((sum, row) => sum + toNumber(row.amount), 0) -
-          expenses.reduce((sum, row) => {
+          normalizedExpenses.reduce((sum, row) => {
             const expenseType = normalizeText(row?.expense_type, '').toLowerCase()
 
             if (expenseType === 'material' || expenseType === 'material_invoice') {
-              return sum + toNumber(row.total_amount)
+              return sum + resolveExpenseTotalAmount(row)
             }
 
             if (
@@ -4446,19 +4599,18 @@ async function loadProjectDetail(
               expenseType === 'lainnya' ||
               expenseType === 'other'
             ) {
-              return sum + toNumber(row.total_amount)
+              return sum + resolveExpenseTotalAmount(row)
             }
 
             return sum
-          }, 0) -
-          salaries.reduce((sum, row) => sum + toNumber(row.total_pay), 0),
+          }, 0) - repairedSalaries.reduce((sum, row) => sum + toNumber(row.total_pay), 0),
         net_profit_project:
           incomes.reduce((sum, row) => sum + toNumber(row.amount), 0) -
-          expenses.reduce((sum, row) => {
+          normalizedExpenses.reduce((sum, row) => {
             const expenseType = normalizeText(row?.expense_type, '').toLowerCase()
 
             if (expenseType === 'material' || expenseType === 'material_invoice') {
-              return sum + toNumber(row.total_amount)
+              return sum + resolveExpenseTotalAmount(row)
             }
 
             if (
@@ -4467,12 +4619,11 @@ async function loadProjectDetail(
               expenseType === 'lainnya' ||
               expenseType === 'other'
             ) {
-              return sum + toNumber(row.total_amount)
+              return sum + resolveExpenseTotalAmount(row)
             }
 
             return sum
-          }, 0) -
-          salaries.reduce((sum, row) => sum + toNumber(row.total_pay), 0),
+          }, 0) - repairedSalaries.reduce((sum, row) => sum + toNumber(row.total_pay), 0),
         company_overhead: toNumber(summaryBaseRow.company_overhead),
       })
     : null
@@ -4480,8 +4631,8 @@ async function loadProjectDetail(
   return {
     summary,
     incomes: incomes.map(normalizeIncomeRow),
-    expenses: expenses.map(normalizeExpenseRow),
-    salaries: salaries.map(normalizeSalaryRow),
+    expenses: normalizedExpenses,
+    salaries: repairedSalaries.map(normalizeSalaryRow),
   }
 }
 
@@ -5295,7 +5446,11 @@ async function loadPartyStatementWorkerRows(readClient, partyId, { dateTo = null
     return null
   }
 
-  const attendances = (attendanceResult.data ?? []).map(normalizeAttendanceDetailRow)
+  const repairedAttendanceRows = await repairAttendanceRowsCompensation(
+    readClient,
+    attendanceResult.data ?? []
+  )
+  const attendances = repairedAttendanceRows.map(normalizeAttendanceDetailRow)
   const bills = billResult.data ?? []
   const attendanceByBillId = new Map()
 

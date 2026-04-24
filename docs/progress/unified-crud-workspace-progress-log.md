@@ -23,13 +23,46 @@ Dokumen ini adalah log progres khusus untuk stream `Unified CRUD Workspace`.
 - Active stream: `Unified CRUD Workspace`
 - Referensi plan: `docs/unified-crud-workspace-plan-2026-04-18.md`
 - Primary freeze authority: `docs/freeze/00-index.md`
-- Current task: `UCW-366`
+- Current task: `UCW-367`
 - Current status: `validated`
-- Catatan fokus: live backfill attendance final sudah masuk ke project `.env` yang dipakai UI aktif, dan jalur audit surface dikunci ke `Absensi`/`Payroll` karena `Jurnal` memang tidak memuat row raw attendance.
-- Catatan brief terbaru: user meminta attendance backfill dilanjutkan sampai bisa diaudit dari UI; klarifikasi berikutnya menetapkan bahwa source-of-truth verifikasi UI tetap project `.env`, bukan `.env.backfill.local`.
-- Catatan audit freeze terbaru: source transaksi canonical tetap satu row per parent `project-income`, domain loan tetap menjaga `pokok` vs `total pengembalian`, dan attendance canonical tetap project-scoped dengan verifikasi UI berbasis tanggal + proyek.
-- Status transitions touched: `UCW-365` tetap `validated`; `UCW-366` baru ditambahkan dan berstatus `validated`.
-- Review order: user audit UI `Absensi` dan `Payroll` pada project `.env` dulu; jika butuh target staging terpisah, audit/alignment schema `.env.backfill.local` dilakukan sebagai task baru.
+- Catatan fokus: audit UI pasca-backfill `.env` sekarang ditutup dengan sinkronisasi source of truth final untuk nominal attendance, `Payroll` history bulanan, dan nominal PDF `Proyek` / `Faktur`.
+- Catatan brief terbaru: user mengonfirmasi data source of truth ada di artifact backfill dan melaporkan tiga bug UI setelah memilih tanggal/proyek yang sesuai: nominal `half_day = 0`, `Payroll` tidak menampilkan histori attendance backfill, dan PDF `Proyek` / `Semua Faktur` tidak menampilkan nominal.
+- Catatan audit freeze terbaru: source transaksi canonical tetap satu row per parent `project-income`, domain loan tetap menjaga `pokok` vs `total pengembalian`, attendance canonical tetap project-scoped, dan live rerun backfill sekarang harus bisa menghapus row legacy stale agar `.env` benar-benar konvergen ke artifact canonical.
+- Status transitions touched: `UCW-366` tetap `validated`; `UCW-367` ditambahkan dan selesai `validated`.
+- Review order: user audit ulang UI lokal pada project `.env` melalui `Absensi`, `Payroll`, lalu PDF `Proyek` / `Faktur`; bila hasil UI sudah sesuai, task berikutnya baru lanjut ke brief lain.
+
+### [2026-04-25] `UCW-367` - Bereskan audit UI pasca-backfill untuk nominal attendance, Payroll history, dan PDF faktur/proyek
+- Status: `validated`
+- Ringkasan:
+  - read path attendance/report sekarang punya fallback yang konsisten terhadap data legacy: `half_day` mewarisi nominal dari `worker_wage_rates`, expense/report memakai `amount` bila `total_amount` lama masih kosong, dan `Payroll` history bisa memilih bulan historis hasil backfill.
+  - loader backfill live juga diselaraskan dengan artifact canonical terbaru: `expenses.total_amount` diisi saat artifact lama belum memilikinya, `attendance_records` zero-pay yang masih valid diwarisi dari `worker_wage_rates`, dan `333` attendance row legacy stale yang tidak lagi ada di artifact canonical di-soft-delete dari project `.env`.
+- File berubah:
+  - `src/lib/attendance-payroll.js`
+  - `api/records.js`
+  - `src/components/PayrollAttendanceHistory.jsx`
+  - `scripts/firestore-backfill/helpers.mjs`
+  - `scripts/firestore-backfill/extract.mjs`
+  - `scripts/firestore-backfill/load.mjs`
+  - `tests/unit/firestore-backfill.test.js`
+  - `scripts/firestore-backfill/README.md`
+  - `docs/firestore-backfill-handoff-2026-04-23.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - source of truth `Absensi` tetap `attendance_records`, tetapi row `half_day` aktif dengan `total_pay <= 0` kini turun dari `1239` menjadi `0` setelah live rerun + cleanup stale rows; `active_attendance_count` pada team `.env` kini `1201`.
+  - `Payroll` history tidak lagi terkunci ke bulan berjalan; route sekarang menyimpan `month` di query string dan auto-fallback ke bulan historis terbaru bila bulan default kosong, sementara recapable row yang memang tersisa di data canonical tetap `3` (`Rahman`, `2026-01-31` s.d. `2026-02-02`, proyek `Dapur Sppg`).
+  - nominal PDF/report proyek/faktur kini kembali terbaca karena `expenses.total_amount` aktif dengan `amount > 0` berubah dari `116` row kosong menjadi `0`; sample live menunjukkan `Persyaratan Proposal` `200000/200000` dan beberapa `INV/...` `amount == total_amount`.
+  - `meta/load-report.json` final mencatat catatan baru: `8 attendance record mewarisi nominal upah dari worker_wage_rates ...` dan `333 attendance record legacy lama di-soft-delete karena tidak lagi ada di artifact canonical.`
+- Validasi:
+  - `node --check api/records.js src/lib/attendance-payroll.js scripts/firestore-backfill/helpers.mjs scripts/firestore-backfill/load.mjs scripts/firestore-backfill/extract.mjs tests/unit/firestore-backfill.test.js`
+  - `npx eslint api/records.js src/lib/attendance-payroll.js src/components/PayrollAttendanceHistory.jsx scripts/firestore-backfill/helpers.mjs scripts/firestore-backfill/load.mjs scripts/firestore-backfill/extract.mjs tests/unit/firestore-backfill.test.js`
+  - `npm run build -- --configLoader native`
+  - `node --test tests/unit/firestore-backfill.test.js` -> gagal karena sandbox `spawn EPERM`
+  - `npm run backfill:load -- --input ./firestore-legacy-export/full-export-2026-04-23-retry/normalized-artifact --target-team-id 2213b84a-a513-47fa-afbb-8b99ae3b64be --env-file ./.env --confirm-live --strict` dijalankan ulang sampai query audit menunjukkan `active_half_day_zero_count = 0` dan `active_missing_total_amount_count = 0`
+  - read-only audit query ke project `.env` untuk menghitung row attendance aktif/recapable dan nominal expense pasca rerun
+- Risiko/regresi:
+  - `Payroll` memang tetap hanya menampilkan `3` row recapable pada data canonical saat ini; bila user mengharapkan histori attendance billed atau worker lain, itu butuh brief terpisah karena kontrak screen saat ini memang `unbilled + total_pay > 0 + salary_bill_id is null`.
+  - cleanup stale attendance sengaja hanya menyasar row legacy aktif yang punya `legacy_firebase_id` tetapi tidak lagi ada di artifact canonical; manual row non-backfill tidak ikut disentuh.
 
 ### [2026-04-25] `UCW-366` - Finalkan live backfill attendance ke project UI aktif dan kunci jalur audit surface
 - Status: `validated`

@@ -2,7 +2,14 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { isUuid, remapRowTeamId, resolveLoanNominalAmounts, shouldBackfillAttendanceRecord } from './helpers.mjs'
+import {
+  isUuid,
+  remapRowTeamId,
+  resolveBackfillAttendanceTotalPay,
+  resolveBackfillExpenseTotalAmount,
+  resolveLoanNominalAmounts,
+  shouldBackfillAttendanceRecord,
+} from './helpers.mjs'
 
 const DEFAULT_INPUT_DIR = 'firestore-legacy-export'
 const DEFAULT_BATCH_SIZE = 200
@@ -305,6 +312,7 @@ const ALLOWED_COLUMNS_BY_TABLE = {
     'description',
     'notes',
     'amount',
+    'total_amount',
     'telegram_user_id',
     'created_by_user_id',
     'project_name_snapshot',
@@ -617,6 +625,69 @@ function chunkArray(values, size) {
 
 function unique(values) {
   return [...new Set(values.filter((value) => value != null))]
+}
+
+function buildArtifactWorkerWageRateLookup(artifacts) {
+  const wageRateRows = artifacts.get('worker_wage_rates')?.rows ?? []
+  const lookup = new Map()
+
+  for (const row of wageRateRows) {
+    const workerId = String(row?.worker_id ?? '').trim()
+
+    if (!workerId || row?.deleted_at) {
+      continue
+    }
+
+    const nextRows = lookup.get(workerId) ?? []
+    nextRows.push(row)
+    lookup.set(workerId, nextRows)
+  }
+
+  return lookup
+}
+
+function resolveAttendanceArtifactBaseWage(row, wageRateLookup) {
+  const workerId = String(row?.worker_id ?? '').trim()
+  const projectId = String(row?.project_id ?? '').trim()
+  const rateRows = workerId ? wageRateLookup.get(workerId) ?? [] : []
+
+  if (rateRows.length === 0) {
+    return 0
+  }
+
+  const sortedRateRows = [...rateRows].sort((left, right) => {
+    const leftProjectMatch = String(left?.project_id ?? '').trim() === projectId ? 1 : 0
+    const rightProjectMatch = String(right?.project_id ?? '').trim() === projectId ? 1 : 0
+
+    if (leftProjectMatch !== rightProjectMatch) {
+      return rightProjectMatch - leftProjectMatch
+    }
+
+    const leftDefault = Number(Boolean(left?.is_default))
+    const rightDefault = Number(Boolean(right?.is_default))
+
+    if (leftDefault !== rightDefault) {
+      return rightDefault - leftDefault
+    }
+
+    const createdAtComparison = String(left?.created_at ?? '').localeCompare(String(right?.created_at ?? ''))
+
+    if (createdAtComparison !== 0) {
+      return createdAtComparison
+    }
+
+    return String(left?.id ?? '').localeCompare(String(right?.id ?? ''))
+  })
+
+  for (const wageRate of sortedRateRows) {
+    const wageAmount = Number(wageRate?.wage_amount ?? 0)
+
+    if (Number.isFinite(wageAmount) && wageAmount > 0) {
+      return wageAmount
+    }
+  }
+
+  return 0
 }
 
 async function fileExists(filePath) {
@@ -1393,6 +1464,14 @@ async function loadSimpleTable(client, artifacts, report, options, duplicateAlia
       overrides.telegram_user_id = options.telegramUserIdFallback
     }
 
+    if (table === 'expenses') {
+      overrides.total_amount = resolveBackfillExpenseTotalAmount({
+        amount: prepared.row.amount,
+        totalAmount: prepared.row.totalAmount,
+        total_amount: prepared.row.total_amount,
+      })
+    }
+
     if (table === 'loans') {
       const loanNominal = resolveLoanNominalAmounts({
         principalAmount: prepared.row.principal_amount,
@@ -1788,9 +1867,11 @@ async function loadAttendanceRecords(client, artifacts, report, options, duplica
   }
 
   const rows = []
+  const wageRateLookup = buildArtifactWorkerWageRateLookup(artifacts)
   let remappedRows = 0
   let skippedRows = 0
   let skippedMissingProjectRows = 0
+  let repairedCompensationRows = 0
 
   for (const row of artifact.rows) {
     const prepared = prepareRowForLoad('attendance_records', row, options, report, duplicateAliasMaps)
@@ -1810,9 +1891,24 @@ async function loadAttendanceRecords(client, artifacts, report, options, duplica
       continue
     }
 
+    const resolvedTotalPay = resolveBackfillAttendanceTotalPay({
+      attendanceStatus: prepared.row.attendance_status,
+      totalPay: prepared.row.total_pay,
+      baseWage: resolveAttendanceArtifactBaseWage(prepared.row, wageRateLookup),
+      overtimeFee: prepared.row.overtime_fee,
+    })
+    const currentTotalPay = Number(prepared.row.total_pay ?? 0)
+    const shouldRepairCompensation =
+      resolvedTotalPay > 0 && (!Number.isFinite(currentTotalPay) || currentTotalPay <= 0)
+
+    if (shouldRepairCompensation) {
+      repairedCompensationRows += 1
+    }
+
     rows.push(
       sanitizeRow('attendance_records', prepared.row, {
         salary_bill_id: remappedBillId,
+        ...(shouldRepairCompensation ? { total_pay: resolvedTotalPay } : {}),
       })
     )
   }
@@ -1830,6 +1926,11 @@ async function loadAttendanceRecords(client, artifacts, report, options, duplica
       `${skippedMissingProjectRows} attendance record tanpa project_id legacy dilewati agar backfill hanya memuat kehadiran per proyek.`
     )
   }
+  if (repairedCompensationRows > 0) {
+    entry.notes.push(
+      `${repairedCompensationRows} attendance record mewarisi nominal upah dari worker_wage_rates karena total_pay legacy kosong atau nol.`
+    )
+  }
 
   try {
     await upsertRows(client, 'attendance_records', rows, {
@@ -1837,6 +1938,7 @@ async function loadAttendanceRecords(client, artifacts, report, options, duplica
       dryRun: options.dryRun,
       reportEntry: entry,
     })
+    await softDeleteStaleLegacyAttendanceRows(client, rows, entry, options)
   } catch (error) {
     if (options.dryRun) {
       throw error
@@ -1850,6 +1952,7 @@ async function loadAttendanceRecords(client, artifacts, report, options, duplica
           dryRun: options.dryRun,
           reportEntry: entry,
         })
+        await softDeleteStaleLegacyAttendanceRows(client, fallbackRows, entry, options)
       } catch (retryError) {
         if (isAttendanceStatusConstraintError(retryError)) {
           throw buildAbsentAttendanceStatusError()
@@ -1870,6 +1973,77 @@ async function loadAttendanceRecords(client, artifacts, report, options, duplica
 
     throw error
   }
+}
+
+async function softDeleteStaleLegacyAttendanceRows(client, rows, entry, options) {
+  if (options.dryRun || !options.targetTeamId) {
+    return
+  }
+
+  const canonicalIds = new Set(rows.map((row) => String(row?.id ?? '').trim()).filter(Boolean))
+
+  if (canonicalIds.size === 0) {
+    return
+  }
+
+  const activeLegacyRows = []
+  const pageSize = 1000
+
+  for (let fromIndex = 0; ; fromIndex += pageSize) {
+    const toIndex = fromIndex + pageSize - 1
+    const { data, error } = await client
+      .from('attendance_records')
+      .select('id')
+      .eq('team_id', options.targetTeamId)
+      .not('legacy_firebase_id', 'is', null)
+      .is('deleted_at', null)
+      .order('id', { ascending: true })
+      .range(fromIndex, toIndex)
+
+    if (error) {
+      throw new Error(`cleanup attendance_records stale rows: ${error.message}`)
+    }
+
+    const pageRows = data ?? []
+
+    if (pageRows.length === 0) {
+      break
+    }
+
+    activeLegacyRows.push(...pageRows)
+
+    if (pageRows.length < pageSize) {
+      break
+    }
+  }
+
+  const staleIds = activeLegacyRows
+    .map((row) => String(row?.id ?? '').trim())
+    .filter((id) => id && !canonicalIds.has(id))
+
+  if (staleIds.length === 0) {
+    return
+  }
+
+  const deletedAt = new Date().toISOString()
+
+  for (const batch of chunkArray(staleIds, options.batchSize)) {
+    const { error: updateError } = await client
+      .from('attendance_records')
+      .update({
+        deleted_at: deletedAt,
+        updated_at: deletedAt,
+      })
+      .in('id', batch)
+
+    if (updateError) {
+      throw new Error(`cleanup attendance_records stale rows: ${updateError.message}`)
+    }
+  }
+
+  entry.notes.push(
+    `${staleIds.length} attendance record legacy lama di-soft-delete karena tidak lagi ada di artifact canonical.`
+  )
 }
 
 async function loadStockTransactions(client, artifacts, report, options, duplicateAliasMaps) {

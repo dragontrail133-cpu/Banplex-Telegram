@@ -31,6 +31,28 @@ export function calculateAttendanceTotalPay({
   return 0
 }
 
+export function resolveAttendanceEffectiveTotalPay({
+  attendanceStatus,
+  totalPay = 0,
+  baseWage = 0,
+  overtimeFee = 0,
+} = {}) {
+  const normalizedStatus = normalizeAttendanceStatus(attendanceStatus)
+  const numericTotalPay = Number(totalPay)
+  const safeStoredTotalPay =
+    Number.isFinite(numericTotalPay) && numericTotalPay > 0 ? Math.round(numericTotalPay) : 0
+
+  if (!normalizedStatus || normalizedStatus === 'absent' || safeStoredTotalPay > 0) {
+    return safeStoredTotalPay
+  }
+
+  return calculateAttendanceTotalPay({
+    attendanceStatus: normalizedStatus,
+    baseWage,
+    overtimeFee,
+  })
+}
+
 export function getAttendanceDayWeight(attendanceStatus) {
   const normalizedStatus = normalizeAttendanceStatus(attendanceStatus)
 

@@ -39,6 +39,8 @@ Sudah diverifikasi end-to-end:
 - live backfill final ke project UI aktif dari `.env` berhasil setelah schema remote `attendance_records` diselaraskan agar menerima `attendance_status = 'absent'` dan kolom `overtime_fee`; `meta/load-report.json` mencatat `total_loaded = 4893`, `blocking_issues = 0`, dan `meta/asset-sync-report.json` mencatat `uploaded = 30`, `failed = 0`
 - surface audit attendance hasil backfill ada di `Absensi` (sheet berbasis tanggal + proyek) dan `Payroll` (summary/rekap attendance); `Jurnal` memang tidak menampilkan row raw `attendance-record` karena source of truth ledger `vw_workspace_transactions` hanya memuat `project-income`, `expense`, `loan-disbursement`, dan `bill`
 - `.env.backfill.local` belum menjadi target UI frontend dan project yang sempat diaudit di env itu belum memuat schema repo aktif, jadi verifikasi UI saat ini tetap harus diarahkan ke project `.env`
+- audit UI pasca-backfill `.env` menambahkan tiga koreksi final: loader sekarang mengisi `expenses.total_amount` dari `amount` legacy bila artifact lama belum memilikinya, live rerun meng-soft-delete `333` attendance row legacy stale yang tidak lagi ada di artifact canonical, dan read path/UI `Payroll` kini bisa membuka bulan historis hasil backfill sambil fallback ke nominal wage/expense legacy saat data lama masih dibaca
+- query audit final project `.env` menunjukkan `active_half_day_zero_count = 0`, `active_missing_total_amount_count = 0`, `active_attendance_count = 1201`, dan recapable attendance yang memang tersisa untuk `Payroll` tetap `3` row (`Rahman`, `2026-01-31` s.d. `2026-02-02`)
 
 Masih tersisa:
 
