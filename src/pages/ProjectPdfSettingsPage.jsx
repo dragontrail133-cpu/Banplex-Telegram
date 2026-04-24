@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Trash2, Upload } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate } from 'react-router-dom'
 import FormLayout from '../components/layouts/FormLayout'
 import BrandLoader from '../components/ui/BrandLoader'
 import useAuthStore from '../store/useAuthStore'
@@ -15,8 +15,6 @@ import {
   AppInput,
   AppTextarea,
   FormSection,
-  PageHeader,
-  PageShell,
 } from '../components/ui/AppPrimitives'
 import { createPdfSettingsDraft, normalizePdfColor, serializePdfSettingsDraft } from '../lib/business-report'
 
@@ -274,8 +272,7 @@ function ProjectPdfSettingsForm({
   )
 }
 
-function ProjectPdfSettingsPage() {
-  const navigate = useNavigate()
+export function ProjectPdfSettingsSection() {
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
   const currentUser = useAuthStore((state) => state.user)
   const pdfSettings = useReportStore((state) => state.pdfSettings)
@@ -299,67 +296,55 @@ function ProjectPdfSettingsPage() {
   const isBusy = isPdfSettingsLoading || isPdfSettingsSaving
   const settingsRevisionKey = pdfSettings?.updated_at ?? pdfSettings?.team_id ?? currentTeamId ?? 'empty'
   const formId = 'project-pdf-settings-form'
-  const pageDescription = 'Atur identitas laporan, warna utama, dan logo yang dipakai saat PDF diunduh.'
-
-  if (isPdfSettingsLoading && !pdfSettings) {
-    return (
-      <PageShell className="space-y-4">
-        <PageHeader
-          eyebrow="Pelaporan"
-          title="Pengaturan PDF"
-          description={pageDescription}
-          backAction={() => navigate('/projects')}
-        />
-        <section className="grid min-h-[calc(100dvh-16rem)] place-items-center px-4 text-center">
-          <div className="flex flex-col items-center gap-5">
-            <BrandLoader context="form" size="hero" />
-            <div className="space-y-2">
-              <h2 className="text-xl font-bold tracking-[-0.03em] text-[var(--app-text-color)]">
-                Memuat pengaturan PDF
-              </h2>
-              <p className="max-w-[20rem] text-sm leading-6 text-[var(--app-hint-color)]">
-                Menyiapkan branding laporan.
-              </p>
-            </div>
-          </div>
-        </section>
-      </PageShell>
-    )
-  }
 
   return (
-    <PageShell className="space-y-4 pb-[calc(max(6.5rem,env(safe-area-inset-bottom))+0.75rem)]">
-      <PageHeader
-        eyebrow="Pelaporan"
-        title="Pengaturan PDF"
-        description={pageDescription}
-        backAction={() => navigate('/projects')}
-      />
-
+    <section id="pdf-settings" className="scroll-mt-24 space-y-4">
       {pdfSettingsError ? (
         <AppErrorState title="Pengaturan PDF gagal diproses" description={pdfSettingsError} />
       ) : null}
 
-      <FormLayout
-        embedded
-        actionLabel="Simpan Pengaturan"
-        formId={formId}
-        isSubmitting={isBusy}
-        submitDisabled={!currentTeamId}
-      >
-        <ProjectPdfSettingsForm
-          key={settingsRevisionKey}
-          currentTeamId={currentTeamId}
-          currentUser={currentUser}
-          formId={formId}
-          initialPdfSettings={pdfSettings}
-          isBusy={isBusy}
-          onSave={savePdfSettings}
-          onUploadLogo={uploadAndRegisterFile}
-        />
-      </FormLayout>
-    </PageShell>
+      <FormSection eyebrow="Pelaporan" title="Pengaturan PDF" description="Atur identitas laporan, warna utama, dan logo yang dipakai saat PDF diunduh.">
+        {isPdfSettingsLoading && !pdfSettings ? (
+          <div className="grid min-h-[16rem] place-items-center px-4 text-center">
+            <div className="flex flex-col items-center gap-5">
+              <BrandLoader context="form" size="hero" />
+              <div className="space-y-2">
+                <h2 className="text-xl font-bold tracking-[-0.03em] text-[var(--app-text-color)]">
+                  Memuat pengaturan PDF
+                </h2>
+                <p className="max-w-[20rem] text-sm leading-6 text-[var(--app-hint-color)]">
+                  Menyiapkan branding laporan.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <FormLayout
+            embedded
+            actionLabel="Simpan Pengaturan"
+            formId={formId}
+            isSubmitting={isBusy}
+            submitDisabled={!currentTeamId}
+          >
+            <ProjectPdfSettingsForm
+              key={settingsRevisionKey}
+              currentTeamId={currentTeamId}
+              currentUser={currentUser}
+              formId={formId}
+              initialPdfSettings={pdfSettings}
+              isBusy={isBusy}
+              onSave={savePdfSettings}
+              onUploadLogo={uploadAndRegisterFile}
+            />
+          </FormLayout>
+        )}
+      </FormSection>
+    </section>
   )
+}
+
+function ProjectPdfSettingsPage() {
+  return <Navigate replace to="/reports#pdf-settings" />
 }
 
 export default ProjectPdfSettingsPage

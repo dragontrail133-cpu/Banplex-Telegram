@@ -1,6 +1,9 @@
+import { normalizeAssistantRoutePath } from './telegram-assistant-links.js'
+
 const assistantCommandNames = new Set([
   'start',
   'menu',
+  'tambah',
   'status',
   'cari',
   'analytics',
@@ -30,6 +33,38 @@ const allowedAnalyticsWindows = new Set([
   'month_previous',
   'custom',
 ])
+const assistantRouteTargets = Object.freeze({
+  dashboard: '/',
+  ledger: '/transactions',
+  activeLedger: '/transactions?tab=aktif',
+  billLedger: '/transactions?tab=tagihan',
+  history: '/transactions?tab=history',
+  payment: '/pembayaran',
+  attendance: '/payroll?tab=daily',
+  payroll: '/payroll',
+  worker: '/payroll?tab=worker',
+  incomeCreate: '/edit/project-income/new',
+  expenseCreate: '/edit/expense/new',
+  loanCreate: '/edit/loan/new',
+  invoiceCreate: '/material-invoice/new',
+  attendanceCreate: '/attendance/new',
+})
+const assistantRouteLabels = Object.freeze({
+  '/': 'Dashboard',
+  '/transactions': 'Jurnal',
+  '/transactions?tab=aktif': 'Jurnal',
+  '/transactions?tab=history': 'Riwayat',
+  '/transactions?tab=tagihan': 'Tagihan',
+  '/pembayaran': 'Pembayaran',
+  '/payroll': 'Absensi',
+  '/payroll?tab=daily': 'Absensi',
+  '/payroll?tab=worker': 'Pekerja',
+  '/edit/project-income/new': 'Pemasukan',
+  '/edit/expense/new': 'Pengeluaran',
+  '/edit/loan/new': 'Pinjaman',
+  '/material-invoice/new': 'Faktur Barang',
+  '/attendance/new': 'Absensi',
+})
 
 function normalizeText(value, fallback = '') {
   const normalizedValue = String(value ?? '').trim()
@@ -214,7 +249,15 @@ function shouldUseAssistantDmFallback({
   )
 }
 
+function getAssistantRouteLabel(path) {
+  const normalizedPath = normalizeAssistantRoutePath(path) ?? normalizeText(path, '')
+
+  return assistantRouteLabels[normalizedPath] ?? 'halaman tujuan'
+}
+
 export {
+  assistantRouteLabels,
+  assistantRouteTargets,
   allowedAnalyticsEntityTypes,
   allowedAnalyticsMetricKeys,
   allowedAnalyticsWindows,
@@ -224,5 +267,6 @@ export {
   buildAssistantCommandRawText,
   extractAssistantCommand,
   resolveAssistantCallbackAction,
+  getAssistantRouteLabel,
   shouldUseAssistantDmFallback,
 }

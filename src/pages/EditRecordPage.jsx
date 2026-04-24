@@ -4,6 +4,7 @@ import FormLayout from '../components/layouts/FormLayout'
 import IncomeForm from '../components/IncomeForm'
 import LoanForm from '../components/LoanForm'
 import MaterialInvoiceForm from '../components/MaterialInvoiceForm'
+import TransactionDeleteDialog from '../components/TransactionDeleteDialog'
 import BrandLoader from '../components/ui/BrandLoader'
 import {
   AppButton,
@@ -18,7 +19,12 @@ import {
   AppTechnicalGrid,
 } from '../components/ui/AppPrimitives'
 import { resolveFormBackRoute } from '../lib/form-shell'
+import { getMaterialInvoiceDeleteBlockReason, isMaterialInvoiceExpense } from '../lib/material-invoice'
 import { formatCurrency } from '../lib/transaction-presentation'
+import {
+  getTransactionDeleteHistoryRoute,
+  hasTransactionPaymentHistory,
+} from '../lib/transaction-delete'
 import {
   calculateAttendanceTotalPay,
   deriveAttendanceBaseWage,
@@ -36,12 +42,6 @@ function formatValue(value) {
   const normalizedValue = String(value ?? '').trim()
 
   return normalizedValue.length > 0 ? normalizedValue : '-'
-}
-
-function toNumber(value) {
-  const parsedValue = Number(value)
-
-  return Number.isFinite(parsedValue) ? parsedValue : NaN
 }
 
 function normalizeText(value, fallback = '') {
@@ -84,55 +84,6 @@ function getWorkerRate(workerId, projectId, workerWageRates = []) {
   return workerWageRates.find((rate) => rate.worker_id === workerId) ?? null
 }
 
-function hasExpensePaymentHistory(expense = null) {
-  const paidAmount = toNumber(expense?.bill?.paid_amount ?? expense?.bill?.paidAmount)
-  const normalizedBillStatus = String(expense?.bill?.status ?? '').trim().toLowerCase()
-
-  return Boolean(
-    expense?.bill?.id &&
-      ((Number.isFinite(paidAmount) && paidAmount > 0) ||
-        ['partial', 'paid'].includes(normalizedBillStatus))
-  )
-}
-
-function getMaterialInvoiceDeleteBlockReason(invoice = null) {
-  if (!invoice?.id || invoice?.deleted_at) {
-    return null
-  }
-
-  const normalizedDocumentType = String(invoice?.document_type ?? 'faktur')
-    .trim()
-    .toLowerCase()
-
-  const items = Array.isArray(invoice?.items) ? invoice.items : []
-
-  for (const item of items) {
-    const rollbackQuantity =
-      normalizedDocumentType === 'surat_jalan'
-        ? toNumber(item?.qty)
-        : -toNumber(item?.qty)
-    const currentStock = toNumber(
-      item?.materials?.current_stock ?? item?.material_current_stock ?? item?.current_stock
-    )
-    const nextStock = (Number.isFinite(currentStock) ? currentStock : 0) + rollbackQuantity
-
-    if (nextStock < 0) {
-      const materialName =
-        String(
-          item?.materials?.name ??
-            item?.material_name ??
-            item?.item_name ??
-            item?.material_id ??
-            'material'
-        ).trim() || 'material'
-
-      return `Dokumen barang ini tidak bisa dihapus karena stok material ${materialName} sudah terpakai di mutasi lain. Koreksi mutasi stok turunannya lebih dulu.`
-    }
-  }
-
-  return null
-}
-
 function EditRecordPage({ technicalView = false }) {
   const navigate = useNavigate()
   const { type, id } = useParams()
@@ -147,9 +98,6 @@ function EditRecordPage({ technicalView = false }) {
   const restoreExpense = useTransactionStore((state) => state.restoreExpense)
   const softDeleteMaterialInvoice = useTransactionStore(
     (state) => state.softDeleteMaterialInvoice
-  )
-  const restoreMaterialInvoice = useTransactionStore(
-    (state) => state.restoreMaterialInvoice
   )
   const fetchAttendanceById = useAttendanceStore((state) => state.fetchAttendanceById)
   const attendanceStatusOptions = useAttendanceStore(
@@ -178,6 +126,10 @@ function EditRecordPage({ technicalView = false }) {
   })
   const [attendanceDayHistory, setAttendanceDayHistory] = useState([])
   const [isAttendanceSaving, setIsAttendanceSaving] = useState(false)
+  const [deleteDialogKind, setDeleteDialogKind] = useState(null)
+  const [deleteDialogHistoryRoute, setDeleteDialogHistoryRoute] = useState(null)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const isAttendanceRecord = normalizedType === 'attendance'
   const attendanceFormId = 'attendance-edit-form'
 
@@ -270,12 +222,9 @@ function EditRecordPage({ technicalView = false }) {
   })
   const currentRoute = `${location.pathname}${location.search ?? ''}`
   const expenseHasPaymentHistory =
-    normalizedType === 'expense' ? hasExpensePaymentHistory(resolvedItem) : false
+    normalizedType === 'expense' ? hasTransactionPaymentHistory(resolvedItem) : false
   const materialInvoiceDeleteBlockReason =
-    normalizedType === 'expense' &&
-    ['material', 'material_invoice'].includes(
-      String(resolvedItem?.expense_type ?? '').trim().toLowerCase()
-    )
+    normalizedType === 'expense' && isMaterialInvoiceExpense(resolvedItem)
       ? getMaterialInvoiceDeleteBlockReason(resolvedItem)
       : null
 
@@ -291,35 +240,21 @@ function EditRecordPage({ technicalView = false }) {
     }
   }
 
-  const handleExpenseDelete = async () => {
+  const openDeleteDialog = (kind) => {
     if (!resolvedItem?.id || resolvedItem.deleted_at) {
       return
     }
 
-    if (expenseHasPaymentHistory) {
-      setRecordError('Pengeluaran yang sudah memiliki pembayaran tidak bisa diubah atau dihapus.')
-      return
-    }
+    setRecordError(null)
+    setDeleteDialogKind(kind)
+    setDeleteDialogHistoryRoute(
+      expenseHasPaymentHistory ? getTransactionDeleteHistoryRoute(resolvedItem) : null
+    )
+    setIsDeleteDialogOpen(true)
+  }
 
-    const shouldDelete = window.confirm(`Hapus ${resolvedTitle}?`)
-
-    if (!shouldDelete) {
-      return
-    }
-
-    try {
-      setRecordError(null)
-      await softDeleteExpense(
-        resolvedItem.id,
-        resolvedItem.updated_at ?? resolvedItem.updatedAt ?? null
-      )
-      const nextRecord = await fetchMaterialInvoiceById(resolvedItem.id, {
-        includeDeleted: true,
-      })
-      setResolvedItem(nextRecord)
-    } catch (error) {
-      setRecordError(error instanceof Error ? error.message : 'Gagal menghapus pengeluaran.')
-    }
+  const handleExpenseDelete = () => {
+    openDeleteDialog('expense')
   }
 
   const handleExpenseRestore = async () => {
@@ -342,7 +277,7 @@ function EditRecordPage({ technicalView = false }) {
     }
   }
 
-  const handleMaterialInvoiceDelete = async () => {
+  const handleMaterialInvoiceDelete = () => {
     if (!resolvedItem?.id || resolvedItem.deleted_at) {
       return
     }
@@ -352,48 +287,43 @@ function EditRecordPage({ technicalView = false }) {
       return
     }
 
-    const shouldDelete = window.confirm(`Hapus ${resolvedTitle}?`)
+    openDeleteDialog('material-invoice')
+  }
 
-    if (!shouldDelete) {
+  const performDelete = async () => {
+    if (!resolvedItem?.id || resolvedItem.deleted_at || expenseHasPaymentHistory) {
       return
     }
 
     try {
+      setIsDeleting(true)
       setRecordError(null)
-      await softDeleteMaterialInvoice(
-        resolvedItem.id,
-        resolvedItem.updated_at ?? resolvedItem.updatedAt ?? null
-      )
+
+      if (deleteDialogKind === 'material-invoice') {
+        await softDeleteMaterialInvoice(
+          resolvedItem.id,
+          resolvedItem.updated_at ?? resolvedItem.updatedAt ?? null
+        )
+      } else {
+        await softDeleteExpense(
+          resolvedItem.id,
+          resolvedItem.updated_at ?? resolvedItem.updatedAt ?? null
+        )
+      }
+
       const nextRecord = await fetchMaterialInvoiceById(resolvedItem.id, {
         includeDeleted: true,
       })
       setResolvedItem(nextRecord)
     } catch (error) {
       setRecordError(
-        error instanceof Error ? error.message : 'Gagal menghapus faktur material.'
+        error instanceof Error ? error.message : 'Gagal menghapus pengeluaran.'
       )
-    }
-  }
-
-  const handleMaterialInvoiceRestore = async () => {
-    if (!resolvedItem?.id || !resolvedItem.deleted_at) {
-      return
-    }
-
-    try {
-      setRecordError(null)
-      await restoreMaterialInvoice(
-        resolvedItem.id,
-        resolvedItem.updated_at ?? resolvedItem.updatedAt ?? null
-      )
-      const nextRecord = await fetchMaterialInvoiceById(resolvedItem.id, {
-        includeDeleted: false,
-      })
-      setResolvedItem(nextRecord)
-    } catch (error) {
-      setRecordError(
-        error instanceof Error ? error.message : 'Gagal memulihkan faktur material.'
-      )
+    } finally {
+      setIsDeleting(false)
+      setIsDeleteDialogOpen(false)
+      setDeleteDialogKind(null)
+      setDeleteDialogHistoryRoute(null)
     }
   }
 
@@ -983,58 +913,33 @@ function EditRecordPage({ technicalView = false }) {
           )}
 
             <div className="grid gap-3 sm:grid-cols-2">
-              {['material', 'material_invoice'].includes(
-                String(resolvedItem.expense_type ?? '').trim().toLowerCase()
-              ) ? (
-                <>
-                  {materialInvoiceDeleteBlockReason ? (
-                    <section className="app-card-dashed p-4 text-sm leading-6 text-[var(--app-hint-color)] sm:col-span-2">
-                      {materialInvoiceDeleteBlockReason}
-                    </section>
-                  ) : null}
+              {!resolvedItem.deleted_at ? (
+                <AppButton
+                  disabled={Boolean(materialInvoiceDeleteBlockReason)}
+                  onClick={
+                    isMaterialInvoiceExpense(resolvedItem)
+                      ? handleMaterialInvoiceDelete
+                      : handleExpenseDelete
+                  }
+                  type="button"
+                  variant="danger"
+                >
+                  Hapus
+                </AppButton>
+              ) : null}
 
-                  {!resolvedItem.deleted_at ? (
-                    <AppButton
-                      disabled={Boolean(materialInvoiceDeleteBlockReason)}
-                      onClick={handleMaterialInvoiceDelete}
-                      type="button"
-                      variant="danger"
-                    >
-                      Hapus
-                    </AppButton>
-                  ) : null}
-
-                  {resolvedItem.deleted_at ? (
-                    <AppButton
-                      onClick={handleMaterialInvoiceRestore}
-                      type="button"
-                      variant="secondary"
-                    >
-                      Restore
-                    </AppButton>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  {!resolvedItem.deleted_at ? (
-                    <AppButton
-                      disabled={expenseHasPaymentHistory}
-                      onClick={handleExpenseDelete}
-                      type="button"
-                      variant="danger"
-                    >
-                      Hapus
-                    </AppButton>
-                  ) : null}
-
-                  {resolvedItem.deleted_at ? (
-                    <AppButton onClick={handleExpenseRestore} type="button" variant="secondary">
-                      Restore
-                    </AppButton>
-                  ) : null}
-                </>
-              )}
+              {resolvedItem.deleted_at ? (
+                <AppButton onClick={handleExpenseRestore} type="button" variant="secondary">
+                  Restore
+                </AppButton>
+              ) : null}
             </div>
+
+            {materialInvoiceDeleteBlockReason ? (
+              <section className="app-card-dashed p-4 text-sm leading-6 text-[var(--app-hint-color)] sm:col-span-2">
+                {materialInvoiceDeleteBlockReason}
+              </section>
+            ) : null}
           </div>
         ) : null}
 
@@ -1055,6 +960,52 @@ function EditRecordPage({ technicalView = false }) {
             </p>
           </section>
         ) : null}
+        <TransactionDeleteDialog
+          confirmLabel={deleteDialogKind === 'material-invoice' ? 'Hapus Faktur' : 'Hapus Pengeluaran'}
+          description={normalizeText(resolvedItem?.supplier_name_snapshot ?? resolvedItem?.supplier_name ?? resolvedTitle, null)}
+          historyRoute={deleteDialogHistoryRoute}
+          isConfirming={isDeleting}
+          open={isDeleteDialogOpen}
+          onClose={() => {
+            setIsDeleteDialogOpen(false)
+            setDeleteDialogKind(null)
+            setDeleteDialogHistoryRoute(null)
+          }}
+          onConfirm={performDelete}
+          onOpenHistory={(route) => {
+            setIsDeleteDialogOpen(false)
+            setDeleteDialogKind(null)
+            setDeleteDialogHistoryRoute(null)
+
+            if (!route) {
+              return
+            }
+
+            navigate(route, {
+              state: {
+                transaction: resolvedItem,
+                item: resolvedItem,
+                detailSurface: 'riwayat',
+              },
+            })
+          }}
+          title={
+            deleteDialogHistoryRoute
+              ? deleteDialogKind === 'material-invoice'
+                ? 'Faktur sudah memiliki pembayaran'
+                : 'Pengeluaran sudah memiliki pembayaran'
+              : deleteDialogKind === 'material-invoice'
+                ? 'Konfirmasi Hapus Faktur Material'
+                : 'Konfirmasi Hapus Pengeluaran'
+          }
+          warning={
+            deleteDialogHistoryRoute
+              ? 'Data ini sudah memiliki pembayaran. Buka riwayat tagihan untuk meninjau pembayaran sebelum memutuskan langkah berikutnya.'
+              : deleteDialogKind === 'material-invoice'
+                ? 'Faktur material akan dipindahkan ke arsip dan tagihan terhubung ikut disinkronkan.'
+                : 'Pengeluaran akan dipindahkan ke arsip dan tagihan terhubung ikut disinkronkan.'
+          }
+        />
       </div>
     </FormLayout>
   )

@@ -27,13 +27,13 @@ const MasterPage = lazy(() => import('./pages/MasterPage'))
 const MasterFormPage = lazy(() => import('./pages/MasterFormPage'))
 const MasterRecycleBinPage = lazy(() => import('./pages/MasterRecycleBinPage'))
 const MaterialInvoicePage = lazy(() => import('./pages/MaterialInvoicePage'))
+const MaterialInvoiceDetailPage = lazy(() => import('./pages/MaterialInvoiceDetailPage'))
 const MorePage = lazy(() => import('./pages/MorePage'))
 const PaymentsPage = lazy(() => import('./pages/PaymentsPage'))
 const PaymentPage = lazy(() => import('./pages/PaymentPage'))
 const PayrollPage = lazy(() => import('./pages/PayrollPage'))
 const PayrollWorkerDetailPage = lazy(() => import('./pages/PayrollWorkerDetailPage'))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
-const ProjectPdfSettingsPage = lazy(() => import('./pages/ProjectPdfSettingsPage'))
 const StockPage = lazy(() => import('./pages/StockPage'))
 const TeamInvitePage = lazy(() => import('./pages/TeamInvitePage'))
 const TransactionDetailPage = lazy(() => import('./pages/TransactionDetailPage'))
@@ -240,24 +240,24 @@ function App() {
           element={<PaymentRouteRedirect to="/payment/:id" />}
         />
         <Route path="/pembayaran/pinjaman/:id" element={<PaymentPage paymentType="loan" />} />
-        <Route path="/projects" element={<ProjectsPage />} />
+        <Route path="/reports" element={<ProjectsPage />} />
+        <Route path="/projects" element={<Navigate to="/reports" replace />} />
         <Route
           path="/projects/pdf-settings"
           element={
-            <ProtectedRoute allowedRoles={['Owner', 'Admin']}>
-              <ProjectPdfSettingsPage />
-            </ProtectedRoute>
+            <Navigate replace to="/reports#pdf-settings" />
           }
         />
         <Route path="/stock" element={<StockPage />} />
         <Route path="/master" element={<MasterPage />} />
         <Route path="/master/recycle-bin" element={<MasterRecycleBinPage />} />
         <Route path="/more" element={<MorePage />} />
+        <Route path="/material-invoice/:id" element={<MaterialInvoiceDetailPage />} />
         <Route path="/history" element={<Navigate to="/transactions?tab=history" replace />} />
         <Route path="/riwayat" element={<Navigate to="/transactions?tab=history" replace />} />
         <Route path="/attendance" element={<Navigate to="/payroll" replace />} />
         <Route path="/transaksi" element={<Navigate to="/transactions" replace />} />
-        <Route path="/proyek" element={<Navigate to="/projects" replace />} />
+        <Route path="/proyek" element={<Navigate to="/reports" replace />} />
         <Route path="/lainnya" element={<Navigate to="/more" replace />} />
       </Route>
       <Route path="/attendance/new" element={renderStandaloneLazyRoute(AttendancePage)} />

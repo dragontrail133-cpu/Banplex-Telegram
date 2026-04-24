@@ -8,7 +8,7 @@ const isCI = Boolean(globalThis.process?.env?.CI)
 const shouldStartLocalServer = !configuredBaseURL || baseURL === defaultBaseURL
 const localServerCommand =
   String(process.env.E2E_LOCAL_SERVER_COMMAND ?? '').trim() ||
-  'vercel dev --listen 127.0.0.1:3000 --yes'
+  'npm run dev:api'
 
 export default defineConfig({
   testDir: './tests/live',

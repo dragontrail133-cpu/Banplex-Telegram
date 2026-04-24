@@ -18,6 +18,8 @@ function FormLayout({
   headerAction = null,
   sections = [],
   embedded = false,
+  embeddedFooterMode = 'sticky',
+  hideFooterOnKeyboardVisible = true,
   formId = null,
   actionLabel = null,
   isSubmitting = false,
@@ -63,9 +65,11 @@ function FormLayout({
         <div
           className={[
             embedded
-              ? 'sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 pt-3'
+              ? embeddedFooterMode === 'fixed'
+                ? 'pointer-events-none fixed inset-x-0 bottom-0 z-[110] mx-auto w-full max-w-md px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2'
+                : 'sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 pt-3'
               : 'pointer-events-none fixed inset-x-0 bottom-0 z-[110] mx-auto w-full max-w-md px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2',
-            isKeyboardVisible
+            hideFooterOnKeyboardVisible && isKeyboardVisible
               ? 'pointer-events-none translate-y-[calc(100%+1.25rem)] opacity-0'
               : 'opacity-100',
             'transition-[transform,opacity] duration-200 ease-out',
@@ -73,10 +77,12 @@ function FormLayout({
             .filter(Boolean)
             .join(' ')}
         >
-          <div
-            className={[
-              embedded ? 'app-card-strong p-3' : 'pointer-events-auto rounded-[28px] border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] p-3 shadow-[var(--app-card-shadow-strong)]',
-            ].join(' ')}
+        <div
+          className={[
+            embedded
+              ? 'pointer-events-auto app-card-strong p-3'
+              : 'pointer-events-auto rounded-[28px] border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] p-3 shadow-[var(--app-card-shadow-strong)]',
+          ].join(' ')}
           >
           <FormActionBar
             actionLabel={actionLabel}

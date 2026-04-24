@@ -1,6 +1,10 @@
 import { jsPDF } from 'jspdf'
 import { APP_TIME_ZONE } from '../src/lib/date-time.js'
-import { createPaymentReceiptPdf } from '../src/lib/report-pdf.js'
+import {
+  addPaymentReceiptFooter,
+  createPaymentReceiptPdf,
+  renderPaymentReceiptShell,
+} from '../src/lib/report-pdf.js'
 import { buildTelegramAssistantLink } from '../src/lib/telegram-assistant-links.js'
 
 function normalizeText(value, fallback = '-') {
@@ -67,6 +71,10 @@ function formatCurrency(value) {
   }).format(amount)}`
 }
 
+const RECEIPT_ACCENT = [6, 95, 70]
+const RECEIPT_ACCENT_SOFT = [245, 250, 248]
+const RECEIPT_BORDER = [226, 232, 240]
+
 function getTypeLabel(type) {
   return type === 'expense' ? 'Pengeluaran' : 'Pemasukan'
 }
@@ -119,7 +127,6 @@ function buildNotificationReplyMarkup(
             'Review transaksi',
             payload.transactionId ? `/transactions/${payload.transactionId}` : '/transactions'
           ),
-          buildButton('Buka jurnal', '/transactions'),
         ]
       case 'material_invoice':
         return [
@@ -127,7 +134,6 @@ function buildNotificationReplyMarkup(
             'Review faktur',
             payload.expenseId ? `/transactions/${payload.expenseId}` : '/transactions'
           ),
-          buildButton('Buka jurnal', '/transactions'),
         ]
       case 'bill_payment':
         return [
@@ -137,7 +143,6 @@ function buildNotificationReplyMarkup(
               ? `/transactions/${payload.billId}?surface=riwayat`
               : '/transactions?tab=history'
           ),
-          buildButton('Buka riwayat', '/transactions?tab=history'),
         ]
       case 'project_income':
         return [
@@ -145,7 +150,6 @@ function buildNotificationReplyMarkup(
             'Review termin',
             payload.transactionId ? `/transactions/${payload.transactionId}` : '/transactions'
           ),
-          buildButton('Buka jurnal', '/transactions'),
         ]
       case 'loan':
         return [
@@ -153,15 +157,15 @@ function buildNotificationReplyMarkup(
             'Review pinjaman',
             payload.transactionId ? `/transactions/${payload.transactionId}` : '/transactions'
           ),
-          buildButton('Buka jurnal', '/transactions'),
         ]
       case 'loan_payment':
         return [
           buildButton(
-            'Review pembayaran',
-            payload.loanId ? `/loan-payment/${payload.loanId}` : '/pembayaran'
+            'Review pinjaman',
+            payload.loanId
+              ? `/transactions/${payload.loanId}?surface=riwayat`
+              : '/transactions?tab=history'
           ),
-          buildButton('Buka riwayat', '/transactions?tab=history'),
         ]
       case 'salary_bill':
         return [
@@ -169,17 +173,14 @@ function buildNotificationReplyMarkup(
             'Review tagihan',
             payload.billId ? `/transactions/${payload.billId}` : '/transactions'
           ),
-          buildButton('Buka payroll', '/payroll?tab=worker'),
         ]
       case 'attendance':
         return [
           buildButton('Review absensi', payload.routePath || '/payroll?tab=daily'),
-          buildButton('Buka payroll', '/payroll?tab=worker'),
         ]
       case 'recap':
         return [
           buildButton('Review recap', payload.routePath || '/transactions?tab=history'),
-          buildButton('Buka workspace', '/transactions'),
         ]
       default:
         return []
@@ -329,25 +330,6 @@ function renderPdfField(doc, label, value, y, valueX, maxWidth) {
   return y + Math.max(7, wrappedValue.length * 5.2)
 }
 
-function drawDocumentHeader(doc, title, subtitle) {
-  const pageWidth = doc.internal.pageSize.getWidth()
-
-  doc.setFillColor(15, 23, 42)
-  doc.roundedRect(10, 10, pageWidth - 20, 28, 4, 4, 'F')
-  doc.setTextColor(255, 255, 255)
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(14)
-  doc.text('BANPLEX GREENFIELD', 15, 21)
-  doc.setFontSize(11)
-  doc.text(title, 15, 29)
-
-  if (subtitle) {
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8.5)
-    doc.text(subtitle, pageWidth - 15, 29, { align: 'right' })
-  }
-}
-
 function generateTransactionPdf(payload) {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -360,15 +342,20 @@ function generateTransactionPdf(payload) {
   const valueWidth = pageWidth - valueX - 12
   let y = 48
 
-  drawDocumentHeader(doc, 'KWITANSI DIGITAL', 'Ringkasan transaksi')
+  renderPaymentReceiptShell(doc, {
+    documentTitle: 'KWITANSI DIGITAL',
+    secondaryText: 'Ringkasan transaksi',
+    referenceLabel: 'DICATAT OLEH',
+    referenceValue: payload.userName,
+  })
 
-  doc.setTextColor(16, 36, 59)
+  doc.setTextColor(...RECEIPT_ACCENT)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
   doc.text('Detail Transaksi', 12, y)
   y += 8
 
-  doc.setDrawColor(203, 213, 225)
+  doc.setDrawColor(...RECEIPT_BORDER)
   doc.line(12, y - 3, pageWidth - 12, y - 3)
   doc.setFontSize(10)
 
@@ -402,9 +389,10 @@ function generateTransactionPdf(payload) {
 
   y += 3
   y = ensurePdfSpace(doc, y, 28)
-  doc.setFillColor(240, 249, 255)
+  doc.setFillColor(...RECEIPT_ACCENT_SOFT)
+  doc.setDrawColor(...RECEIPT_ACCENT)
   doc.roundedRect(12, y, pageWidth - 24, 20, 4, 4, 'F')
-  doc.setTextColor(8, 47, 73)
+  doc.setTextColor(...RECEIPT_ACCENT)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10)
   doc.text('Nominal', 16, y + 7)
@@ -421,6 +409,7 @@ function generateTransactionPdf(payload) {
     pageWidth - 24
   )
   doc.text(footerLines, 12, Math.min(y, pageHeight - 16))
+  addPaymentReceiptFooter(doc, 'LEDGER BANPLEX', payload.transactionDate ?? new Date())
 
   return new Uint8Array(doc.output('arraybuffer'))
 }
@@ -428,12 +417,13 @@ function generateTransactionPdf(payload) {
 function drawInvoiceTableHeader(doc, y, columns) {
   let x = 12
 
-  doc.setFillColor(226, 232, 240)
-  doc.setTextColor(15, 23, 42)
+  doc.setFillColor(...RECEIPT_ACCENT_SOFT)
+  doc.setTextColor(...RECEIPT_ACCENT)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(8.5)
 
   columns.forEach((column) => {
+    doc.setDrawColor(...RECEIPT_BORDER)
     doc.rect(x, y, column.width, 8, 'F')
     doc.text(column.label, x + 2, y + 5)
     x += column.width
@@ -447,7 +437,7 @@ function drawInvoiceRow(doc, y, columns, item) {
   const rowHeight = Math.max(8, itemLines.length * 4.2 + 4)
   let x = 12
 
-  doc.setDrawColor(226, 232, 240)
+  doc.setDrawColor(...RECEIPT_BORDER)
   doc.setTextColor(30, 41, 59)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8.5)
@@ -486,15 +476,20 @@ function generateMaterialInvoicePdf(payload) {
   ]
   let y = 48
 
-  drawDocumentHeader(doc, 'FAKTUR MATERIAL', 'Relational expense invoice')
+  renderPaymentReceiptShell(doc, {
+    documentTitle: 'FAKTUR MATERIAL',
+    secondaryText: 'Relational expense invoice',
+    referenceLabel: 'SUPPLIER',
+    referenceValue: payload.supplierName,
+  })
 
-  doc.setTextColor(16, 36, 59)
+  doc.setTextColor(...RECEIPT_ACCENT)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
   doc.text('Informasi Faktur', 12, y)
   y += 8
 
-  doc.setDrawColor(203, 213, 225)
+  doc.setDrawColor(...RECEIPT_BORDER)
   doc.line(12, y - 3, pageWidth - 12, y - 3)
   doc.setFontSize(10)
 
@@ -521,7 +516,7 @@ function generateMaterialInvoicePdf(payload) {
 
   y += 4
   y = ensurePdfSpace(doc, y, 20)
-  doc.setTextColor(16, 36, 59)
+  doc.setTextColor(...RECEIPT_ACCENT)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
   doc.text('Line Items', 12, y)
@@ -551,9 +546,10 @@ function generateMaterialInvoicePdf(payload) {
 
   y += 6
   y = ensurePdfSpace(doc, y, 30)
-  doc.setFillColor(240, 249, 255)
+  doc.setFillColor(...RECEIPT_ACCENT_SOFT)
+  doc.setDrawColor(...RECEIPT_ACCENT)
   doc.roundedRect(12, y, pageWidth - 24, 20, 4, 4, 'F')
-  doc.setTextColor(8, 47, 73)
+  doc.setTextColor(...RECEIPT_ACCENT)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10)
   doc.text('Total Invoice', 16, y + 7)
@@ -570,6 +566,7 @@ function generateMaterialInvoicePdf(payload) {
     pageWidth - 24
   )
   doc.text(footerLines, 12, y)
+  addPaymentReceiptFooter(doc, 'LEDGER BANPLEX', payload.invoiceDate ?? new Date())
 
   return new Uint8Array(doc.output('arraybuffer'))
 }
@@ -670,6 +667,20 @@ function buildSalaryBillMessage(payload) {
 }
 
 function buildAttendanceMessage(payload) {
+  const recordCount = Number(payload.recordCount ?? 0)
+  const totalPay = Number(payload.totalPay ?? 0)
+
+  if (Number.isFinite(recordCount) && recordCount > 0) {
+    return [
+      '<b>Sheet Absensi Baru Dicatat</b>',
+      `Oleh: <b>${escapeHtml(normalizeText(payload.userName, 'Pengguna Telegram'))}</b>`,
+      `Proyek: <b>${escapeHtml(normalizeText(payload.projectName))}</b>`,
+      `Jumlah Record: <b>${escapeHtml(String(recordCount))}</b>`,
+      `Total Upah: <b>${escapeHtml(formatCurrency(totalPay))}</b>`,
+      `Tanggal: <b>${escapeHtml(formatDate(payload.attendanceDate))}</b>`,
+    ].join('\n')
+  }
+
   return [
     '<b>Absensi Baru Dicatat</b>',
     `Pekerja: <b>${escapeHtml(normalizeText(payload.workerName))}</b>`,
@@ -831,6 +842,9 @@ function parseAttendancePayload(body) {
     ),
     status: normalizeText(body.status ?? body.attendanceStatus, 'full_day'),
     routePath: normalizeText(body.routePath ?? body.route, ''),
+    recordCount: Number(body.recordCount ?? body.record_count ?? 0),
+    totalPay: Number(body.totalPay ?? body.total_pay ?? 0),
+    userName: normalizeText(body.userName, 'Pengguna Telegram'),
   }
 }
 

@@ -17,6 +17,7 @@ import {
   getTransactionSourceLabel,
   getTransactionTitle,
   getTransactionTypeLabel,
+  shouldHideTransactionAmount,
 } from '../lib/transaction-presentation'
 import { markRecycleBinListStateNeedsRefresh } from '../lib/recycle-bin-state'
 import {
@@ -285,17 +286,19 @@ function DeletedTransactionDetailPage() {
           </div>
         </div>
 
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-            Nominal
-          </p>
-          <p
-            className={`mt-2 text-2xl font-bold tracking-[-0.04em] ${presentation.amountClassName}`}
-          >
-            {presentation.amountPrefix}
-            {formatCurrency(Math.abs(Number(transaction.amount ?? 0)))}
-          </p>
-        </div>
+        {!shouldHideTransactionAmount(transaction) ? (
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+              Nominal
+            </p>
+            <p
+              className={`mt-2 text-2xl font-bold tracking-[-0.04em] ${presentation.amountClassName}`}
+            >
+              {presentation.amountPrefix}
+              {formatCurrency(Math.abs(Number(transaction.amount ?? 0)))}
+            </p>
+          </div>
+        ) : null}
       </AppCardStrong>
 
       <div className="grid gap-3 sm:grid-cols-2">

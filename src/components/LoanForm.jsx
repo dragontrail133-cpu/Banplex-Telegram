@@ -680,7 +680,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
               </summary>
               <div className="pt-4">
                 <textarea
-                  className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  className="h-12 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                   name="notes"
                   onChange={handleChange}
                   placeholder="Contoh: Dana talangan untuk pembelian material."

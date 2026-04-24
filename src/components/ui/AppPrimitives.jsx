@@ -180,7 +180,7 @@ function AppNominalInput({
 function AppTextarea({ className = '', ...props }) {
   return (
     <textarea
-      className={joinClasses('app-input min-h-28 w-full resize-none rounded-[20px] px-4 py-3 text-base', className)}
+      className={joinClasses('app-input h-12 w-full resize-none rounded-[20px] px-4 py-3 text-base', className)}
       {...props}
     />
   )

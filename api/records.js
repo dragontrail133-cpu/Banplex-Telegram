@@ -4629,6 +4629,863 @@ async function buildProjectPlReportData(
   })
 }
 
+const partyStatementPartyLabels = {
+  creditor: 'Kreditur',
+  supplier: 'Supplier',
+  worker: 'Pekerja',
+}
+
+const partyStatementEntryTypeWeights = {
+  debit: 0,
+  credit: 1,
+}
+
+function normalizePartyStatementPartyType(value) {
+  const normalizedValue = normalizeText(value, '').toLowerCase()
+
+  return Object.prototype.hasOwnProperty.call(partyStatementPartyLabels, normalizedValue)
+    ? normalizedValue
+    : null
+}
+
+function getPartyStatementPartyLabel(partyType) {
+  return partyStatementPartyLabels[normalizePartyStatementPartyType(partyType)] ?? 'Pihak'
+}
+
+function getPartyStatementTitle(partyType) {
+  const normalizedPartyType = normalizePartyStatementPartyType(partyType)
+
+  if (normalizedPartyType === 'creditor') {
+    return 'LAPORAN PIUTANG KREDITUR'
+  }
+
+  if (normalizedPartyType === 'supplier') {
+    return 'LAPORAN HUTANG SUPPLIER'
+  }
+
+  if (normalizedPartyType === 'worker') {
+    return 'LAPORAN GAJI PEKERJA'
+  }
+
+  return 'LAPORAN PIHAK'
+}
+
+function getPartyStatementDateKey(value) {
+  const normalizedValue = normalizeText(value, '')
+
+  return normalizedValue ? normalizedValue.slice(0, 10) : null
+}
+
+function getPartyStatementSortTimestamp(value) {
+  const normalizedValue = normalizeText(value, '')
+
+  if (!normalizedValue) {
+    return null
+  }
+
+  const timestamp = new Date(normalizedValue).getTime()
+
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+function comparePartyStatementRows(left, right) {
+  const leftDateKey = getPartyStatementDateKey(left?.transactionDate) ?? ''
+  const rightDateKey = getPartyStatementDateKey(right?.transactionDate) ?? ''
+
+  if (leftDateKey !== rightDateKey) {
+    return leftDateKey.localeCompare(rightDateKey)
+  }
+
+  const leftEntryType = normalizeText(left?.entryType, 'debit').toLowerCase()
+  const rightEntryType = normalizeText(right?.entryType, 'debit').toLowerCase()
+  const leftEntryTypeWeight = partyStatementEntryTypeWeights[leftEntryType] ?? 0
+  const rightEntryTypeWeight = partyStatementEntryTypeWeights[rightEntryType] ?? 0
+
+  if (leftEntryTypeWeight !== rightEntryTypeWeight) {
+    return leftEntryTypeWeight - rightEntryTypeWeight
+  }
+
+  const leftSortTimestamp = Number.isFinite(Number(left?.sortTimestamp))
+    ? Number(left.sortTimestamp)
+    : getPartyStatementSortTimestamp(left?.sortAt ?? left?.transactionDate) ?? 0
+  const rightSortTimestamp = Number.isFinite(Number(right?.sortTimestamp))
+    ? Number(right.sortTimestamp)
+    : getPartyStatementSortTimestamp(right?.sortAt ?? right?.transactionDate) ?? 0
+
+  if (leftSortTimestamp !== rightSortTimestamp) {
+    return leftSortTimestamp - rightSortTimestamp
+  }
+
+  return normalizeText(left?.id, '').localeCompare(normalizeText(right?.id, ''))
+}
+
+function createPartyStatementRow({
+  id = null,
+  sourceType = 'unknown',
+  entryType = 'debit',
+  transactionDate = null,
+  sortAt = null,
+  description = null,
+  amount = 0,
+  status = null,
+  reference = {},
+  metadata = {},
+} = {}) {
+  const normalizedTransactionDate = getPartyStatementDateKey(transactionDate)
+  const normalizedSortTimestamp =
+    getPartyStatementSortTimestamp(sortAt ?? transactionDate) ??
+    getPartyStatementSortTimestamp(transactionDate) ??
+    0
+
+  return {
+    id: normalizeText(id, null),
+    sourceType: normalizeText(sourceType, 'unknown'),
+    entryType: normalizeText(entryType, 'debit').toLowerCase() === 'credit' ? 'credit' : 'debit',
+    transactionDate: normalizedTransactionDate,
+    sortAt: normalizeText(sortAt, normalizedTransactionDate),
+    sortTimestamp: normalizedSortTimestamp,
+    description: normalizeText(description, '-'),
+    amount: Math.max(toNumber(amount), 0),
+    status: normalizeText(status, null),
+    reference,
+    metadata,
+  }
+}
+
+function summarizePartyStatementRows(rows = [], { dateFrom = null, dateTo = null, openingBalance = 0 } = {}) {
+  const normalizedDateFrom = getPartyStatementDateKey(dateFrom)
+  const normalizedDateTo = getPartyStatementDateKey(dateTo)
+  const sortedRows = [...rows].sort(comparePartyStatementRows)
+  let runningBalance = toNumber(openingBalance, 0)
+  let openingBalanceAtPeriodStart = runningBalance
+  const visibleRows = []
+  let totalDebit = 0
+  let totalCredit = 0
+  let debitCount = 0
+  let creditCount = 0
+
+  for (const row of sortedRows) {
+    const rowDateKey = getPartyStatementDateKey(row?.transactionDate)
+    const normalizedEntryType = normalizeText(row?.entryType, 'debit').toLowerCase()
+    const signedAmount =
+      normalizedEntryType === 'credit' ? -toNumber(row?.amount) : toNumber(row?.amount)
+
+    if (normalizedDateTo && rowDateKey && rowDateKey > normalizedDateTo) {
+      continue
+    }
+
+    if (normalizedDateFrom && rowDateKey && rowDateKey < normalizedDateFrom) {
+      runningBalance += signedAmount
+      openingBalanceAtPeriodStart = runningBalance
+      continue
+    }
+
+    runningBalance += signedAmount
+
+    if (normalizedEntryType === 'credit') {
+      totalCredit += toNumber(row?.amount)
+      creditCount += 1
+    } else {
+      totalDebit += toNumber(row?.amount)
+      debitCount += 1
+    }
+
+    visibleRows.push({
+      ...row,
+      signedAmount,
+      balance: runningBalance,
+    })
+  }
+
+  return {
+    rows: visibleRows,
+    summary: {
+      opening_balance: openingBalanceAtPeriodStart,
+      total_debit: totalDebit,
+      total_credit: totalCredit,
+      closing_balance: runningBalance,
+      outstanding_amount: Math.max(runningBalance, 0),
+      row_count: visibleRows.length,
+      debit_count: debitCount,
+      credit_count: creditCount,
+    },
+  }
+}
+
+function createPartyStatementBase({
+  partyType,
+  partyId,
+  partyProfile = null,
+  period,
+  generatedAt = new Date().toISOString(),
+  summary = {},
+  rows = [],
+} = {}) {
+  const normalizedPartyType = normalizePartyStatementPartyType(partyType)
+  const normalizedPartyId = normalizeText(partyId, null)
+  const normalizedPartyProfile = partyProfile
+    ? {
+        ...partyProfile,
+        partyType: normalizedPartyType,
+        label: getPartyStatementPartyLabel(normalizedPartyType),
+        id: normalizeText(partyProfile?.id, normalizedPartyId),
+        name: normalizeText(partyProfile?.name, '-'),
+      }
+    : null
+
+  return {
+    reportKind: 'party_statement',
+    title: getPartyStatementTitle(normalizedPartyType),
+    period: buildBusinessReportPeriod(period?.dateFrom, period?.dateTo),
+    generatedAt,
+    partyType: normalizedPartyType,
+    partyId: normalizedPartyId,
+    partyProfile: normalizedPartyProfile,
+    summary,
+    rows,
+  }
+}
+
+async function loadPartyStatementPartyProfile(readClient, partyType, partyId) {
+  const normalizedPartyType = normalizePartyStatementPartyType(partyType)
+  const normalizedPartyId = normalizeText(partyId, null)
+
+  if (!normalizedPartyType) {
+    throw createHttpError(400, 'Party type tidak valid.')
+  }
+
+  if (!normalizedPartyId) {
+    throw createHttpError(400, 'Party ID tidak valid.')
+  }
+
+  if (normalizedPartyType === 'creditor') {
+    const { data, error } = await readClient
+      .from('funding_creditors')
+      .select('id, team_id, name, creditor_name, notes, is_active, deleted_at')
+      .eq('id', normalizedPartyId)
+      .is('deleted_at', null)
+      .maybeSingle()
+
+    if (error) {
+      throw error
+    }
+
+    return data
+      ? {
+          id: data.id,
+          teamId: data.team_id ?? null,
+          name: normalizeText(data.creditor_name ?? data.name, '-'),
+          notes: normalizeText(data.notes, null),
+          isActive: data.is_active ?? true,
+        }
+      : null
+  }
+
+  if (normalizedPartyType === 'supplier') {
+    const { data, error } = await readClient
+      .from('suppliers')
+      .select('id, team_id, name, supplier_name, supplier_type, notes, is_active, deleted_at')
+      .eq('id', normalizedPartyId)
+      .is('deleted_at', null)
+      .maybeSingle()
+
+    if (error) {
+      throw error
+    }
+
+    return data
+      ? {
+          id: data.id,
+          teamId: data.team_id ?? null,
+          name: normalizeText(data.supplier_name ?? data.name, '-'),
+          notes: normalizeText(data.notes, null),
+          isActive: data.is_active ?? true,
+          supplierType: normalizeText(data.supplier_type, null),
+        }
+      : null
+  }
+
+  const { data, error } = await readClient
+    .from('workers')
+    .select('id, team_id, name, worker_name, notes, status, is_active, deleted_at')
+    .eq('id', normalizedPartyId)
+    .is('deleted_at', null)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  return data
+    ? {
+        id: data.id,
+        teamId: data.team_id ?? null,
+        name: normalizeText(data.worker_name ?? data.name, '-'),
+        notes: normalizeText(data.notes, null),
+        status: normalizeText(data.status, null),
+        isActive: data.is_active ?? true,
+      }
+    : null
+}
+
+async function loadPartyStatementLoanRows(readClient, partyId, { dateTo = null } = {}) {
+  const normalizedPartyId = normalizeText(partyId, null)
+
+  if (!normalizedPartyId) {
+    throw createHttpError(400, 'Party ID tidak valid.')
+  }
+
+  let loanQuery = readClient
+    .from('loans')
+    .select(
+      'id, team_id, creditor_id, transaction_date, disbursed_date, principal_amount, repayment_amount, amount, description, notes, creditor_name_snapshot, status, paid_amount, created_at, updated_at, deleted_at'
+    )
+    .eq('creditor_id', normalizedPartyId)
+    .is('deleted_at', null)
+    .order('transaction_date', { ascending: true })
+    .order('created_at', { ascending: true })
+
+  if (dateTo) {
+    loanQuery = applyDateRangeToQuery(loanQuery, 'transaction_date', null, dateTo)
+  }
+
+  const { data: loans, error: loansError } = await loanQuery
+
+  if (loansError) {
+    throw loansError
+  }
+
+  const loanIds = [...new Set((loans ?? []).map((row) => normalizeText(row?.id, null)).filter(Boolean))]
+
+  let paymentRows = []
+
+  if (loanIds.length > 0) {
+    let paymentQuery = readClient
+      .from('loan_payments')
+      .select(
+        'id, loan_id, team_id, telegram_user_id, amount, payment_date, notes, created_at, updated_at, deleted_at, creditor_name_snapshot'
+      )
+      .in('loan_id', loanIds)
+      .is('deleted_at', null)
+      .order('payment_date', { ascending: true })
+      .order('created_at', { ascending: true })
+
+    if (dateTo) {
+      paymentQuery = applyDateRangeToQuery(paymentQuery, 'payment_date', null, dateTo)
+    }
+
+    const { data, error } = await paymentQuery
+
+    if (error) {
+      throw error
+    }
+
+    paymentRows = data ?? []
+  }
+
+  return [
+    ...(loans ?? []).map((loan) =>
+      createPartyStatementRow({
+        id: loan.id,
+        sourceType: 'loan',
+        entryType: 'debit',
+        transactionDate: loan.transaction_date ?? loan.disbursed_date ?? loan.created_at,
+        sortAt: loan.created_at ?? loan.transaction_date ?? loan.disbursed_date,
+        description:
+          loan.description ?? loan.notes ?? normalizeText(loan.creditor_name_snapshot, '-'),
+        amount: loan.repayment_amount ?? loan.amount ?? loan.principal_amount,
+        status: loan.status ?? null,
+        reference: {
+          loanId: loan.id,
+          creditorId: loan.creditor_id ?? normalizedPartyId,
+        },
+        metadata: {
+          principalAmount: toNumber(loan.principal_amount),
+          repaymentAmount: toNumber(loan.repayment_amount),
+          paidAmount: toNumber(loan.paid_amount),
+          creditorNameSnapshot: normalizeText(loan.creditor_name_snapshot, null),
+        },
+      })
+    ),
+    ...paymentRows.map((payment) =>
+      createPartyStatementRow({
+        id: payment.id,
+        sourceType: 'loan_payment',
+        entryType: 'credit',
+        transactionDate: payment.payment_date ?? payment.created_at,
+        sortAt: payment.created_at ?? payment.payment_date,
+        description: payment.notes ?? 'Pembayaran pinjaman',
+        amount: payment.amount,
+        reference: {
+          loanId: payment.loan_id ?? null,
+        },
+        metadata: {
+          creditorNameSnapshot: normalizeText(payment.creditor_name_snapshot, null),
+        },
+      })
+    ),
+  ]
+}
+
+async function loadPartyStatementSupplierRows(readClient, partyId, { dateTo = null } = {}) {
+  const normalizedPartyId = normalizeText(partyId, null)
+
+  if (!normalizedPartyId) {
+    throw createHttpError(400, 'Party ID tidak valid.')
+  }
+
+  const [supplierResult, expenseResult, billResult] = await Promise.all([
+    readClient
+      .from('suppliers')
+      .select('id, team_id, name, supplier_name, supplier_type, notes, is_active, deleted_at')
+      .eq('id', normalizedPartyId)
+      .is('deleted_at', null)
+      .maybeSingle(),
+    (async () => {
+      let expenseQuery = readClient
+        .from('expenses')
+        .select(expenseSelectColumns)
+        .eq('supplier_id', normalizedPartyId)
+        .is('deleted_at', null)
+        .order('expense_date', { ascending: true })
+        .order('created_at', { ascending: true })
+
+      if (dateTo) {
+        expenseQuery = applyDateRangeToQuery(expenseQuery, 'expense_date', null, dateTo)
+      }
+
+      return expenseQuery
+    })(),
+    readClient
+      .from('bills')
+      .select(
+        'id, expense_id, project_income_id, telegram_user_id, team_id, worker_id, supplier_id, staff_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, worker_name_snapshot, supplier_name_snapshot, project_name_snapshot, created_at, updated_at, deleted_at'
+      )
+      .eq('supplier_id', normalizedPartyId)
+      .is('deleted_at', null)
+      .order('due_date', { ascending: true })
+      .order('created_at', { ascending: true }),
+  ])
+
+  if (supplierResult.error) {
+    throw supplierResult.error
+  }
+
+  if (expenseResult.error) {
+    throw expenseResult.error
+  }
+
+  if (billResult.error) {
+    throw billResult.error
+  }
+
+  if (!supplierResult.data?.id) {
+    return null
+  }
+
+  const expenses = expenseResult.data ?? []
+  const bills = billResult.data ?? []
+  const expensesById = new Map(expenses.map((expense) => [normalizeText(expense?.id, null), expense]))
+  const billedExpenseIds = new Set(
+    bills.map((bill) => normalizeText(bill?.expense_id, null)).filter(Boolean)
+  )
+  const rows = []
+
+  for (const bill of bills) {
+    const expense = normalizeText(bill?.expense_id, null)
+      ? expensesById.get(normalizeText(bill.expense_id, null)) ?? null
+      : null
+
+    rows.push(
+      createPartyStatementRow({
+        id: bill.id,
+        sourceType: 'supplier_bill',
+        entryType: 'debit',
+        transactionDate:
+          expense?.expense_date ?? bill.due_date ?? expense?.created_at ?? bill.created_at,
+        sortAt: bill.created_at ?? expense?.created_at ?? bill.due_date ?? expense?.expense_date,
+        description:
+          bill.description ??
+          expense?.description ??
+          expense?.expense_type ??
+          normalizeText(bill.supplier_name_snapshot ?? expense?.supplier_name_snapshot, '-'),
+        amount: bill.amount ?? expense?.total_amount ?? expense?.amount,
+        status: bill.status ?? expense?.status ?? null,
+        reference: {
+          billId: bill.id,
+          expenseId: expense?.id ?? bill.expense_id ?? null,
+        },
+        metadata: {
+          expenseType: normalizeText(expense?.expense_type, null),
+          documentType: normalizeText(expense?.document_type, null),
+          billType: normalizeText(bill.bill_type, null),
+          paidAmount: toNumber(bill.paid_amount),
+          paidAt: bill.paid_at ?? null,
+          dueDate: bill.due_date ?? null,
+          projectNameSnapshot: normalizeText(
+            expense?.project_name_snapshot ?? bill.project_name_snapshot,
+            null
+          ),
+          supplierNameSnapshot: normalizeText(
+            expense?.supplier_name_snapshot ?? bill.supplier_name_snapshot,
+            null
+          ),
+        },
+      })
+    )
+  }
+
+  for (const expense of expenses) {
+    if (billedExpenseIds.has(normalizeText(expense?.id, null))) {
+      continue
+    }
+
+    rows.push(
+      createPartyStatementRow({
+        id: expense.id,
+        sourceType: 'supplier_expense',
+        entryType: 'debit',
+        transactionDate: expense.expense_date ?? expense.created_at,
+        sortAt: expense.created_at ?? expense.expense_date,
+        description:
+          expense.description ??
+          expense.expense_type ??
+          expense.document_type ??
+          normalizeText(expense.supplier_name_snapshot, '-'),
+        amount: expense.total_amount ?? expense.amount,
+        status: expense.status ?? null,
+        reference: {
+          expenseId: expense.id,
+        },
+        metadata: {
+          expenseType: normalizeText(expense.expense_type, null),
+          documentType: normalizeText(expense.document_type, null),
+          projectNameSnapshot: normalizeText(expense.project_name_snapshot, null),
+          supplierNameSnapshot: normalizeText(expense.supplier_name_snapshot, null),
+        },
+      })
+    )
+  }
+
+  const billIds = [...new Set(bills.map((bill) => normalizeText(bill?.id, null)).filter(Boolean))]
+  let paymentRows = []
+
+  if (billIds.length > 0) {
+    const { data: payments, error: paymentsError } = await readClient
+      .from('bill_payments')
+      .select('id, bill_id, team_id, amount, payment_date, notes, created_at, updated_at, deleted_at')
+      .in('bill_id', billIds)
+      .is('deleted_at', null)
+      .order('payment_date', { ascending: true })
+      .order('created_at', { ascending: true })
+
+    if (paymentsError) {
+      throw paymentsError
+    }
+
+    paymentRows = payments ?? []
+  }
+
+  const billById = new Map(bills.map((bill) => [normalizeText(bill?.id, null), bill]))
+
+  for (const payment of paymentRows) {
+    const bill = billById.get(normalizeText(payment?.bill_id, null)) ?? null
+    const expense = bill?.expense_id ? expensesById.get(normalizeText(bill.expense_id, null)) ?? null : null
+
+    rows.push(
+      createPartyStatementRow({
+        id: payment.id,
+        sourceType: 'bill_payment',
+        entryType: 'credit',
+        transactionDate: payment.payment_date ?? payment.created_at,
+        sortAt: payment.created_at ?? payment.payment_date,
+        description:
+          payment.notes ??
+          bill?.description ??
+          expense?.description ??
+          'Pembayaran tagihan',
+        amount: payment.amount,
+        reference: {
+          billId: payment.bill_id ?? null,
+          expenseId: expense?.id ?? bill?.expense_id ?? null,
+        },
+        metadata: {
+          billType: normalizeText(bill?.bill_type, null),
+          billStatus: normalizeText(bill?.status, null),
+          billDescription: normalizeText(bill?.description, null),
+          supplierNameSnapshot: normalizeText(
+            bill?.supplier_name_snapshot ?? expense?.supplier_name_snapshot,
+            null
+          ),
+        },
+      })
+    )
+  }
+
+  return rows
+}
+
+async function loadPartyStatementWorkerRows(readClient, partyId, { dateTo = null } = {}) {
+  const normalizedPartyId = normalizeText(partyId, null)
+
+  if (!normalizedPartyId) {
+    throw createHttpError(400, 'Party ID tidak valid.')
+  }
+
+  const [workerResult, attendanceResult, billResult] = await Promise.all([
+    readClient
+      .from('workers')
+      .select('id, team_id, name, worker_name, notes, status, is_active, deleted_at')
+      .eq('id', normalizedPartyId)
+      .is('deleted_at', null)
+      .maybeSingle(),
+    (async () => {
+      let attendanceQuery = readClient
+        .from('attendance_records')
+        .select(attendanceDetailSelectColumns)
+        .eq('worker_id', normalizedPartyId)
+        .is('deleted_at', null)
+        .order('attendance_date', { ascending: true })
+        .order('created_at', { ascending: true })
+
+      if (dateTo) {
+        attendanceQuery = applyDateRangeToQuery(attendanceQuery, 'attendance_date', null, dateTo)
+      }
+
+      return attendanceQuery
+    })(),
+    readClient
+      .from('bills')
+      .select(
+        'id, expense_id, project_income_id, telegram_user_id, team_id, worker_id, supplier_id, staff_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, worker_name_snapshot, supplier_name_snapshot, project_name_snapshot, created_at, updated_at, deleted_at'
+      )
+      .eq('worker_id', normalizedPartyId)
+      .is('deleted_at', null)
+      .order('due_date', { ascending: true })
+      .order('created_at', { ascending: true }),
+  ])
+
+  if (workerResult.error) {
+    throw workerResult.error
+  }
+
+  if (attendanceResult.error) {
+    throw attendanceResult.error
+  }
+
+  if (billResult.error) {
+    throw billResult.error
+  }
+
+  if (!workerResult.data?.id) {
+    return null
+  }
+
+  const attendances = (attendanceResult.data ?? []).map(normalizeAttendanceDetailRow)
+  const bills = billResult.data ?? []
+  const attendanceByBillId = new Map()
+
+  for (const attendance of attendances) {
+    const billId = normalizeText(attendance?.salary_bill_id ?? attendance?.salary_bill?.id, null)
+
+    if (!billId) {
+      continue
+    }
+
+    const nextRows = attendanceByBillId.get(billId) ?? []
+    nextRows.push(attendance)
+    attendanceByBillId.set(billId, nextRows)
+  }
+
+  const billedAttendanceBillIds = new Set(
+    [...attendanceByBillId.keys()].map((billId) => normalizeText(billId, null)).filter(Boolean)
+  )
+  const rows = []
+
+  for (const bill of bills) {
+    const relatedAttendances = attendanceByBillId.get(normalizeText(bill?.id, null)) ?? []
+    const earliestAttendanceDate = [...relatedAttendances]
+      .map((attendance) => normalizeText(attendance?.attendance_date, null))
+      .filter(Boolean)
+      .sort()[0] ?? null
+    const attendanceCount = relatedAttendances.length
+    const attendanceIds = relatedAttendances.map((attendance) => attendance.id).filter(Boolean)
+
+    rows.push(
+      createPartyStatementRow({
+        id: bill.id,
+        sourceType: 'salary_bill',
+        entryType: 'debit',
+        transactionDate: earliestAttendanceDate ?? bill.due_date ?? bill.created_at,
+        sortAt: bill.created_at ?? bill.due_date ?? earliestAttendanceDate,
+        description:
+          bill.description ??
+          normalizeText(bill.worker_name_snapshot, null) ??
+          normalizeText(workerResult.data.worker_name ?? workerResult.data.name, '-'),
+        amount: bill.amount,
+        status: bill.status ?? null,
+        reference: {
+          billId: bill.id,
+          attendanceIds,
+        },
+        metadata: {
+          attendanceCount,
+          attendanceIds,
+          billType: normalizeText(bill.bill_type, null),
+          paidAmount: toNumber(bill.paid_amount),
+          paidAt: bill.paid_at ?? null,
+          dueDate: bill.due_date ?? null,
+          workerNameSnapshot: normalizeText(
+            bill.worker_name_snapshot ?? workerResult.data.worker_name ?? workerResult.data.name,
+            null
+          ),
+        },
+      })
+    )
+  }
+
+  for (const attendance of attendances) {
+    const billId = normalizeText(attendance?.salary_bill_id ?? attendance?.salary_bill?.id, null)
+
+    if (billId && billedAttendanceBillIds.has(billId)) {
+      continue
+    }
+
+    rows.push(
+      createPartyStatementRow({
+        id: attendance.id,
+        sourceType: 'attendance',
+        entryType: 'debit',
+        transactionDate: attendance.attendance_date ?? attendance.created_at,
+        sortAt: attendance.created_at ?? attendance.attendance_date,
+        description:
+          attendance.notes ??
+          attendance.project_name ??
+          attendance.project_name_snapshot ??
+          attendance.attendance_status,
+        amount: attendance.total_pay,
+        status: attendance.billing_status ?? null,
+        reference: {
+          attendanceId: attendance.id,
+          billId,
+        },
+        metadata: {
+          attendanceStatus: normalizeText(attendance.attendance_status, null),
+          entryMode: normalizeText(attendance.entry_mode, null),
+          projectNameSnapshot: normalizeText(attendance.project_name_snapshot, null),
+          salaryBillId: billId,
+        },
+      })
+    )
+  }
+
+  const billIds = [...new Set(bills.map((bill) => normalizeText(bill?.id, null)).filter(Boolean))]
+  let paymentRows = []
+
+  if (billIds.length > 0) {
+    const { data: payments, error: paymentsError } = await readClient
+      .from('bill_payments')
+      .select('id, bill_id, team_id, amount, payment_date, notes, created_at, updated_at, deleted_at')
+      .in('bill_id', billIds)
+      .is('deleted_at', null)
+      .order('payment_date', { ascending: true })
+      .order('created_at', { ascending: true })
+
+    if (paymentsError) {
+      throw paymentsError
+    }
+
+    paymentRows = payments ?? []
+  }
+
+  const billById = new Map(bills.map((bill) => [normalizeText(bill?.id, null), bill]))
+
+  for (const payment of paymentRows) {
+    const bill = billById.get(normalizeText(payment?.bill_id, null)) ?? null
+    const relatedAttendances = bill ? attendanceByBillId.get(normalizeText(bill.id, null)) ?? [] : []
+
+    rows.push(
+      createPartyStatementRow({
+        id: payment.id,
+        sourceType: 'bill_payment',
+        entryType: 'credit',
+        transactionDate: payment.payment_date ?? payment.created_at,
+        sortAt: payment.created_at ?? payment.payment_date,
+        description:
+          payment.notes ??
+          bill?.description ??
+          normalizeText(workerResult.data.worker_name ?? workerResult.data.name, '-') ??
+          'Pembayaran gaji',
+        amount: payment.amount,
+        reference: {
+          billId: payment.bill_id ?? null,
+          attendanceIds: relatedAttendances.map((attendance) => attendance.id).filter(Boolean),
+        },
+        metadata: {
+          billType: normalizeText(bill?.bill_type, null),
+          billStatus: normalizeText(bill?.status, null),
+          billDescription: normalizeText(bill?.description, null),
+          workerNameSnapshot: normalizeText(
+            bill?.worker_name_snapshot ?? workerResult.data.worker_name ?? workerResult.data.name,
+            null
+          ),
+        },
+      })
+    )
+  }
+
+  return rows
+}
+
+async function buildPartyStatementReportData(readClient, { partyType, partyId, dateFrom = null, dateTo = null } = {}) {
+  const normalizedPartyType = normalizePartyStatementPartyType(partyType)
+  const normalizedPartyId = normalizeText(partyId, null)
+
+  if (!normalizedPartyType) {
+    throw createHttpError(400, 'Party type tidak valid.')
+  }
+
+  if (!normalizedPartyId) {
+    throw createHttpError(400, 'Party ID wajib diisi.')
+  }
+
+  const partyProfile = await loadPartyStatementPartyProfile(readClient, normalizedPartyType, normalizedPartyId)
+
+  if (!partyProfile?.id) {
+    throw createHttpError(404, 'Data pihak tidak ditemukan.')
+  }
+
+  let rows = []
+
+  if (normalizedPartyType === 'creditor') {
+    rows = await loadPartyStatementLoanRows(readClient, normalizedPartyId, { dateTo })
+  } else if (normalizedPartyType === 'supplier') {
+    rows = await loadPartyStatementSupplierRows(readClient, normalizedPartyId, { dateTo })
+  } else {
+    rows = await loadPartyStatementWorkerRows(readClient, normalizedPartyId, { dateTo })
+  }
+
+  const { rows: summarizedRows, summary } = summarizePartyStatementRows(rows, {
+    dateFrom,
+    dateTo,
+  })
+
+  return createPartyStatementBase({
+    partyType: normalizedPartyType,
+    partyId: normalizedPartyId,
+    partyProfile: {
+      ...partyProfile,
+      label: getPartyStatementPartyLabel(normalizedPartyType),
+    },
+    period: { dateFrom, dateTo },
+    summary: {
+      ...summary,
+      party_label: getPartyStatementPartyLabel(normalizedPartyType),
+    },
+    rows: summarizedRows,
+  })
+}
+
 async function loadAttachmentPolicyRole(adminClient, telegramUserId) {
   const normalizedTelegramUserId = normalizeText(telegramUserId, null)
 
@@ -5815,6 +6672,33 @@ export default async function handler(req, res) {
         })
       }
 
+      if (reportKind === 'party_statement') {
+        const partyType = normalizePartyStatementPartyType(
+          req.query?.partyType ?? req.query?.party_type
+        )
+        const partyId = normalizeText(req.query?.partyId ?? req.query?.party_id, null)
+
+        if (!partyType) {
+          throw createHttpError(400, 'Party type wajib diisi untuk laporan per pihak.')
+        }
+
+        if (!partyId) {
+          throw createHttpError(400, 'Party ID wajib diisi untuk laporan per pihak.')
+        }
+
+        const reportData = await buildPartyStatementReportData(readClient, {
+          partyType,
+          partyId,
+          dateFrom,
+          dateTo,
+        })
+
+        return res.status(200).json({
+          success: true,
+          reportData,
+        })
+      }
+
       if (reportKind === 'cash_flow') {
         const reportData = await buildCashFlowReportData(readClient, {
           dateFrom,
@@ -5892,3 +6776,5 @@ export default async function handler(req, res) {
     })
   }
 }
+
+export { normalizePartyStatementPartyType, summarizePartyStatementRows }

@@ -24,9 +24,11 @@ import {
   allowedAnalyticsMetricKeys,
   allowedAnalyticsWindows,
   assistantCallbackPrefixes,
+  assistantRouteTargets,
   buildAssistantCommandInput,
   buildAssistantCommandRawText,
   extractAssistantCommand,
+  getAssistantRouteLabel,
   resolveAssistantCallbackAction,
   shouldUseAssistantDmFallback,
 } from '../src/lib/telegram-assistant-routing.js'
@@ -98,6 +100,125 @@ const routeKeywordMap = [
   { pattern: /\b(pinjaman|loan|hutang|utang|nginjeum)\b/, path: '/transactions', label: 'Jurnal Pinjaman' },
   { pattern: /\b(payroll|absensi|attendance|kehadiran|rekap absensi|catatan absensi)\b/, path: '/payroll', label: 'Absensi' },
 ]
+const assistantCreateRouteMap = [
+  {
+    pattern: /\b(pemasukan|income|termin|uang masuk)\b/,
+    path: assistantRouteTargets.incomeCreate,
+    label: 'Pemasukan',
+  },
+  {
+    pattern: /\b(pengeluaran|expense|uang keluar)\b/,
+    path: assistantRouteTargets.expenseCreate,
+    label: 'Pengeluaran',
+  },
+  {
+    pattern: /\b(pinjaman|loan|kasbon|hutang|utang|nginjeum)\b/,
+    path: assistantRouteTargets.loanCreate,
+    label: 'Pinjaman',
+  },
+  {
+    pattern: /\b(faktur|material|barang|surat jalan)\b/,
+    path: assistantRouteTargets.invoiceCreate,
+    label: 'Faktur Barang',
+  },
+  {
+    pattern: /\b(absensi|attendance|kehadiran|gaji|upah)\b/,
+    path: assistantRouteTargets.attendanceCreate,
+    label: 'Absensi',
+  },
+]
+const assistantCoreRouteMap = [
+  {
+    pattern: /\b(dashboard|beranda|home)\b/,
+    path: assistantRouteTargets.dashboard,
+    label: 'Dashboard',
+  },
+  {
+    pattern: /\b(jurnal|transaksi|ledger|catetan transaksi|catetan)\b/,
+    path: assistantRouteTargets.ledger,
+    label: 'Jurnal',
+  },
+  {
+    pattern: /\b(tagihan|invoice|tunggakan)\b/,
+    path: assistantRouteTargets.billLedger,
+    label: 'Tagihan',
+  },
+  {
+    pattern: /\b(pembayaran|payment|bayaran)\b/,
+    path: assistantRouteTargets.payment,
+    label: 'Pembayaran',
+  },
+  {
+    pattern: /\b(payroll|absensi|attendance|kehadiran|rekap absensi|catatan absensi)\b/,
+    path: assistantRouteTargets.attendance,
+    label: 'Absensi',
+  },
+]
+const assistantSearchRouteMap = [
+  {
+    pattern: /\b(pemasukan|income|termin|uang masuk)\b/,
+    path: assistantRouteTargets.ledger,
+    label: 'Pemasukan',
+  },
+  {
+    pattern: /\b(pengeluaran|expense|uang keluar)\b/,
+    path: assistantRouteTargets.ledger,
+    label: 'Pengeluaran',
+  },
+  {
+    pattern: /\b(pinjaman|loan|kasbon|hutang|utang|nginjeum)\b/,
+    path: assistantRouteTargets.ledger,
+    label: 'Pinjaman',
+  },
+  {
+    pattern: /\b(faktur|material|barang|surat jalan)\b/,
+    path: assistantRouteTargets.billLedger,
+    label: 'Faktur Barang',
+  },
+  {
+    pattern: /\b(absensi|attendance|kehadiran|gaji|upah)\b/,
+    path: assistantRouteTargets.attendance,
+    label: 'Absensi',
+  },
+]
+const assistantStatusBucketRoutes = [
+  {
+    status: 'paid',
+    label: 'Lunas',
+    path: assistantRouteTargets.history,
+  },
+  {
+    status: 'partial',
+    label: 'Dicicil',
+    path: assistantRouteTargets.payment,
+  },
+  {
+    status: 'unpaid',
+    label: 'Belum lunas',
+    path: assistantRouteTargets.billLedger,
+  },
+]
+function findAssistantRouteConfigFromText(text, routeMap) {
+  const normalizedText = normalizeText(text, '').toLowerCase()
+
+  if (!normalizedText) {
+    return null
+  }
+
+  return routeMap.find((route) => route.pattern.test(normalizedText)) ?? null
+}
+
+function resolveAssistantCreateRoutePath(text) {
+  return findAssistantRouteConfigFromText(text, assistantCreateRouteMap)?.path ?? null
+}
+
+function resolveAssistantCoreRoutePath(text) {
+  return findAssistantRouteConfigFromText(text, assistantCoreRouteMap)?.path ?? null
+}
+
+function resolveAssistantSearchRoutePath(text) {
+  return findAssistantRouteConfigFromText(text, assistantSearchRouteMap)?.path ?? null
+}
 const stopWordPatterns = [
   /\b(tolong|mohon|bantu|punten|mangga|parios|neangan|milarian|tingali|muka|buka|cek|status|cari|temukan|search|tampilkan|pindah|masuk|ke)\b/g,
   /\b(total|nominal|jumlah|berapa|data|ringkasan|rekap|siapa|mana|terbesar|paling|besar|hadir|pengeluaran|saldo|toko)\b/g,
@@ -215,9 +336,13 @@ const localeTemplates = {
     sessionExpired: 'Sesi sudah kedaluwarsa. Kirim ulang pesan.',
     handoffInvalid: 'Tautan DM ini tidak valid, sudah dipakai, atau kedaluwarsa. Minta kirim ulang dari grup.',
     workspaceNotFound: 'Workspace tidak ditemukan.',
-    menuIntro: 'Pilih quick action assistant atau buka halaman workspace yang dibutuhkan.',
-    menuHint: 'Command assistant tetap read-only: status, cari, analytics, riwayat, dan buka.',
-    openRoutePrompt: 'Pilih halaman workspace yang ingin dibuka.',
+    menuIntro: 'Pilih aksi assistant yang dibutuhkan.',
+    menuHint: 'Command step-by-step: tambah, buka, cari, status, riwayat, dan analytics.',
+    addRoutePrompt: 'Pilih domain input yang mau dibuka.',
+    openRoutePrompt: 'Pilih halaman core yang ingin dibuka.',
+    searchRoutePrompt: 'Pilih domain yang ingin dicari.',
+    statusRoutePrompt: 'Pilih bucket status yang ingin dilihat.',
+    historyRoutePrompt: 'Pilih bucket riwayat yang ingin dibuka.',
     noResultStatus: (queryLabel) =>
       queryLabel
         ? `Tidak ada tagihan atau pinjaman outstanding yang cocok untuk "${queryLabel}".\nBuka Jurnal untuk melihat riwayat lengkap.`
@@ -268,6 +393,8 @@ const localeTemplates = {
     actionPayment: 'Buka pembayaran',
     actionLedger: 'Buka Jurnal',
     openRoute: (routeLabel) => `Buka ${routeLabel}`,
+    addRoute: (routeLabel) => `Tambah ${routeLabel}`,
+    searchRoute: (routeLabel) => `Cari ${routeLabel}`,
     noWorkspaceChoice: 'Saya tidak menemukan membership aktif yang bisa dipakai untuk workspace ini.',
     workspacePicked: (workspaceName) => `${workspaceName ?? 'Workspace'} dipilih.`,
     callbackSessionExpired: 'Sesi sudah kedaluwarsa. Kirim ulang pesan.',
@@ -278,10 +405,15 @@ const localeTemplates = {
     quickAnalytics: 'Analytics',
     quickHistory: 'Riwayat',
     quickMenu: 'Menu',
+    quickAdd: 'Tambah',
+    quickOpen: 'Buka',
     routeLedger: 'Jurnal',
     routeHistory: 'Riwayat',
     routePayment: 'Pembayaran',
     routeAttendance: 'Absensi',
+    statusBucketPaid: 'Lunas',
+    statusBucketPartial: 'Dicicil',
+    statusBucketUnpaid: 'Belum lunas',
     groupFallbackIntro: 'Untuk detail atau klarifikasi, lanjutkan di DM bot.',
     groupFallbackHint:
       'Review cepat tetap tersedia di Jurnal, Riwayat, Pembayaran, dan Absensi di Mini Web.',
@@ -299,9 +431,13 @@ const localeTemplates = {
     analyticsWindowMonthCurrent: 'Bulan ini',
   },
   su: {
-    menuIntro: 'Pilih quick action assistant atawa buka halaman workspace nu diperlukeun.',
-    menuHint: 'Command assistant tetep read-only: status, cari, analytics, riwayat, jeung buka.',
-    openRoutePrompt: 'Pilih halaman workspace nu rek dibuka.',
+    menuIntro: 'Pilih aksi assistant nu diperlukeun.',
+    menuHint: 'Command step-by-step: tambah, buka, cari, status, riwayat, jeung analytics.',
+    addRoutePrompt: 'Pilih domain input nu rek dibuka.',
+    openRoutePrompt: 'Pilih halaman core nu rek dibuka.',
+    searchRoutePrompt: 'Pilih domain nu rek ditalungtik.',
+    statusRoutePrompt: 'Pilih bucket status nu rek ditempo.',
+    historyRoutePrompt: 'Pilih bucket riwayat nu rek dibuka.',
     workspaceChoiceIntro: 'Kuring manggihan sababaraha workspace aktip. Pilih workspace nu dipaké:',
     workspaceChoiceHint: 'Kirim angka, nami workspace, atawa pencét tombol pilihan di handap.',
     workspaceChoiceCancelled: 'Pilihan workspace dibatalkeun.',
@@ -360,6 +496,8 @@ const localeTemplates = {
     actionPayment: 'Buka pembayaran',
     actionLedger: 'Buka Jurnal',
     openRoute: (routeLabel) => `Muka ${routeLabel}`,
+    addRoute: (routeLabel) => `Tambah ${routeLabel}`,
+    searchRoute: (routeLabel) => `Milarian ${routeLabel}`,
     noWorkspaceChoice: 'Kuring teu manggihan membership aktip nu bisa dipaké pikeun workspace ieu.',
     workspacePicked: (workspaceName) => `${workspaceName ?? 'Workspace'} dipilih.`,
     callbackSessionExpired: 'Sési geus kadaluwarsa. Kirim deui pesen.',
@@ -370,10 +508,15 @@ const localeTemplates = {
     quickAnalytics: 'Analytics',
     quickHistory: 'Riwayat',
     quickMenu: 'Menu',
+    quickAdd: 'Tambah',
+    quickOpen: 'Muka',
     routeLedger: 'Jurnal',
     routeHistory: 'Riwayat',
     routePayment: 'Pembayaran',
     routeAttendance: 'Absensi',
+    statusBucketPaid: 'Lunas',
+    statusBucketPartial: 'Dicicil',
+    statusBucketUnpaid: 'Belum lunas',
     groupFallbackIntro: 'Pikeun detail atawa klarifikasi, lanjutkeun di DM bot.',
     groupFallbackHint:
       'Review gancang tetep aya di Jurnal, Riwayat, Pembayaran, jeung Absensi dina Mini Web.',
@@ -391,6 +534,103 @@ const localeTemplates = {
     analyticsWindowMonthCurrent: 'Bulan ieu',
   },
 }
+
+const assistantSafetyBaseVocabulary = (() => {
+  const tokens = new Set()
+  const safeVocabularySources = [
+    followUpSignals,
+    assistantTopicSignals,
+    payrollScopeKeywords,
+    Array.from(allowedIntents),
+    Array.from(allowedStatuses),
+    Array.from(allowedKinds),
+    Array.from(allowedClarificationCodes),
+    Array.from(allowedAnalyticsMetricKeys),
+    Array.from(allowedAnalyticsEntityTypes),
+    Array.from(allowedAnalyticsWindows),
+    Array.from(financeCoreScopes),
+    [
+      'ada',
+      'detail',
+      'halaman',
+      'informasi',
+      'jawaban',
+      'jawab',
+      'kembali',
+      'kirim',
+      'lanjut',
+      'langsung',
+      'lebih',
+      'maksudnya',
+      'menu',
+      'minta',
+      'mohon',
+      'muka',
+      'opsi',
+      'pilih',
+      'perlu',
+      'pertanyaan',
+      'ringkas',
+      'saya',
+      'silakan',
+      'singkat',
+      'spesifik',
+      'selanjutnya',
+      'sudah',
+      'tidak',
+      'tetap',
+      'tolong',
+      'tujuan',
+      'untuk',
+      'dengan',
+      'tanpa',
+      'atau',
+      'dan',
+      'yang',
+      'di',
+      'ke',
+      'dari',
+      'ini',
+      'itu',
+      'hari',
+      'minggu',
+      'bulan',
+      'waktu',
+      'periode',
+      'saat',
+      'baru',
+      'lama',
+      'semua',
+      'beberapa',
+      'cukup',
+      'bisa',
+      'bukan',
+      'jika',
+      'kalau',
+      'bila',
+      'saja',
+      'terkait',
+      'aktif',
+      'hasil',
+      'data',
+      'pesan',
+      'cek',
+      'lihat',
+      'buka',
+      'membuka',
+    ],
+  ]
+
+  for (const source of safeVocabularySources) {
+    collectAssistantStringValues(source).forEach((value) => {
+      for (const token of extractAssistantWordTokens(value)) {
+        tokens.add(token)
+      }
+    })
+  }
+
+  return tokens
+})()
 
 function truncateText(value, maxLength = 240) {
   const normalizedValue = normalizeText(value, '')
@@ -1111,6 +1351,50 @@ function extractNumericTokens(text) {
   return [...normalizeText(text, '').matchAll(/\b\d[\d.,]*\b/g)].map((match) => match[0])
 }
 
+function extractAssistantWordTokens(text) {
+  return [...normalizeText(text, '').toLowerCase().matchAll(/\p{L}+/gu)].map((match) => match[0])
+}
+
+function collectAssistantStringValues(value, collected = []) {
+  if (typeof value === 'string') {
+    const normalizedValue = normalizeText(value, '')
+
+    if (normalizedValue) {
+      collected.push(normalizedValue)
+    }
+
+    return collected
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectAssistantStringValues(item, collected)
+    }
+
+    return collected
+  }
+
+  if (value && typeof value === 'object') {
+    for (const item of Object.values(value)) {
+      collectAssistantStringValues(item, collected)
+    }
+  }
+
+  return collected
+}
+
+function buildAssistantResponseWordAllowlist(factPacket) {
+  const tokens = new Set(assistantSafetyBaseVocabulary)
+
+  collectAssistantStringValues(factPacket).forEach((value) => {
+    for (const token of extractAssistantWordTokens(value)) {
+      tokens.add(token)
+    }
+  })
+
+  return tokens
+}
+
 function buildAssistantResponseFactPacket({
   plan,
   reply,
@@ -1157,7 +1441,7 @@ function buildAssistantResponsePrompt(factPacket) {
   return [
     'Ubah fact packet Telegram assistant ini menjadi jawaban natural language yang singkat, jelas, dan tetap read-only.',
     'Aturan wajib:',
-    '- Jangan menambah angka, nama, tanggal, entity, atau aksi yang tidak ada di fact packet.',
+    '- Jangan menambah angka, nama, tanggal, entity, route, atau aksi yang tidak ada di fact packet.',
     '- Pertahankan semua angka sebagai digit yang sama persis jika disebut ulang.',
     '- Jika fact packet meminta klarifikasi, ajukan satu pertanyaan singkat dan spesifik.',
     '- Jika fact packet berisi jawaban final, jawab langsung tanpa menjelaskan proses internal.',
@@ -1178,6 +1462,12 @@ function isAssistantResponseSafe(candidateText, factPacket) {
     return false
   }
 
+  const candidateWords = extractAssistantWordTokens(normalizedText)
+
+  if (candidateWords.length === 0) {
+    return false
+  }
+
   const allowedNumbers = new Set(
     [
       ...extractNumericTokens(JSON.stringify(factPacket ?? {})),
@@ -1185,8 +1475,13 @@ function isAssistantResponseSafe(candidateText, factPacket) {
     ].filter(Boolean)
   )
   const candidateNumbers = extractNumericTokens(normalizedText)
+  const allowedWords = buildAssistantResponseWordAllowlist(factPacket)
 
-  return candidateNumbers.every((numberToken) => allowedNumbers.has(numberToken))
+  if (!candidateNumbers.every((numberToken) => allowedNumbers.has(numberToken))) {
+    return false
+  }
+
+  return candidateWords.every((wordToken) => allowedWords.has(wordToken))
 }
 
 async function rewriteAssistantReply({
@@ -3097,8 +3392,8 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
       ].join('\n'),
       buttons: [
         {
-          text: locale.openRoute('Absensi'),
-          path: '/payroll?tab=daily',
+          text: locale.openRoute(getAssistantRouteLabel(assistantRouteTargets.attendance)),
+          path: assistantRouteTargets.attendance,
         },
       ],
       needsClarification: false,
@@ -3185,8 +3480,17 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
       text: lines.join('\n'),
       buttons: [
         {
-          text: locale.openRoute(entityResolution.entityType === 'worker' ? 'Absensi' : 'Tagihan'),
-          path: entityResolution.entityType === 'worker' ? '/payroll?tab=worker' : '/transactions?tab=tagihan',
+          text: locale.openRoute(
+            getAssistantRouteLabel(
+              entityResolution.entityType === 'worker'
+                ? assistantRouteTargets.worker
+                : assistantRouteTargets.billLedger
+            )
+          ),
+          path:
+            entityResolution.entityType === 'worker'
+              ? assistantRouteTargets.worker
+              : assistantRouteTargets.billLedger,
         },
       ],
       needsClarification: false,
@@ -3278,14 +3582,20 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
     buttons: [
       {
         text: locale.openRoute(
-          resolvedEntityType === 'worker' ? 'Absensi' : resolvedEntityType === 'creditor' ? 'Jurnal' : 'Tagihan'
+          getAssistantRouteLabel(
+            resolvedEntityType === 'worker'
+              ? assistantRouteTargets.worker
+              : resolvedEntityType === 'creditor'
+                ? assistantRouteTargets.ledger
+                : assistantRouteTargets.billLedger
+          )
         ),
         path:
           resolvedEntityType === 'worker'
-            ? '/payroll?tab=worker'
+            ? assistantRouteTargets.worker
             : resolvedEntityType === 'creditor'
-              ? '/transactions'
-              : '/transactions?tab=tagihan',
+              ? assistantRouteTargets.ledger
+              : assistantRouteTargets.billLedger,
       },
     ],
     needsClarification: false,
@@ -3524,17 +3834,8 @@ function buildStatusReply(rows, plan) {
 
 function buildNavigateReply(plan) {
   const locale = getLocaleText(plan?.language)
-  const path = normalizeAssistantRoutePath(plan?.targetPath) ?? '/transactions'
-  const routeLabelMap = new Map([
-    ['/transactions', 'Jurnal'],
-    ['/transactions?tab=history', 'Riwayat'],
-    ['/transactions?tab=tagihan', 'Tagihan'],
-    ['/pembayaran', 'Pembayaran'],
-    ['/payroll', 'Absensi'],
-    ['/payroll?tab=worker', 'Pekerja'],
-    ['/payroll?tab=daily', 'Harian'],
-  ])
-  const routeLabel = routeLabelMap.get(path) ?? 'halaman tujuan'
+  const path = normalizeAssistantRoutePath(plan?.targetPath) ?? assistantRouteTargets.ledger
+  const routeLabel = getAssistantRouteLabel(path)
 
   return {
     text: locale.navigateIntro(routeLabel),
@@ -3833,31 +4134,248 @@ function buildAssistantQuickActionRows(language = 'id') {
   ]
 }
 
+function buildAssistantMenuBackRow(language = 'id') {
+  const locale = getLocaleText(language)
+
+  return [
+    [
+      {
+        text: locale.quickMenu,
+        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'menu'),
+      },
+    ],
+  ]
+}
+
+function buildAssistantTopLevelActionRows(language = 'id') {
+  const locale = getLocaleText(language)
+
+  return [
+    [
+      {
+        text: locale.quickAdd,
+        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'tambah'),
+      },
+      {
+        text: locale.quickOpen,
+        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'buka'),
+      },
+      {
+        text: locale.quickSearch,
+        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'cari'),
+      },
+    ],
+    [
+      {
+        text: locale.quickStatus,
+        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'status'),
+      },
+      {
+        text: locale.quickHistory,
+        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'riwayat'),
+      },
+      {
+        text: locale.quickAnalytics,
+        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'analytics'),
+      },
+    ],
+  ]
+}
+
 function buildAssistantRouteRows(language = 'id') {
   const locale = getLocaleText(language)
 
   return [
     [
       {
-        text: locale.openRoute(locale.routeLedger),
-        path: '/transactions',
+        text: locale.openRoute(getAssistantRouteLabel(assistantRouteTargets.dashboard)),
+        path: assistantRouteTargets.dashboard,
       },
       {
-        text: locale.openRoute(locale.routeHistory),
-        path: '/transactions?tab=history',
+        text: locale.openRoute(getAssistantRouteLabel(assistantRouteTargets.ledger)),
+        path: assistantRouteTargets.ledger,
       },
     ],
     [
       {
-        text: locale.openRoute(locale.routePayment),
-        path: '/pembayaran',
+        text: locale.openRoute(getAssistantRouteLabel(assistantRouteTargets.billLedger)),
+        path: assistantRouteTargets.billLedger,
       },
       {
-        text: locale.openRoute(locale.routeAttendance),
-        path: '/payroll?tab=worker',
+        text: locale.openRoute(getAssistantRouteLabel(assistantRouteTargets.payment)),
+        path: assistantRouteTargets.payment,
       },
     ],
+    [
+      {
+        text: locale.openRoute(getAssistantRouteLabel(assistantRouteTargets.attendance)),
+        path: assistantRouteTargets.attendance,
+      },
+    ],
+    ...buildAssistantMenuBackRow(language),
   ]
+}
+
+function buildAssistantCreateRouteRows(language = 'id') {
+  const locale = getLocaleText(language)
+
+  return [
+    [
+      {
+        text: locale.addRoute(getAssistantRouteLabel(assistantRouteTargets.incomeCreate)),
+        path: assistantRouteTargets.incomeCreate,
+      },
+      {
+        text: locale.addRoute(getAssistantRouteLabel(assistantRouteTargets.expenseCreate)),
+        path: assistantRouteTargets.expenseCreate,
+      },
+    ],
+    [
+      {
+        text: locale.addRoute(getAssistantRouteLabel(assistantRouteTargets.loanCreate)),
+        path: assistantRouteTargets.loanCreate,
+      },
+      {
+        text: locale.addRoute(getAssistantRouteLabel(assistantRouteTargets.invoiceCreate)),
+        path: assistantRouteTargets.invoiceCreate,
+      },
+    ],
+    [
+      {
+        text: locale.addRoute(getAssistantRouteLabel(assistantRouteTargets.attendanceCreate)),
+        path: assistantRouteTargets.attendanceCreate,
+      },
+    ],
+    ...buildAssistantMenuBackRow(language),
+  ]
+}
+
+function buildAssistantSearchRouteRows(language = 'id') {
+  const locale = getLocaleText(language)
+
+  return [
+    [
+      {
+        text: locale.searchRoute('Pemasukan'),
+        path: assistantRouteTargets.ledger,
+      },
+      {
+        text: locale.searchRoute('Pengeluaran'),
+        path: assistantRouteTargets.ledger,
+      },
+    ],
+    [
+      {
+        text: locale.searchRoute('Pinjaman'),
+        path: assistantRouteTargets.ledger,
+      },
+      {
+        text: locale.searchRoute('Faktur Barang'),
+        path: assistantRouteTargets.billLedger,
+      },
+    ],
+    [
+      {
+        text: locale.searchRoute('Absensi'),
+        path: assistantRouteTargets.payroll,
+      },
+    ],
+    ...buildAssistantMenuBackRow(language),
+  ]
+}
+
+function buildSettlementBucketSummaryRows(rows = []) {
+  return assistantStatusBucketRoutes.map((bucket) => {
+    const bucketRows = rows.filter(
+      (row) => normalizeText(row?.bill_status, '').toLowerCase() === bucket.status
+    )
+    const financeCount = bucketRows.filter((row) => !isPayrollRow(row)).length
+    const payrollCount = bucketRows.filter((row) => isPayrollRow(row)).length
+
+    return {
+      ...bucket,
+      totalCount: bucketRows.length,
+      financeCount,
+      payrollCount,
+    }
+  })
+}
+
+function buildSettlementBucketReply(language = 'id', rows = [], surface = 'status') {
+  const locale = getLocaleText(language)
+  const summaries = buildSettlementBucketSummaryRows(rows)
+  const prompt = surface === 'history' ? locale.historyRoutePrompt : locale.statusRoutePrompt
+
+  return {
+    text: [
+      prompt,
+      ...summaries.map((bucket) => {
+        const detailParts = [
+          `Finance ${bucket.financeCount}`,
+          `Payroll ${bucket.payrollCount}`,
+        ].filter((item) => !item.endsWith(' 0'))
+
+        return `• ${bucket.label}: ${bucket.totalCount} item${detailParts.length > 0 ? ` (${detailParts.join(', ')})` : ''}`
+      }),
+    ].join('\n'),
+    buttonRows: [
+      ...summaries.map((bucket) => [
+        {
+          text: `${bucket.label}${bucket.totalCount > 0 ? ` (${bucket.totalCount})` : ''}`,
+          path: bucket.path,
+        },
+      ]),
+      ...buildAssistantMenuBackRow(language),
+    ],
+    buttons: [],
+    needsClarification: false,
+    appendQuickActions: false,
+    facts: {
+      surface,
+      rowCount: rows.length,
+      buckets: summaries.map((bucket) => ({
+        status: bucket.status,
+        label: bucket.label,
+        totalCount: bucket.totalCount,
+        financeCount: bucket.financeCount,
+        payrollCount: bucket.payrollCount,
+        path: bucket.path,
+      })),
+    },
+  }
+}
+
+function buildDirectRouteReply(language = 'id', path, action = 'open') {
+  const locale = getLocaleText(language)
+  const routeLabel = getAssistantRouteLabel(path)
+  const buttonText =
+    action === 'add'
+      ? locale.addRoute(routeLabel)
+      : action === 'search'
+        ? locale.searchRoute(routeLabel)
+        : locale.openRoute(routeLabel)
+
+  return {
+    text: buttonText,
+    buttonRows: [
+      [
+        {
+          text: buttonText,
+          path,
+        },
+      ],
+      ...buildAssistantMenuBackRow(language),
+    ],
+    buttons: [],
+    needsClarification: false,
+    appendQuickActions: false,
+    facts: {
+      surface: `${action}_route_direct`,
+      path,
+      routeLabel,
+      action,
+    },
+  }
 }
 
 function buildAssistantClarificationRows(clarificationCode, language = 'id', facts = {}) {
@@ -3963,10 +4481,7 @@ function buildCommandMenuReply(language = 'id') {
 
   return {
     text: [locale.menuIntro, locale.menuHint].join('\n'),
-    buttonRows: [
-      ...buildAssistantQuickActionRows(language),
-      ...buildAssistantRouteRows(language),
-    ],
+    buttonRows: buildAssistantTopLevelActionRows(language),
     buttons: [],
     needsClarification: false,
     appendQuickActions: false,
@@ -3983,13 +4498,50 @@ function buildOpenRouteReply(language = 'id') {
     text: locale.openRoutePrompt,
     buttonRows: buildAssistantRouteRows(language),
     buttons: [],
-    needsClarification: true,
+    needsClarification: false,
     appendQuickActions: false,
     facts: {
-      clarificationCode: 'specific_filter',
       surface: 'route_picker',
     },
   }
+}
+
+function buildTambahReply(language = 'id') {
+  const locale = getLocaleText(language)
+
+  return {
+    text: locale.addRoutePrompt,
+    buttonRows: buildAssistantCreateRouteRows(language),
+    buttons: [],
+    needsClarification: false,
+    appendQuickActions: false,
+    facts: {
+      surface: 'create_route_picker',
+    },
+  }
+}
+
+function buildCariReply(language = 'id') {
+  const locale = getLocaleText(language)
+
+  return {
+    text: locale.searchRoutePrompt,
+    buttonRows: buildAssistantSearchRouteRows(language),
+    buttons: [],
+    needsClarification: false,
+    appendQuickActions: false,
+    facts: {
+      surface: 'search_route_picker',
+    },
+  }
+}
+
+function buildStatusSummaryReply(language = 'id', rows = []) {
+  return buildSettlementBucketReply(language, rows, 'status')
+}
+
+function buildRiwayatSummaryReply(language = 'id', rows = []) {
+  return buildSettlementBucketReply(language, rows, 'history')
 }
 
 function buildInlineKeyboardButton(botUsername, button) {
@@ -4110,7 +4662,11 @@ async function processAssistantCommand({
     null
   const workspaceName =
     selectedMembership?.team_name ?? normalizeText(sessionPayload.last_workspace_name, null)
+  const commandArgs = normalizeText(command?.args, '')
   const commandInput = buildAssistantCommandInput(command?.command, command?.args)
+  const directCreateRoutePath = resolveAssistantCreateRoutePath(commandArgs)
+  const directCoreRoutePath = resolveAssistantCoreRoutePath(commandArgs)
+  const directSearchRoutePath = resolveAssistantSearchRoutePath(commandArgs)
 
   if (command?.command === 'menu') {
     if (chatId && telegramUserId) {
@@ -4131,6 +4687,132 @@ async function processAssistantCommand({
       chatId,
       text: menuReply.text,
       replyMarkup: buildReplyMarkup(getTelegramBotUsername(), menuReply, {
+        language: responseLanguage,
+      }),
+      replyToMessageId,
+    })
+
+    return { processed: true }
+  }
+
+  if (command?.command === 'tambah') {
+    const addReply = directCreateRoutePath
+      ? buildDirectRouteReply(responseLanguage, directCreateRoutePath, 'add')
+      : buildTambahReply(responseLanguage)
+
+    await sendTelegramMessage({
+      botToken,
+      chatId,
+      text: addReply.text,
+      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), addReply, {
+        language: responseLanguage,
+      }),
+      replyToMessageId,
+    })
+
+    return { processed: true }
+  }
+
+  if (command?.command === 'buka' && directCoreRoutePath) {
+    const openReply = buildDirectRouteReply(responseLanguage, directCoreRoutePath, 'open')
+
+    await sendTelegramMessage({
+      botToken,
+      chatId,
+      text: openReply.text,
+      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), openReply, {
+        language: responseLanguage,
+      }),
+      replyToMessageId,
+    })
+
+    return { processed: true }
+  }
+
+  if (command?.command === 'cari' && directSearchRoutePath) {
+    const searchReply = buildDirectRouteReply(responseLanguage, directSearchRoutePath, 'search')
+
+    await sendTelegramMessage({
+      botToken,
+      chatId,
+      text: searchReply.text,
+      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), searchReply, {
+        language: responseLanguage,
+      }),
+      replyToMessageId,
+    })
+
+    return { processed: true }
+  }
+
+  if (command?.command === 'buka' && !commandArgs) {
+    const openReply = buildOpenRouteReply(responseLanguage)
+
+    await sendTelegramMessage({
+      botToken,
+      chatId,
+      text: openReply.text,
+      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), openReply, {
+        language: responseLanguage,
+      }),
+      replyToMessageId,
+    })
+
+    return { processed: true }
+  }
+
+  if (command?.command === 'cari' && !commandArgs) {
+    const searchReply = buildCariReply(responseLanguage)
+
+    await sendTelegramMessage({
+      botToken,
+      chatId,
+      text: searchReply.text,
+      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), searchReply, {
+        language: responseLanguage,
+      }),
+      replyToMessageId,
+    })
+
+    return { processed: true }
+  }
+
+  if (command?.command === 'status' && !commandArgs) {
+    const statusRows = await loadWorkspaceRows(
+      adminClient,
+      selectedMembership?.team_id,
+      { search: {} },
+      { limit: 100, outstandingOnly: false }
+    )
+    const statusReply = buildStatusSummaryReply(responseLanguage, statusRows)
+
+    await sendTelegramMessage({
+      botToken,
+      chatId,
+      text: statusReply.text,
+      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), statusReply, {
+        language: responseLanguage,
+      }),
+      replyToMessageId,
+    })
+
+    return { processed: true }
+  }
+
+  if (command?.command === 'riwayat' && !commandArgs) {
+    const historyRows = await loadWorkspaceRows(
+      adminClient,
+      selectedMembership?.team_id,
+      { search: {} },
+      { limit: 100, outstandingOnly: false }
+    )
+    const historyReply = buildRiwayatSummaryReply(responseLanguage, historyRows)
+
+    await sendTelegramMessage({
+      botToken,
+      chatId,
+      text: historyReply.text,
+      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), historyReply, {
         language: responseLanguage,
       }),
       replyToMessageId,

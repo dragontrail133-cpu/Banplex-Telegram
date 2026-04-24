@@ -15,11 +15,35 @@ test.describe('report surfaces', () => {
 
   test('opens tagihan summary', async ({ page }) => {
     await openApp(page, '/tagihan')
-    await expectHeading(page, 'Tagihan')
+    await expect(page).toHaveURL(/\/transactions\?tab=tagihan$/)
+    await expectHeading(page, 'Jurnal')
+    await expect(page.getByRole('button', { name: 'Tagihan', pressed: true })).toBeVisible({
+      timeout: 15000,
+    })
+    await expect(page.getByText('Belum Ada Tagihan', { exact: false })).toBeVisible({
+      timeout: 15000,
+    })
+  })
+
+  test('redirects the project report alias to reports', async ({ page }) => {
+    await openApp(page, '/projects')
+    await expect(page).toHaveURL(/\/reports(?:\?.*)?$/)
+    await expect(page.getByRole('button', { name: 'Unduh PDF' })).toBeVisible({
+      timeout: 15000,
+    })
+  })
+
+  test('redirects pdf settings alias to reports anchor', async ({ page }) => {
+    await openApp(page, '/projects/pdf-settings')
+    await expect(page).toHaveURL(/\/reports(?:\?.*)?#pdf-settings$/)
+    await expect(page.getByRole('button', { name: 'Pengaturan PDF' })).toBeVisible({
+      timeout: 15000,
+    })
   })
 
   test('exports business report PDF', async ({ page }) => {
-    await openApp(page, '/projects')
+    await openApp(page, '/reports')
+    await expect(page).toHaveURL(/\/reports(?:\?.*)?$/)
 
     const downloadButton = page.getByRole('button', { name: 'Unduh PDF' })
     await expect(downloadButton).toBeVisible({ timeout: 15000 })
@@ -32,6 +56,6 @@ test.describe('report surfaces', () => {
     expect(reportPdfPath).toBeTruthy()
     expect((await readFile(reportPdfPath)).subarray(0, 5).toString('utf8')).toBe('%PDF-')
 
-    expect(reportPdf.suggestedFilename()).toContain('laporan-bisnis')
+    expect(reportPdf.suggestedFilename()).toContain('laporan-executive-finance')
   })
 })

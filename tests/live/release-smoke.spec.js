@@ -111,7 +111,7 @@ test.describe('live release smoke', () => {
     page,
     baseURL,
   }) => {
-    test.setTimeout(300000)
+    test.setTimeout(360000)
 
     const artifact = await createLiveSmokeArtifact({ baseURL })
     const attendanceDate = pickSmokeAttendanceDate()
@@ -148,8 +148,26 @@ test.describe('live release smoke', () => {
       timeout: 20000,
     })
 
+    let attendanceNotifyBody = null
+    let resolveAttendanceNotify = null
+    const attendanceNotifyPromise = new Promise((resolve) => {
+      resolveAttendanceNotify = resolve
+    })
+
     await artifact.addStep('create_attendance')
-    await openLiveApp(page, '/attendance/new')
+    await openLiveApp(page, '/attendance/new', {
+      telegram: {},
+      mockApi: {
+        notify: async ({ body }) => {
+          attendanceNotifyBody = body
+          resolveAttendanceNotify?.(body)
+
+          return {
+            success: true,
+          }
+        },
+      },
+    })
     await expect(page.getByRole('heading', { name: 'Absensi Harian' })).toBeVisible({
       timeout: 20000,
     })
@@ -247,6 +265,16 @@ test.describe('live release smoke', () => {
     await expect(page.getByText('Record ini akan muncul di payroll dan bisa ditagihkan per worker.')).toBeVisible({
       timeout: 20000,
     })
+
+    const attendanceNotify = await attendanceNotifyPromise
+    expect(attendanceNotifyBody).toBeTruthy()
+    expect(attendanceNotify?.notificationType ?? attendanceNotifyBody?.notificationType).toBe(
+      'attendance'
+    )
+    expect(Number(attendanceNotifyBody?.recordCount ?? 0)).toBeGreaterThan(0)
+    expect(attendanceNotifyBody?.routePath).toBe('/payroll?tab=daily')
+    expect(attendanceNotifyBody?.projectName).toBeTruthy()
+
     await dismissToastIfVisible(page)
 
     await artifact.addStep('generate_salary_bill')

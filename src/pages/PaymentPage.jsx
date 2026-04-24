@@ -500,12 +500,12 @@ function PaymentPage({ paymentType = 'bill', technicalView = false }) {
                 <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
                   Catatan
                 </span>
-                <textarea
-                  className="app-input min-h-28 w-full resize-none rounded-[20px] px-4 py-3 text-base"
-                  disabled={isLoadingRecord || !record}
-                  name="notes"
-                  onChange={handleChange}
-                  placeholder="Tambahkan catatan pembayaran jika perlu"
+              <textarea
+                className="app-input min-h-24 w-full resize-none rounded-[20px] px-4 py-3 text-base"
+                disabled={isLoadingRecord || !record}
+                name="notes"
+                onChange={handleChange}
+                placeholder="Tambahkan catatan pembayaran jika perlu"
                   value={formData.notes}
                 />
               </label>

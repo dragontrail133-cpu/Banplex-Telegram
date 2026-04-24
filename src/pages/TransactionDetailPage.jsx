@@ -11,12 +11,14 @@ import {
   PageHeader,
   AppTechnicalGrid,
 } from '../components/ui/AppPrimitives'
+import MaterialInvoiceDetailPanel from '../components/MaterialInvoiceDetailPanel'
+import TransactionDeleteDialog from '../components/TransactionDeleteDialog'
 import { formatAppDateLabel } from '../lib/date-time'
 import { savePaymentReceiptPdf } from '../lib/report-pdf'
 import {
-  canDeleteTransaction,
   canEditTransaction,
   formatCurrency,
+  hasMeaningfulText,
   formatPayrollSettlementLabel,
   formatTransactionTimestamp,
   getTransactionEditRoute,
@@ -24,12 +26,18 @@ import {
   getTransactionPaymentRoute,
   getTransactionSourceLabel,
   getTransactionTitle,
+  shouldHideTransactionAmount,
 } from '../lib/transaction-presentation'
+import {
+  canShowTransactionDelete,
+  getTransactionDeleteHistoryRoute,
+} from '../lib/transaction-delete'
 import { canPerformAttachmentAction } from '../lib/attachment-permissions'
 import {
   fetchHistoryTransactionByIdFromApi,
   fetchWorkspaceTransactionByIdFromApi,
 } from '../lib/transactions-api'
+import { fetchMaterialInvoiceByIdFromApi } from '../lib/records-api'
 import useAuthStore from '../store/useAuthStore'
 import useBillStore from '../store/useBillStore'
 import useDashboardStore from '../store/useDashboardStore'
@@ -167,9 +175,6 @@ function TransactionDetailPage({ technicalView = false }) {
   const softDeleteLoan = useIncomeStore((state) => state.softDeleteLoan)
   const fetchLoanById = useIncomeStore((state) => state.fetchLoanById)
   const softDeleteExpense = useTransactionStore((state) => state.softDeleteExpense)
-  const softDeleteMaterialInvoice = useTransactionStore(
-    (state) => state.softDeleteMaterialInvoice
-  )
   const fetchExpenseAttachments = useTransactionStore(
     (state) => state.fetchExpenseAttachments
   )
@@ -184,15 +189,13 @@ function TransactionDetailPage({ technicalView = false }) {
   const softDeleteAttendanceRecord = useAttendanceStore(
     (state) => state.softDeleteAttendanceRecord
   )
-  const fetchMaterialInvoiceById = useTransactionStore(
-    (state) => state.fetchMaterialInvoiceById
-  )
   const initialTransaction = location.state?.transaction ?? null
   const isOwner = currentRole === 'Owner'
   const [transaction, setTransaction] = useState(initialTransaction)
   const [billDetail, setBillDetail] = useState(null)
-  const [loanDetail, setLoanDetail] = useState(null)
   const [materialInvoiceDetail, setMaterialInvoiceDetail] = useState(null)
+  const [materialInvoiceError, setMaterialInvoiceError] = useState(null)
+  const [loanDetail, setLoanDetail] = useState(null)
   const [expenseAttachments, setExpenseAttachments] = useState(
     Array.isArray(initialTransaction?.attachments) ? initialTransaction.attachments : []
   )
@@ -208,6 +211,9 @@ function TransactionDetailPage({ technicalView = false }) {
   const [isLoadingAttachments, setIsLoadingAttachments] = useState(false)
   const [recordError, setRecordError] = useState(null)
   const [attachmentError, setAttachmentError] = useState(null)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [deleteDialogHistoryRoute, setDeleteDialogHistoryRoute] = useState(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const detailSurface = useMemo(() => getDetailSurface(location), [location])
   const isHistorySurface = detailSurface === 'riwayat' || detailSurface === 'history'
   const isPaymentSurface = detailSurface === 'pembayaran' || detailSurface === 'payment'
@@ -227,6 +233,8 @@ function TransactionDetailPage({ technicalView = false }) {
 
     async function hydrateChildCollections(nextTransaction) {
       setBillDetail(null)
+      setMaterialInvoiceDetail(null)
+      setMaterialInvoiceError(null)
       setLoanDetail(null)
 
       const nextBillId =
@@ -251,6 +259,31 @@ function TransactionDetailPage({ technicalView = false }) {
         }
       }
 
+      if (isMaterialExpense(nextTransaction)) {
+        try {
+          const nextMaterialInvoice = await fetchMaterialInvoiceByIdFromApi(nextTransaction.id, {
+            includeDeleted: true,
+          })
+
+          if (isActive) {
+            setMaterialInvoiceDetail(nextMaterialInvoice)
+            setMaterialInvoiceError(
+              nextMaterialInvoice ? null : 'Faktur material tidak ditemukan.'
+            )
+          }
+        } catch (invoiceError) {
+          if (isActive) {
+            setMaterialInvoiceDetail(null)
+            setMaterialInvoiceError(
+              invoiceError instanceof Error
+                ? invoiceError.message
+                : 'Gagal memuat rincian faktur material.'
+            )
+            console.error('Gagal memuat detail faktur material:', invoiceError)
+          }
+        }
+      }
+
       if (nextTransaction?.sourceType === 'loan-disbursement') {
         try {
           const nextLoan = await fetchLoanById(nextTransaction.id)
@@ -270,6 +303,7 @@ function TransactionDetailPage({ technicalView = false }) {
     if (!currentTeamId) {
       setTransaction(null)
       setMaterialInvoiceDetail(null)
+      setMaterialInvoiceError(null)
       setRecordError('Workspace aktif belum tersedia.')
       setIsLoadingRecord(false)
 
@@ -282,7 +316,6 @@ function TransactionDetailPage({ technicalView = false }) {
 
     if (cachedTransaction) {
       setTransaction(cachedTransaction)
-      setMaterialInvoiceDetail(null)
       setRecordError(null)
       setIsLoadingRecord(false)
     }
@@ -291,6 +324,8 @@ function TransactionDetailPage({ technicalView = false }) {
       setIsLoadingRecord(true)
       setRecordError(null)
       setBillDetail(null)
+      setMaterialInvoiceDetail(null)
+      setMaterialInvoiceError(null)
       setLoanDetail(null)
 
       try {
@@ -305,7 +340,6 @@ function TransactionDetailPage({ technicalView = false }) {
         if (!nextTransaction) {
           if (!cachedTransaction) {
             setTransaction(null)
-            setMaterialInvoiceDetail(null)
             setRecordError('Transaksi tidak ditemukan.')
           }
           return
@@ -313,25 +347,6 @@ function TransactionDetailPage({ technicalView = false }) {
 
         setTransaction(nextTransaction)
         await hydrateChildCollections(nextTransaction)
-
-        if (isMaterialExpense(nextTransaction)) {
-          try {
-            const nextMaterialInvoice = await fetchMaterialInvoiceById(nextTransaction.id, {
-              includeDeleted: true,
-            })
-
-            if (isActive) {
-              setMaterialInvoiceDetail(nextMaterialInvoice)
-            }
-          } catch (materialInvoiceError) {
-            if (isActive) {
-              setMaterialInvoiceDetail(null)
-              console.error('Gagal memuat detail faktur material:', materialInvoiceError)
-            }
-          }
-        } else if (isActive) {
-          setMaterialInvoiceDetail(null)
-        }
       } catch (error) {
         if (!isActive) {
           return
@@ -339,7 +354,6 @@ function TransactionDetailPage({ technicalView = false }) {
 
         if (!cachedTransaction) {
           setTransaction(null)
-          setMaterialInvoiceDetail(null)
           setRecordError(
             error instanceof Error ? error.message : 'Gagal memuat detail transaksi.'
           )
@@ -360,7 +374,6 @@ function TransactionDetailPage({ technicalView = false }) {
     currentTeamId,
     initialTransaction,
     isHistorySurface,
-    fetchMaterialInvoiceById,
     fetchBillById,
     fetchLoanById,
     transactionId,
@@ -454,30 +467,34 @@ function TransactionDetailPage({ technicalView = false }) {
     })
   }
 
-  const handleDelete = async () => {
-    if (!transaction || isHistorySurface || !canDeleteTransaction(transaction)) {
+  const handleDelete = () => {
+    if (!transaction || isHistorySurface || !canShowTransactionDelete(transaction)) {
       return
     }
 
-    const shouldDelete = window.confirm(`Hapus ${getTransactionTitle(transaction)}?`)
+    setRecordError(null)
+    setDeleteDialogHistoryRoute(hasPaymentHistory ? getTransactionDeleteHistoryRoute(transaction) : null)
+    setIsDeleteDialogOpen(true)
+  }
 
-    if (!shouldDelete) {
+  const performDelete = async () => {
+    if (!transaction || isHistorySurface || !canShowTransactionDelete(transaction) || hasPaymentHistory) {
       return
     }
 
     try {
+      setIsDeleting(true)
       setRecordError(null)
 
       if (transaction.sourceType === 'project-income') {
-        await softDeleteProjectIncome(transaction.id, transaction.updated_at ?? transaction.updatedAt ?? null)
+        await softDeleteProjectIncome(
+          transaction.id,
+          transaction.updated_at ?? transaction.updatedAt ?? null
+        )
       } else if (transaction.sourceType === 'loan-disbursement') {
         await softDeleteLoan(transaction.id, transaction.updated_at ?? transaction.updatedAt ?? null)
       } else if (transaction.sourceType === 'expense') {
-        if (isMaterialExpense(transaction)) {
-          await softDeleteMaterialInvoice(transaction.id, transaction.updated_at ?? transaction.updatedAt ?? null)
-        } else {
-          await softDeleteExpense(transaction.id, transaction.updated_at ?? transaction.updatedAt ?? null)
-        }
+        await softDeleteExpense(transaction.id, transaction.updated_at ?? transaction.updatedAt ?? null)
       } else if (transaction.sourceType === 'attendance-record') {
         await softDeleteAttendanceRecord({
           attendanceId: transaction.id,
@@ -495,6 +512,10 @@ function TransactionDetailPage({ technicalView = false }) {
       navigate('/transactions/recycle-bin', { replace: true })
     } catch (error) {
       setRecordError(error instanceof Error ? error.message : 'Gagal menghapus transaksi.')
+    } finally {
+      setIsDeleting(false)
+      setIsDeleteDialogOpen(false)
+      setDeleteDialogHistoryRoute(null)
     }
   }
 
@@ -570,6 +591,7 @@ function TransactionDetailPage({ technicalView = false }) {
 
   const presentation = getTransactionPresentation(transaction)
   const { Icon } = presentation
+  const hideTransactionAmount = shouldHideTransactionAmount(transaction)
   const editButtonLabel =
     transaction.document_type === 'surat_jalan' ? 'Konversi Surat Jalan' : 'Edit'
   const attachmentTitle = isMaterialExpense(transaction)
@@ -589,7 +611,14 @@ function TransactionDetailPage({ technicalView = false }) {
         ''
     ).trim().toLowerCase() === 'gaji'
   const loanSnapshot = isLoanDisbursement ? loanDetail ?? transaction : null
-  const loanSettlementLabel = formatLoanSettlementLabel(loanSnapshot?.status ?? transaction.status)
+  const loanSettlementLabel = formatLoanSettlementLabel(
+    loanSnapshot?.status ??
+      loanSnapshot?.bill_status ??
+      loanSnapshot?.bill?.status ??
+      transaction.status ??
+      transaction.bill_status ??
+      transaction.bill?.status
+  )
   const loanOutstandingAmount = Number(
     loanSnapshot?.remaining_amount ?? loanSnapshot?.remainingAmount ?? 0
   )
@@ -643,14 +672,23 @@ function TransactionDetailPage({ technicalView = false }) {
       0
   )
   const canEdit = !isHistorySurface && !isPaymentSurface && canEditTransaction(transaction)
-  const canDelete = !isHistorySurface && !isPaymentSurface && canDeleteTransaction(transaction)
+  const canDelete = !isHistorySurface && !isPaymentSurface && canShowTransactionDelete(transaction)
   const paymentRoute = isHistorySurface || isPaymentSurface ? null : getTransactionPaymentRoute(transaction)
   const billPaymentHistory = billPayments
   const loanPaymentHistory = loanPayments
   const activePaymentHistory = isLoanDisbursement ? loanPaymentHistory : billPaymentHistory
   const hasPaymentHistory = activePaymentHistory.length > 0
   const hasAttachmentHistory = expenseAttachments.length > 0
+  const hasMaterialInvoiceDetail = isMaterialExpense(transaction)
+  const materialInvoiceTabLabel =
+    String(transaction?.document_type ?? '').trim().toLowerCase() === 'surat_jalan'
+      ? 'Surat Jalan'
+      : 'Faktur'
   const availableDetailTabs = [{ value: 'info', label: 'Info' }]
+
+  if (hasMaterialInvoiceDetail) {
+    availableDetailTabs.push({ value: 'invoice', label: `Rincian ${materialInvoiceTabLabel}` })
+  }
 
   if (hasPaymentHistory) {
     availableDetailTabs.push({ value: 'history', label: 'Riwayat' })
@@ -958,42 +996,53 @@ function TransactionDetailPage({ technicalView = false }) {
           </div>
         ) : null}
 
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
-            Nominal
-          </p>
-          <p
-            className={`mt-2 text-2xl font-bold tracking-[-0.04em] ${presentation.amountClassName}`}
-          >
-            {presentation.amountPrefix}
-            {formatCurrency(Math.abs(Number(transaction.amount ?? 0)))}
-          </p>
-        </div>
+        {!hideTransactionAmount ? (
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
+              Nominal
+            </p>
+            <p
+              className={`mt-2 text-2xl font-bold tracking-[-0.04em] ${presentation.amountClassName}`}
+            >
+              {presentation.amountPrefix}
+              {formatCurrency(Math.abs(Number(transaction.amount ?? 0)))}
+            </p>
+          </div>
+        ) : null}
       </AppCardStrong>
 
       {billSnapshot && !isAttendanceRecord ? (
-        <div className="grid gap-3 sm:grid-cols-3">
+        hideTransactionAmount ? (
           <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
             <p className="app-meta">{isPayrollBill ? 'Status Tagihan Upah' : 'Status Tagihan'}</p>
             <p className="text-sm font-semibold text-[var(--app-text-color)]">
-              {isPayrollBill
-                ? payrollSettlementLabel
-                : billSnapshot.status ?? '-'}
+              {isPayrollBill ? payrollSettlementLabel : billSnapshot.status ?? '-'}
             </p>
           </AppCard>
-          <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-            <p className="app-meta">{isPayrollBill ? 'Nominal Tagihan Upah' : 'Nominal Tagihan'}</p>
-            <p className="text-sm font-semibold text-[var(--app-text-color)]">
-              {formatCurrency(billSnapshot.amount ?? 0)}
-            </p>
-          </AppCard>
-          <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-            <p className="app-meta">{isPayrollBill ? 'Sisa Tagihan Upah' : 'Sisa Tagihan'}</p>
-            <p className="text-sm font-semibold text-[var(--app-text-color)]">
-              {formatCurrency(billSnapshot.remainingAmount ?? billSnapshot.remaining_amount ?? 0)}
-            </p>
-          </AppCard>
-        </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
+              <p className="app-meta">{isPayrollBill ? 'Status Tagihan Upah' : 'Status Tagihan'}</p>
+              <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                {isPayrollBill
+                  ? payrollSettlementLabel
+                  : billSnapshot.status ?? '-'}
+              </p>
+            </AppCard>
+            <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
+              <p className="app-meta">{isPayrollBill ? 'Nominal Tagihan Upah' : 'Nominal Tagihan'}</p>
+              <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                {formatCurrency(billSnapshot.amount ?? 0)}
+              </p>
+            </AppCard>
+            <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
+              <p className="app-meta">{isPayrollBill ? 'Sisa Tagihan Upah' : 'Sisa Tagihan'}</p>
+              <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                {formatCurrency(billSnapshot.remainingAmount ?? billSnapshot.remaining_amount ?? 0)}
+              </p>
+            </AppCard>
+          </div>
+        )
       ) : null}
 
       {billSnapshot && isAttendanceRecord ? (
@@ -1093,43 +1142,16 @@ function TransactionDetailPage({ technicalView = false }) {
         </AppCard>
       ) : null}
 
-      {materialInvoiceDetail?.items?.length > 0 ? (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3 px-1">
-            <div>
-              <p className="app-kicker">Rincian Item</p>
-              <h3 className="app-section-title">Faktur Material</h3>
-            </div>
-            <span className="app-chip">{materialInvoiceDetail.items.length} item</span>
-          </div>
-
-          <div className="space-y-3">
-            {materialInvoiceDetail.items.map((item) => (
-              <AppCard key={item.id ?? `${item.sort_order}-${item.item_name}`} className="space-y-2 bg-[var(--app-surface-strong-color)]">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-[var(--app-text-color)]">
-                      {item.item_name}
-                    </p>
-                    <p className="mt-1 text-xs text-[var(--app-hint-color)]">
-                      Qty {item.qty} • Urutan {item.sort_order}
-                    </p>
-                  </div>
-                  <p className="shrink-0 text-sm font-semibold text-[var(--app-text-color)]">
-                    {formatCurrency(item.line_total ?? 0)}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs text-[var(--app-hint-color)]">
-                  <span className="app-chip">Harga {formatCurrency(item.unit_price ?? 0)}</span>
-                  <span className="app-chip">Subtotal {formatCurrency(item.line_total ?? 0)}</span>
-                </div>
-              </AppCard>
-            ))}
-          </div>
-        </div>
+        </>
       ) : null}
 
-        </>
+      {resolvedDetailTab === 'invoice' ? (
+        <MaterialInvoiceDetailPanel
+          billDetail={billDetail}
+          error={materialInvoiceError}
+          invoice={materialInvoiceDetail}
+          isLoading={isLoadingRecord && !materialInvoiceDetail}
+        />
       ) : null}
 
       {resolvedDetailTab === 'history' ? (
@@ -1173,9 +1195,11 @@ function TransactionDetailPage({ technicalView = false }) {
                         <p className="mt-1 text-xs leading-5 text-[var(--app-hint-color)]">
                           {paymentDateLabel}
                         </p>
-                        <p className="mt-1 text-xs leading-5 text-[var(--app-hint-color)]">
-                          {formatValue(payment.notes)}
-                        </p>
+                        {hasMeaningfulText(payment.notes) ? (
+                          <p className="mt-1 text-xs leading-5 text-[var(--app-hint-color)]">
+                            {formatValue(payment.notes)}
+                          </p>
+                        ) : null}
                       </div>
 
                       <div className="flex shrink-0 items-center gap-2">
@@ -1381,6 +1405,43 @@ function TransactionDetailPage({ technicalView = false }) {
           ) : null}
         </div>
       ) : null}
+      <TransactionDeleteDialog
+        confirmLabel="Hapus Transaksi"
+        description={getTransactionSourceLabel(transaction)}
+        historyRoute={hasPaymentHistory ? deleteDialogHistoryRoute : null}
+        isConfirming={isDeleting}
+        open={isDeleteDialogOpen}
+        onClose={() => {
+          setIsDeleteDialogOpen(false)
+          setDeleteDialogHistoryRoute(null)
+        }}
+        onConfirm={performDelete}
+        onOpenHistory={(route) => {
+          setIsDeleteDialogOpen(false)
+          setDeleteDialogHistoryRoute(null)
+
+          if (!route) {
+            return
+          }
+
+          navigate(route, {
+            state: {
+              transaction,
+              detailSurface: 'riwayat',
+            },
+          })
+        }}
+        title={
+          hasPaymentHistory
+            ? 'Transaksi sudah memiliki pembayaran'
+            : `Konfirmasi Hapus ${getTransactionTitle(transaction)}`
+        }
+        warning={
+          hasPaymentHistory
+            ? 'Transaksi ini sudah memiliki pembayaran. Buka riwayat tagihan untuk meninjau pembayaran sebelum memutuskan langkah berikutnya.'
+            : 'Transaksi akan dipindahkan ke arsip dan dapat dipulihkan dari halaman recycle bin.'
+        }
+      />
     </PageShell>
   )
 }

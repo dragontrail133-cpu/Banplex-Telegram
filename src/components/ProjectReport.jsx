@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import useAuthStore from '../store/useAuthStore'
 import useReportStore from '../store/useReportStore'
+import useMasterStore from '../store/useMasterStore'
 import useTelegram from '../hooks/useTelegram'
 import {
   REPORT_KIND_OPTIONS,
@@ -20,6 +21,7 @@ import {
   formatReportPeriodLabel,
   getReportKindOption,
   getBusinessSourceLabel,
+  getPartyStatementSourceLabel,
 } from '../lib/business-report'
 import { formatAppDateLabel } from '../lib/date-time'
 import {
@@ -76,6 +78,19 @@ function getSummaryCards(reportKind, summary = {}) {
     ]
   }
 
+  if (
+    reportKind === 'creditor_statement' ||
+    reportKind === 'supplier_statement' ||
+    reportKind === 'worker_statement'
+  ) {
+    return [
+      { label: 'Saldo Awal', value: formatCurrency(summary.opening_balance), icon: WalletCards },
+      { label: 'Total Debit', value: formatCurrency(summary.total_debit), icon: Receipt },
+      { label: 'Total Kredit', value: formatCurrency(summary.total_credit), icon: CreditCard },
+      { label: 'Saldo Akhir', value: formatCurrency(summary.closing_balance ?? summary.outstanding_amount), icon: Coins },
+    ]
+  }
+
   if (reportKind === 'cash_flow') {
     return [
       { label: 'Cash In', value: formatCurrency(summary.total_inflow), icon: WalletCards },
@@ -97,6 +112,66 @@ function getProjectLabel(summary) {
   return summary?.project_name ?? summary?.name ?? 'Proyek tanpa nama'
 }
 
+function getCreditorLabel(summary) {
+  return summary?.creditor_name ?? summary?.name ?? 'Kreditur tanpa nama'
+}
+
+function getSupplierLabel(summary) {
+  return summary?.supplier_name ?? summary?.name ?? 'Supplier tanpa nama'
+}
+
+function getWorkerLabel(summary) {
+  return summary?.worker_name ?? summary?.name ?? 'Pekerja tanpa nama'
+}
+
+function getPartyStatementEntityLabel(reportKind) {
+  if (reportKind === 'supplier_statement') {
+    return 'Supplier'
+  }
+
+  if (reportKind === 'worker_statement') {
+    return 'Pekerja'
+  }
+
+  return 'Kreditur'
+}
+
+function getPartyStatementTitle(reportKind) {
+  if (reportKind === 'supplier_statement') {
+    return 'Transaksi Supplier'
+  }
+
+  if (reportKind === 'worker_statement') {
+    return 'Transaksi Pekerja'
+  }
+
+  return 'Transaksi Kreditur'
+}
+
+function getPartyStatementEmptyDescription(reportKind) {
+  if (reportKind === 'supplier_statement') {
+    return 'Statement supplier membutuhkan satu supplier terpilih terlebih dahulu.'
+  }
+
+  if (reportKind === 'worker_statement') {
+    return 'Statement pekerja membutuhkan satu pekerja terpilih terlebih dahulu.'
+  }
+
+  return 'Statement kreditur membutuhkan satu kreditur terpilih terlebih dahulu.'
+}
+
+function getPartyStatementPartyLabel(partyType, summary) {
+  if (partyType === 'supplier') {
+    return getSupplierLabel(summary)
+  }
+
+  if (partyType === 'worker') {
+    return getWorkerLabel(summary)
+  }
+
+  return getCreditorLabel(summary)
+}
+
 function ProjectReport() {
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false)
   const { tg } = useTelegram()
@@ -104,6 +179,7 @@ function ProjectReport() {
   const reportKind = useReportStore((state) => state.reportKind)
   const reportPeriod = useReportStore((state) => state.reportPeriod)
   const selectedProjectId = useReportStore((state) => state.selectedProjectId)
+  const selectedPartyId = useReportStore((state) => state.selectedPartyId)
   const projectSummaries = useReportStore((state) => state.projectSummaries)
   const reportData = useReportStore((state) => state.reportData)
   const isLoading = useReportStore((state) => state.isLoading)
@@ -125,6 +201,13 @@ function ProjectReport() {
   const setReportKind = useReportStore((state) => state.setReportKind)
   const setReportPeriod = useReportStore((state) => state.setReportPeriod)
   const setSelectedProjectId = useReportStore((state) => state.setSelectedProjectId)
+  const setSelectedPartyId = useReportStore((state) => state.setSelectedPartyId)
+  const fundingCreditors = useMasterStore((state) => state.fundingCreditors)
+  const suppliers = useMasterStore((state) => state.suppliers)
+  const workers = useMasterStore((state) => state.workers)
+  const fetchFundingCreditors = useMasterStore((state) => state.fetchFundingCreditors)
+  const fetchSuppliers = useMasterStore((state) => state.fetchSuppliers)
+  const fetchWorkers = useMasterStore((state) => state.fetchWorkers)
 
   useEffect(() => {
     void fetchProjectSummaries({ force: true }).catch((fetchError) => {
@@ -146,27 +229,99 @@ function ProjectReport() {
     void fetchBusinessReportData().catch((fetchError) => {
       console.error('Gagal memuat data laporan:', fetchError)
     })
-  }, [fetchBusinessReportData, reportKind, reportPeriod.dateFrom, reportPeriod.dateTo, selectedProjectId])
+  }, [
+    fetchBusinessReportData,
+    reportKind,
+    reportPeriod.dateFrom,
+    reportPeriod.dateTo,
+    selectedProjectId,
+    selectedPartyId,
+  ])
+
+  useEffect(() => {
+    if (!currentTeamId) {
+      return
+    }
+
+    void fetchFundingCreditors({ force: true }).catch((fetchError) => {
+      console.error('Gagal memuat kreditur pendanaan:', fetchError)
+    })
+  }, [currentTeamId, fetchFundingCreditors])
+
+  useEffect(() => {
+    if (!currentTeamId || reportKind !== 'supplier_statement') {
+      return
+    }
+
+    void fetchSuppliers({ force: true }).catch((fetchError) => {
+      console.error('Gagal memuat supplier:', fetchError)
+    })
+  }, [currentTeamId, fetchSuppliers, reportKind])
+
+  useEffect(() => {
+    if (!currentTeamId || reportKind !== 'worker_statement') {
+      return
+    }
+
+    void fetchWorkers({ force: true }).catch((fetchError) => {
+      console.error('Gagal memuat pekerja:', fetchError)
+    })
+  }, [currentTeamId, fetchWorkers, reportKind])
 
   const selectedKindOption = getReportKindOption(reportKind)
   const periodLabel = formatReportPeriodLabel(reportPeriod.dateFrom, reportPeriod.dateTo)
   const summaryCards = getSummaryCards(reportKind, reportData?.summary ?? {})
+  const selectedPartyType =
+    reportKind === 'supplier_statement'
+      ? 'supplier'
+      : reportKind === 'worker_statement'
+        ? 'worker'
+      : reportKind === 'creditor_statement'
+        ? 'creditor'
+        : null
+  const selectedPartyOptions =
+    selectedPartyType === 'supplier'
+      ? suppliers
+      : selectedPartyType === 'worker'
+        ? workers
+        : fundingCreditors
+  const selectedPartySummary = useMemo(
+    () =>
+      selectedPartyOptions.find(
+        (party) => String(party.id ?? '').trim() === String(selectedPartyId ?? '').trim()
+      ) ?? null,
+    [selectedPartyOptions, selectedPartyId]
+  )
   const selectedProjectSummary = useMemo(
     () => projectSummaries.find((summary) => String(summary.project_id ?? '').trim() === String(selectedProjectId ?? '').trim()) ?? null,
     [projectSummaries, selectedProjectId]
   )
   const isTelegramMiniWeb = tg != null
+  const isPartyStatement = selectedPartyType != null
+  const hasSelectedProject = reportKind !== 'project_pl' || Boolean(selectedProjectId)
+  const hasSelectedParty = !isPartyStatement || Boolean(selectedPartyId)
   const canDownloadPdf =
-    !isPdfGenerating && !isReportLoading && (reportKind !== 'project_pl' || Boolean(selectedProjectId))
+    !isPdfGenerating && !isReportLoading && hasSelectedProject && hasSelectedParty
   const canSendPdfToDm =
     isTelegramMiniWeb &&
     !isPdfDelivering &&
     !isReportLoading &&
-    (reportKind !== 'project_pl' || Boolean(selectedProjectId))
+    hasSelectedProject &&
+    hasSelectedParty
   const reportTabOptions = useMemo(
     () => REPORT_KIND_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
     []
   )
+  const filterSheetDescription =
+    reportKind === 'project_pl'
+      ? 'Atur periode dan Unit Kerja yang ingin ditampilkan.'
+      : reportKind === 'supplier_statement'
+        ? 'Atur periode dan supplier yang ingin ditampilkan.'
+        : reportKind === 'worker_statement'
+          ? 'Atur periode dan pekerja yang ingin ditampilkan.'
+        : reportKind === 'creditor_statement'
+          ? 'Atur periode dan kreditur yang ingin ditampilkan.'
+        : 'Atur periode dan cakupan yang ingin ditampilkan.'
 
   const handleRefresh = () => {
     void fetchBusinessReportData({ force: true }).catch((fetchError) => {
@@ -215,13 +370,27 @@ function ProjectReport() {
             />
           </div>
           <div className="min-w-0 space-y-1 sm:border-t sm:border-[var(--app-border-color)] sm:pt-3">
-            <p className="app-meta">{reportKind === 'project_pl' ? 'Unit Kerja' : 'Cakupan'}</p>
+            <p className="app-meta">
+              {reportKind === 'project_pl'
+                ? 'Unit Kerja'
+                : reportKind === 'supplier_statement'
+                  ? 'Supplier'
+                  : reportKind === 'worker_statement'
+                    ? 'Pekerja'
+                  : reportKind === 'creditor_statement'
+                    ? 'Kreditur'
+                  : 'Cakupan'}
+            </p>
             <p className="text-sm font-medium leading-6 text-[var(--app-text-color)]">
               {reportKind === 'project_pl'
                 ? selectedProjectSummary
                   ? getProjectLabel(selectedProjectSummary)
                   : 'Belum dipilih'
-                : 'Seluruh Unit Kerja'}
+                : isPartyStatement
+                  ? selectedPartySummary
+                    ? getPartyStatementPartyLabel(selectedPartyType, selectedPartySummary)
+                    : 'Belum dipilih'
+                  : 'Seluruh Unit Kerja'}
             </p>
           </div>
         </div>
@@ -264,7 +433,7 @@ function ProjectReport() {
       </AppCardStrong>
 
       <AppSheet
-        description="Atur periode dan Unit Kerja yang ingin ditampilkan."
+        description={filterSheetDescription}
         onClose={() => setIsFilterSheetOpen(false)}
         open={isFilterSheetOpen}
         title="Filter Laporan"
@@ -306,6 +475,36 @@ function ProjectReport() {
                 ))}
               </AppSelect>
             </label>
+          ) : reportKind === 'supplier_statement' ||
+            reportKind === 'worker_statement' ||
+            reportKind === 'creditor_statement' ? (
+            <label className="space-y-2">
+              <span className="app-meta">
+                {selectedPartyType === 'supplier'
+                  ? 'Pilih Supplier'
+                  : selectedPartyType === 'worker'
+                    ? 'Pilih Pekerja'
+                    : 'Pilih Kreditur'}
+              </span>
+              <AppSelect
+                disabled={isReportLoading || selectedPartyOptions.length === 0}
+                onChange={(event) => setSelectedPartyId(event.target.value)}
+                value={selectedPartyId}
+              >
+                <option value="">
+                  {selectedPartyType === 'supplier'
+                    ? 'Pilih Supplier'
+                    : selectedPartyType === 'worker'
+                      ? 'Pilih Pekerja'
+                      : 'Pilih Kreditur'}
+                </option>
+                {selectedPartyOptions.map((party) => (
+                  <option key={party.id} value={party.id}>
+                    {getPartyStatementPartyLabel(selectedPartyType, party)}
+                  </option>
+                ))}
+              </AppSelect>
+            </label>
           ) : null}
         </div>
       </AppSheet>
@@ -323,8 +522,24 @@ function ProjectReport() {
       ) : null}
 
       <AppCardStrong className="space-y-4 p-4 sm:p-5">
-        <SectionHeader eyebrow="Ringkasan" title={selectedKindOption.label} description={periodLabel} />
-        {isReportLoading && !reportData ? (
+        <SectionHeader
+          eyebrow={isPartyStatement ? getPartyStatementEntityLabel(reportKind) : 'Ringkasan'}
+          title={
+            isPartyStatement
+              ? selectedPartySummary
+                ? getPartyStatementPartyLabel(selectedPartyType, selectedPartySummary)
+                : `Pilih ${getPartyStatementEntityLabel(reportKind)}`
+              : selectedKindOption.label
+          }
+          description={periodLabel}
+        />
+        {isPartyStatement && !selectedPartyId ? (
+          <AppEmptyState
+            icon={<FileText className="h-5 w-5" />}
+            title={`Pilih ${getPartyStatementEntityLabel(reportKind)}`}
+            description={getPartyStatementEmptyDescription(reportKind)}
+          />
+        ) : isReportLoading && !reportData ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="h-24 animate-pulse rounded-[24px] bg-[var(--app-surface-low-color)]" />
             <div className="h-24 animate-pulse rounded-[24px] bg-[var(--app-surface-low-color)]" />
@@ -339,6 +554,65 @@ function ProjectReport() {
           </div>
         )}
       </AppCardStrong>
+
+      {isPartyStatement && selectedPartyId ? (
+        <AppCardStrong className="space-y-4 p-4 sm:p-5">
+          <SectionHeader
+            eyebrow="Rincian"
+            title={getPartyStatementTitle(reportKind)}
+            description={
+              selectedPartySummary
+                ? getPartyStatementPartyLabel(selectedPartyType, selectedPartySummary)
+                : periodLabel
+            }
+          />
+          {isReportLoading && !reportData ? (
+            <div className="space-y-2">
+              <div className="h-16 animate-pulse rounded-[20px] bg-[var(--app-surface-low-color)]" />
+              <div className="h-16 animate-pulse rounded-[20px] bg-[var(--app-surface-low-color)]" />
+              <div className="h-16 animate-pulse rounded-[20px] bg-[var(--app-surface-low-color)]" />
+            </div>
+          ) : Array.isArray(reportData?.rows) && reportData.rows.length > 0 ? (
+            <div className="space-y-2">
+              {reportData.rows.map((row, index) => (
+                <AppListCard
+                  key={`${row.id ?? row.transactionDate ?? 'row'}-${index}`}
+                  className="bg-[var(--app-surface-strong-color)]"
+                >
+                  <AppListRow
+                    title={formatAppDateLabel(row.transactionDate)}
+                    description={`${getPartyStatementSourceLabel(row.sourceType)} • ${
+                      String(row.description ?? '').trim() || '-'
+                    }`}
+                    trailing={
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                          {formatCurrency(row.amount)}
+                        </p>
+                        <p className="text-xs text-[var(--app-hint-color)]">
+                          Saldo: {formatCurrency(row.balance)}
+                        </p>
+                      </div>
+                    }
+                  />
+                </AppListCard>
+              ))}
+            </div>
+          ) : (
+            <AppEmptyState
+              icon={<FileText className="h-5 w-5" />}
+              title="Belum ada transaksi"
+              description={
+                selectedPartyType === 'supplier'
+                  ? 'Statement supplier akan menampilkan transaksi pada periode yang dipilih.'
+                  : selectedPartyType === 'worker'
+                    ? 'Statement pekerja akan menampilkan transaksi pada periode yang dipilih.'
+                  : 'Statement kreditur akan menampilkan transaksi pada periode yang dipilih.'
+              }
+            />
+          )}
+        </AppCardStrong>
+      ) : null}
 
       {reportKind === 'executive_finance' ? (
         <div className="space-y-4">

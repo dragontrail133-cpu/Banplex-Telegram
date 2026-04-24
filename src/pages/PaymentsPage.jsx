@@ -33,6 +33,7 @@ import {
   formatTransactionTimestamp,
   getTransactionSourceLabel,
   getTransactionTitle,
+  hasMeaningfulText,
 } from '../lib/transaction-presentation'
 import {
   fetchDeletedBillPaymentsFromApi,
@@ -307,9 +308,12 @@ function PayrollGroupDetail({
                       </p>
                       <p className="mt-1 text-xs leading-5 text-[var(--app-hint-color)]">
                         {formatAppDateLabel(entry.paymentDate)}
-                        {' · '}
-                        {entry.notes || 'Tanpa catatan'}
                       </p>
+                      {hasMeaningfulText(entry.notes) ? (
+                        <p className="mt-1 text-xs leading-5 text-[var(--app-hint-color)]">
+                          {String(entry.notes ?? '').trim()}
+                        </p>
+                      ) : null}
                       <p className="mt-1 text-xs leading-5 text-[var(--app-hint-color)]">
                         {entry.billLabel}
                       </p>

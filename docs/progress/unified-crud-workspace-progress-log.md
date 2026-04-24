@@ -23,13 +23,648 @@ Dokumen ini adalah log progres khusus untuk stream `Unified CRUD Workspace`.
 - Active stream: `Unified CRUD Workspace`
 - Referensi plan: `docs/unified-crud-workspace-plan-2026-04-18.md`
 - Primary freeze authority: `docs/freeze/00-index.md`
-- Current task: `UCW-329`
-- Current status: `validated`
-- Catatan fokus: Team Invite harus ringkas untuk owner, dengan field picker bottom sheet tanpa search dan tanpa helper/deskripsi tambahan.
-- Catatan brief terbaru: surface invite ini bukan surface edukasi; copy layar harus dipangkas ke label, action, dan data status saja.
-- Catatan audit freeze terbaru: scope tetap sempit pada `TeamInvitePage`, `TeamInviteManager`, dan `MasterPickerField`; tidak ada perubahan kontrak invite atau bot write boundary.
-- Status transitions touched: `UCW-242` tetap `audit_required`; `UCW-243`, `UCW-244`, `UCW-245`, `UCW-246`, `UCW-247`, `UCW-248`, `UCW-249`, `UCW-250`, `UCW-251`, `UCW-252`, `UCW-253`, `UCW-254`, `UCW-255`, `UCW-256`, `UCW-257`, `UCW-258`, `UCW-259`, `UCW-260`, `UCW-261`, `UCW-262`, `UCW-263`, `UCW-264`, `UCW-265`, `UCW-266`, `UCW-267`, `UCW-268`, `UCW-269`, `UCW-270`, `UCW-271`, `UCW-272`, `UCW-273`, `UCW-274`, `UCW-275`, `UCW-276`, dan `UCW-277` tetap `validated`; `UCW-278` sekarang `validated`; `UCW-279` tetap `validated`; `UCW-280` tetap `validated`; `UCW-281` tetap `validated`; `UCW-283` tetap `validated`; `UCW-284` tetap `validated`; `UCW-285` tetap `validated`; `UCW-286` sekarang `validated`; `UCW-287` sekarang `validated`; `UCW-288` sekarang `validated`; `UCW-289` sekarang `validated`; `UCW-290` sekarang `validated`; `UCW-291` sekarang `validated`; `UCW-292` sekarang `validated`; `UCW-293` sekarang `validated`; `UCW-294` sekarang `validated`; `UCW-295` sekarang `validated`; `UCW-296` sekarang `validated`; `UCW-297` sekarang `validated`; `UCW-298` sekarang `validated`; `UCW-299` sekarang `validated`; `UCW-300` sekarang `validated`; `UCW-301` tetap `validated`; `UCW-302` sekarang `validated`; `UCW-303` sekarang `validated`; `UCW-304` sekarang `validated`; `UCW-305` sekarang `validated`; `UCW-306` sekarang `validated`; `UCW-307` sekarang `validated`; `UCW-308` tetap `validated`; `UCW-309` tetap `validated`; `UCW-310` tetap `validated`; `UCW-311` tetap `validated`; `UCW-312` tetap `validated`; `UCW-313` tetap `validated`; `UCW-314` tetap `validated`; `UCW-315` tetap `validated`; `UCW-316` tetap `validated`; `UCW-317` sekarang `validated`; `UCW-318` sekarang `validated`; `UCW-319` sekarang `validated`; `UCW-320` sekarang `validated`; `UCW-321` sekarang `validated`; `UCW-322` tetap `planned`; `UCW-323` sekarang `deferred`; `UCW-324` sekarang `validated`; `UCW-325` sekarang `validated`; `UCW-326` sekarang `validated`; `UCW-327` sekarang `validated`; `UCW-328` sekarang `deferred`; `UCW-329` sekarang `validated`.
-- Review order: invite shell -> role picker -> invite card -> member list -> verifier lint/build.
+- Current task: `UCW-356`
+- Current status: `audit_required`
+- Catatan fokus: route canonical `/reports` sudah dipatch; `/projects`, `/projects/pdf-settings`, dan `/proyek` menjadi alias direct ke canonical path, tetapi build dan smoke masih perlu validasi di environment yang mengizinkan spawn.
+- Catatan brief terbaru: user meminta implementasi plan audit/arsitektur tanpa asumsi liar; batch aktif kini mencakup runtime route `/reports`, bukan hanya dokumen audit.
+- Catatan audit freeze terbaru: `Report PDF` tetap output turunan, `pdf_settings` tetap konfigurasi branding, dan `Payment Receipt PDF` tetap terpisah dari laporan bisnis.
+- Status transitions touched: `UCW-353` tetap `validated`; `UCW-354` tetap `planned`; `UCW-355` tetap `validated`; `UCW-356` sekarang `audit_required`.
+- Review order: submit mobile income -> implement route `/reports` -> validasi lint/build/smoke, lalu lanjut ke `UCW-357` bila environment sudah aman.
+
+### [2026-04-24] `UCW-356` - Tambahkan canonical route `/reports` tanpa mengubah generator PDF
+- Status: `audit_required`
+- Ringkasan:
+  - Route canonical `/reports` sekarang memakai `ProjectsPage`; `/projects`, `/projects/pdf-settings`, dan `/proyek` langsung mengarah ke `/reports` atau `/reports#pdf-settings`.
+  - Link internal report hub di Dashboard dan More page sudah pindah ke `/reports`, dan smoke report sudah diarahkan ke canonical path.
+- Addendum audit:
+  - Implementasi ini sengaja tidak mengubah `ProjectReport`, `useReportStore`, `reports-api`, atau generator PDF.
+  - `npx eslint` pada file yang diubah lolos, tetapi `npm run build` dan Playwright smoke masih terhenti oleh `spawn EPERM` di environment sandbox ini.
+- File berubah:
+  - `src/App.jsx`
+  - `src/pages/Dashboard.jsx`
+  - `src/pages/MorePage.jsx`
+  - `src/pages/ProjectPdfSettingsPage.jsx`
+  - `src/pages/ProjectsPage.jsx`
+  - `tests/e2e/report.spec.js`
+  - `tests/live/report-pdf-delivery.spec.js`
+- Audit hasil:
+  - Canonical route `reports` sudah hidup, dan alias legacy tetap kompatibel.
+  - URL alias PDF settings mendarat ke anchor `#pdf-settings` pada route canonical.
+- Validasi:
+  - `npx eslint src/App.jsx src/pages/ProjectsPage.jsx src/pages/ProjectPdfSettingsPage.jsx src/pages/Dashboard.jsx src/pages/MorePage.jsx tests/e2e/report.spec.js tests/live/report-pdf-delivery.spec.js`
+  - `npm run build` -> failed: `spawn EPERM`
+  - `npx playwright test tests/e2e/report.spec.js --reporter=line --output=.pw-route-v1-results` -> failed: `spawn EPERM`
+- Risiko/regresi:
+  - Because build/smoke are blocked by the sandbox, runtime confirmation should still be rerun in CI or a less restricted shell before marking the route fully validated.
+- Next allowed task:
+  - Re-run `UCW-356` validation in an environment that allows build and Playwright workers, then advance to `UCW-357` if the route is clean.
+
+### [2026-04-24] `UCW-355` - Audit entrypoint dan arsitektur `/reports` untuk PDF hub
+- Status: `validated`
+- Ringkasan:
+  - Entry point aktual unduh PDF laporan Kreditur/Supplier/Pekerja dipetakan dari runtime repo: saat ini masih berada di `/projects` melalui `ProjectReport`, `useReportStore`, `/api/records?resource=reports`, dan generator `src/lib/report-pdf.js`.
+  - Keputusan arsitektur user dikunci ke canonical route `/reports`, compatibility alias `/projects`, dan pola PDF on-demand hybrid tanpa mengubah runtime pada batch ini.
+- Addendum audit:
+  - Dokumen audit baru memisahkan repo truth, target route, data flow, format PDF profesional, risiko skala, dan micro-task implementasi lanjutan.
+  - Scope sengaja docs-only; tidak ada route, store, API, migration, dependency, atau test runtime yang diubah.
+- File berubah:
+  - `docs/report-pdf-hub-entrypoint-audit-2026-04-24.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - `/projects` terkonfirmasi sebagai hub aktual dan `/projects/pdf-settings` sebagai alias settings saat ini.
+  - `/reports` belum diimplementasi; micro-task lanjutan memerintahkan route canonical baru sambil mempertahankan alias lama.
+  - Guard dataset besar belum diberi angka asumtif; dokumen menurunkan task audit query/index sebelum hardening skala runtime.
+- Validasi:
+  - `git diff --check`
+- Risiko/regresi:
+  - Runtime risk nol karena batch ini hanya menambah dokumen dan update backlog/progress.
+- Next allowed task:
+  - `UCW-354` untuk sinkronkan AQ gate atau `UCW-356` untuk implement route `/reports`, sesuai instruksi user berikutnya.
+
+### [2026-04-24] `UCW-353` - Stabilkan submit mobile create `project-income` pada routed form
+- Status: `validated`
+- Ringkasan:
+  - Footer action pada routed income form mobile sekarang tetap terlihat dan bisa diklik ketika field terakhir masih fokus, sehingga `Simpan Termin Proyek` benar-benar mengirim `POST /api/transactions`.
+  - Shell form tetap memakai jalur routed yang sama; yang diubah hanya perilaku footer/action bar agar tidak disembunyikan terlalu agresif saat input aktif di mobile.
+- Addendum audit:
+  - Fix dipusatkan di `FormLayout` dan `IncomeForm`; action bar embedded diberi mode fixed yang pointer-safe, lalu keyboard visibility tidak lagi menyembunyikan footer untuk form income ini.
+  - Scope tetap di shell form mobile dan test E2E terkait; tidak ada perubahan contract submit transaksi atau payload bisnis.
+- File berubah:
+  - `src/components/layouts/FormLayout.jsx`
+  - `src/components/IncomeForm.jsx`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Mobile submit `project-income` dari route `/edit/project-income/new` sekarang lolos tanpa perlu force click atau hack scroll, dan request POST benar-benar terkirim.
+  - Failure full-file di `tests/e2e/edit.spec.js` yang lain tetap terpisah dan tidak berkaitan dengan task ini.
+- Validasi:
+  - `npx playwright test tests/e2e/edit.spec.js -g "saves project income from the new form" --project=mobile-chrome --reporter=line`
+  - `npm run lint`
+  - `npm run build`
+- Risiko/regresi:
+  - Perilaku footer keyboard untuk form income sekarang lebih permisif; jika nanti perlu sembunyikan action saat keyboard aktif, itu perlu lane UI tersendiri.
+- Next allowed task:
+  - `UCW-354` untuk sinkronkan AQ gate dengan coverage smoke aktual dan gap yang masih tersisa
+
+### [2026-04-24] `UCW-352` - Sinkronkan smoke mock `Tagihan` dan PDF dengan contract UI terbaru
+- Status: `validated`
+- Ringkasan:
+  - Smoke mock `Tagihan` sekarang mengikuti route canonical `/transactions?tab=tagihan` dengan heading `Jurnal`, tab `Tagihan` aktif, dan empty state yang sesuai.
+  - Smoke PDF di `tests/e2e/report.spec.js` kini memakai fixture laporan deterministik sehingga tombol `Unduh PDF` benar-benar menghasilkan file PDF, bukan bergantung pada seed live.
+- Addendum audit:
+  - Fixture report di helper mock browser sengaja cukup untuk `executive_finance` karena itu jalur PDF smoke yang dipakai suite mock saat ini; live lane tetap ditangani di spec terpisah.
+  - Contract UI tidak diubah; yang diselaraskan adalah assertion smoke mock dan data fallback yang menghidupi download.
+- File berubah:
+  - `tests/e2e/helpers/app.js`
+  - `tests/e2e/report.spec.js`
+  - `docs/release-aq-gate.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - `/tagihan` sekarang diverifikasi sebagai redirect ke `Jurnal` dengan tab `Tagihan` aktif, sesuai contract route yang hidup.
+  - PDF mock kini menghasilkan `laporan-executive-finance` dengan data fixture deterministik, sehingga browser download asserted secara nyata.
+- Validasi:
+  - `npx playwright test tests/e2e/report.spec.js --reporter=line`
+  - `npm run lint`
+- Risiko/regresi:
+  - Fixture report mock ini sengaja minimum dan fokus ke jalur `executive_finance`; jika smoke report lain ditambah nanti, ia perlu fixture sendiri atau override yang lebih spesifik.
+- Next allowed task:
+  - `UCW-353` untuk menstabilkan submit mobile create `project-income` pada routed form
+
+### [2026-04-24] `UCW-351` - Stabilkan bootstrap auth mock browser dan first-route smoke
+- Status: `validated`
+- Ringkasan:
+  - Helper Playwright mock browser sekarang menanam dev-auth bypass ke `sessionStorage` sebelum navigation dan menunggu loading screen workspace hilang, jadi smoke root dan first-route tidak lagi race dengan bootstrap auth.
+- Addendum audit:
+  - Fix berada di helper smoke `tests/e2e/helpers/app.js`; runtime store auth dan config Playwright tetap tidak berubah.
+  - Smoke chromium dan mobile untuk `auth`, `create`, dan `telegram-shell` lolos setelah helper menunggu auth bootstrap selesai.
+- File berubah:
+  - `tests/e2e/helpers/app.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - `openApp()` kini lebih deterministik untuk `/`, `/attendance/new`, dan route shell lain karena assert tidak lagi dimulai saat layar `Sedang memuat workspace` masih aktif.
+  - Scope tetap di harness smoke; tidak ada perubahan contract auth production.
+- Validasi:
+  - `npx playwright test tests/e2e/auth.spec.js tests/e2e/create.spec.js --reporter=line`
+  - `npx playwright test tests/e2e/telegram-shell.spec.js --reporter=line`
+- Risiko/regresi:
+  - Helper kini menunggu hingga 25 detik untuk loading workspace hilang; jika bootstrap auth benar-benar melambat di atas itu, smoke akan tetap gagal dengan sinyal yang jelas.
+- Next allowed task:
+  - `UCW-352` untuk menyinkronkan smoke mock `Tagihan` dan PDF dengan contract UI terbaru
+
+### [2026-04-24] `UCW-350` - Stabilkan unit test lifecycle invite token agar tidak bergantung tanggal hari ini
+- Status: `validated`
+- Ringkasan:
+  - Helper lifecycle invite menerima reference clock opsional, dan unit test mapping invite memakai timestamp deterministik agar status `active`/`expired` stabil lintas tanggal runtime.
+- Addendum audit:
+  - `mapInviteToken()` tetap backward-compatible untuk caller runtime karena parameter jam referensi bersifat opsional dan default-nya masih `Date.now()`.
+  - Fixture test sekarang mengecek jalur `active` dan `expired` terhadap reference clock yang sama, sehingga tanggal hari ini tidak lagi memengaruhi hasil.
+- File berubah:
+  - `src/lib/team-invite.js`
+  - `tests/unit/team-invite-store.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - `lifecycle_status` dan `lifecycle_status_label` sekarang deterministik terhadap jam referensi yang disuplai test.
+  - Scope tetap sempit di helper invite dan unit test store tim; tidak ada perubahan runtime store atau workflow invite lintas UI/server.
+- Validasi:
+  - `node --test tests/unit/team-invite-store.test.js`
+  - `npm run lint`
+- Risiko/regresi:
+  - Caller baru yang ingin hasil deterministik tetap harus meneruskan reference clock eksplisit; perilaku runtime default tetap bergantung `Date.now()`.
+- Next allowed task:
+  - `UCW-351` untuk menstabilkan bootstrap auth mock browser dan first-route smoke
+
+### [2026-04-24] `DOC-PLAN-UPDATE-06` - Audit hasil smoke global dan turunkan backlog sempit
+- Status: `validated`
+- Ringkasan:
+  - Mengaudit hasil validasi global repo saat ini, lalu menurunkannya menjadi backlog stream yang lebih sempit dan bisa dieksekusi berurutan.
+  - Menutup mismatch planning untuk `UCW-348`, lalu menambahkan lane follow-up khusus untuk lint gate, deterministic unit test, harness browser mock, smoke report/PDF, submit mobile income, dan sinkronisasi AQ docs.
+- File berubah:
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - `UCW-348` diselaraskan menjadi `validated` di planning agar tidak tertinggal dari log implementasi sebelumnya.
+  - Task baru yang belum tercakup sudah ditambahkan: `UCW-349`, `UCW-350`, `UCW-351`, `UCW-352`, `UCW-353`, dan `UCW-354`.
+  - Urutan berikutnya dipersempit: mulai dari baseline audit (`npm run lint` yang masih noisy), lalu deterministik unit test dan stabilisasi harness browser mock sebelum menyentuh drift smoke report atau submit mobile create income.
+- Validasi:
+  - Validasi ringan dokumen: cek konsistensi checklist planning baru, referensi task baru, dan sinkronisasi status planning/progress
+- Risiko/regresi:
+  - Worktree repo saat audit masih penuh perubahan WIP, jadi backlog baru memetakan temuan pada state repo aktif sekarang, bukan baseline commit bersih.
+  - Lane live write staging tetap belum boleh diasumsikan aman sebelum target staging-safe benar-benar dibuktikan terpisah.
+- Next allowed task:
+  - `UCW-349` untuk merapikan gate lint agar audit source repo kembali punya sinyal yang bersih
+
+### [2026-04-24] `UCW-349` - Rapikan gate lint agar artefak generated tidak mengotori audit repo
+- Status: `validated`
+- Ringkasan:
+  - `npm run lint` sekarang kembali membaca source repo aktif saja; artefak generated Playwright tidak lagi mengotori audit source code.
+  - Gate AQ juga ditegaskan supaya lint preflight diperlakukan sebagai source-only signal, bukan pemeriksaan output smoke yang sudah dihasilkan.
+- File berubah:
+  - `eslint.config.js`
+  - `docs/release-aq-gate.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - `globalIgnores()` sekarang menutup `playwright-report/**` dan `test-results/**`, yang sebelumnya membuat `eslint .` membaca bundle trace generated.
+  - Baseline lint repo kembali selaras dengan maksud gate: memeriksa source `src/api/tests/scripts` yang aktif, bukan artefak hasil smoke.
+  - Scope tetap sempit pada hygiene validation gate; tidak ada perubahan workflow bisnis, route, store, atau API runtime.
+- Validasi:
+  - `npm run lint`
+  - `git diff --check -- eslint.config.js docs/release-aq-gate.md docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko/regresi:
+  - Direktori generated baru di luar `playwright-report/` dan `test-results/` masih perlu ditambahkan eksplisit bila nanti ikut menghasilkan file JS.
+  - Task ini hanya membersihkan gate lint; failure unit/e2e yang sudah teridentifikasi di backlog lain tetap belum terselesaikan.
+- Next allowed task:
+  - `UCW-350` untuk menstabilkan unit test lifecycle invite token agar tidak bergantung tanggal hari ini
+
+### [2026-04-24] `UCW-347` - Ringkas field deskripsi/catatan dan sembunyikan notes kosong di detail
+- Status: `validated`
+- Ringkasan:
+  - Field textarea deskripsi dan catatan pada form aktif dipadatkan ke tinggi yang lebih hemat ruang tanpa mengubah contract submit.
+  - Notes kosong di detail/history surface tidak lagi dirender; UI hanya menampilkan catatan saat ada isi bermakna.
+- Addendum audit:
+  - `AppTextarea` dan textarea raw pada form terkait turun dari `min-h-28` ke `min-h-24`.
+  - Helper `hasMeaningfulText()` dipakai di detail transaksi, detail payroll worker, history pembayaran, dan detail material invoice supaya catatan kosong benar-benar hilang, bukan diganti placeholder.
+  - Refinement lanjutan sekarang memakai tinggi nominal `h-12` untuk textarea yang masih terlihat di form aktif, dan area catatan pada `ExpenseForm` serta `HrdPipeline` berubah ke collapse native agar ruang vertikal ikut turun.
+- File target:
+  - `src/components/HrdPipeline.jsx`
+  - `src/components/IncomeForm.jsx`
+  - `src/components/LoanForm.jsx`
+  - `src/components/MaterialInvoiceDetailPanel.jsx`
+  - `src/components/MaterialInvoiceForm.jsx`
+  - `src/components/ExpenseForm.jsx`
+  - `src/components/ui/AppPrimitives.jsx`
+  - `src/lib/transaction-presentation.js`
+  - `src/pages/PaymentPage.jsx`
+  - `src/pages/PayrollWorkerDetailPage.jsx`
+  - `src/pages/PaymentsPage.jsx`
+  - `src/pages/TransactionDetailPage.jsx`
+  - `tests/unit/transaction-presentation.test.js`
+- Validasi:
+  - `node --test tests/unit/transaction-presentation.test.js tests/unit/transaction-delete.test.js`
+  - `npx eslint src/components/ExpenseForm.jsx src/components/HrdPipeline.jsx src/components/IncomeForm.jsx src/components/LoanForm.jsx src/components/MaterialInvoiceDetailPanel.jsx src/components/MaterialInvoiceForm.jsx src/components/ui/AppPrimitives.jsx src/lib/transaction-presentation.js src/pages/PaymentPage.jsx src/pages/PayrollWorkerDetailPage.jsx src/pages/PaymentsPage.jsx src/pages/TransactionDetailPage.jsx tests/unit/transaction-presentation.test.js`
+  - `npm run build`
+
+### [2026-04-24] `UCW-347` - Ringkas field deskripsi/catatan dan sembunyikan notes kosong di detail
+- Status: `in_progress`
+- Ringkasan:
+  - Field textarea deskripsi dan catatan di form aktif diringkas supaya surface input tidak terlalu tinggi.
+  - Notes kosong di detail/history surface tidak lagi dirender; UI hanya menampilkan catatan ketika memang ada isi yang bermakna.
+- Addendum audit:
+  - Target compact textarea diturunkan dari 28px ke 24px untuk menjaga form tetap hemat ruang tanpa mengubah contract submit.
+  - Hiding notes mengikuti helper presentasi yang sama di transaction detail, payroll worker detail, payment history, dan detail material invoice.
+  - Routing canonical tetap code-owned; BotFather hanya visibility command list.
+- File target:
+  - `api/telegram-assistant.js`
+  - `src/lib/telegram-assistant-links.js`
+  - `src/lib/telegram-assistant-routing.js`
+  - `tests/unit/telegram-assistant-routing.test.js`
+  - `docs/freeze/01-planning-decision-freeze.md`
+  - `docs/freeze/02-prd-master.md`
+  - `docs/freeze/03-source-of-truth-contract-map.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+
+### [2026-04-24] `UCW-348` - Susun command bot step-by-step dengan `tambah`
+- Status: `validated`
+- Ringkasan:
+  - `Telegram assistant` dipetakan ke command step-by-step dengan `/tambah`, `/buka`, `/cari`, `/status`, `/riwayat`, dan `/analytics` sebagai surface resmi.
+  - `tambah` membuka domain input, `buka` membuka core surface, `cari` membuka picker domain-first, dan `status/riwayat` memakai summary bucket yang lebih ringkas.
+- Addendum audit:
+  - `/tambah` tetap deep-link only ke form input mini app, bukan write flow chat.
+  - Routing canonical tetap code-owned; BotFather hanya visibility command list.
+- File target:
+  - `api/telegram-assistant.js`
+  - `src/lib/telegram-assistant-links.js`
+  - `src/lib/telegram-assistant-routing.js`
+  - `tests/unit/telegram-assistant-routing.test.js`
+  - `docs/freeze/01-planning-decision-freeze.md`
+  - `docs/freeze/02-prd-master.md`
+  - `docs/freeze/03-source-of-truth-contract-map.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Validasi:
+  - `node --check api/telegram-assistant.js`
+  - `npx eslint api/telegram-assistant.js src/lib/telegram-assistant-links.js src/lib/telegram-assistant-routing.js tests/unit/telegram-assistant-routing.test.js`
+  - `node --test tests/unit/telegram-assistant-routing.test.js`
+  - `npm run build`
+  - `git diff --check -- api/telegram-assistant.js tests/unit/telegram-assistant-routing.test.js docs/freeze/01-planning-decision-freeze.md docs/freeze/02-prd-master.md docs/freeze/03-source-of-truth-contract-map.md docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
+
+### [2026-04-24] `UCW-346` - Koreksi badge row jurnal dan sembunyikan amount surat jalan
+- Status: `validated`
+- Ringkasan:
+  - Row jurnal di `TransactionsPage` kembali menaruh amount di atas, lalu creator badge dan status settlement dibedakan secara visual agar tidak terlihat duplikat.
+  - Amount untuk surat jalan disembunyikan di surface transaksi yang relevan, termasuk list jurnal, riwayat, recycle bin, dashboard recent items, dan detail transaksi.
+- Addendum audit:
+  - `getTransactionSettlementBadgeLabel()` sekarang punya fallback loan berbasis tagihan/amount bila status loan eksplisit kosong, jadi badge loan tetap muncul.
+  - `shouldHideTransactionAmount()` dipakai lintas surface agar surat jalan tidak menampilkan nominal, sementara faktur normal tetap aman.
+- File target:
+  - `src/components/MaterialInvoiceDetailPanel.jsx`
+  - `src/components/ui/ActionCard.jsx`
+  - `src/lib/transaction-presentation.js`
+  - `src/pages/Dashboard.jsx`
+  - `src/pages/DeletedTransactionDetailPage.jsx`
+  - `src/pages/HistoryPage.jsx`
+  - `src/pages/TransactionDetailPage.jsx`
+  - `src/pages/TransactionsPage.jsx`
+  - `src/pages/TransactionsRecycleBinPage.jsx`
+  - `tests/unit/transaction-presentation.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Validasi:
+  - `node --test tests/unit/transaction-presentation.test.js tests/unit/transaction-delete.test.js`
+  - `npx eslint src/components/MaterialInvoiceDetailPanel.jsx src/components/ui/ActionCard.jsx src/lib/transaction-presentation.js src/pages/Dashboard.jsx src/pages/DeletedTransactionDetailPage.jsx src/pages/HistoryPage.jsx src/pages/TransactionDetailPage.jsx src/pages/TransactionsPage.jsx src/pages/TransactionsRecycleBinPage.jsx tests/unit/transaction-presentation.test.js`
+  - `npm run build`
+
+### [2026-04-24] `UCW-322` - Smoke browser, Mini Web Telegram, dan fallback DM untuk laporan bisnis
+- Status: `validated`
+- Ringkasan:
+  - Smoke report/PDF divalidasi lewat `tests/live/report-pdf-delivery.spec.js`, yang membuka `ProjectsPage` di Telegram Mini Web, memverifikasi download PDF browser, dan memanggil `/api/report-pdf-delivery`.
+  - Flow ini dipisah dari serial release smoke besar supaya bukti report/PDF tetap bisa diuji walau lane baseline lain masih berat di env ini.
+- Addendum audit:
+  - `openLiveApp()` tetap bisa men-stub Telegram WebApp dan mock route delivery report, sehingga smoke menangkap request DM tanpa side effect Telegram nyata.
+  - Dedicated report smoke lolos di Chromium dan mobile-chrome, memverifikasi `%PDF-`, filename generator, dan payload `reportData`/`pdfSettings` untuk delivery DM.
+  - Coverage gate di `docs/release-aq-gate.md` sudah diperbarui supaya report/PDF live smoke tercatat sebagai browser download + DM trigger pada spec khusus, sementara comparator angka deterministik masih open.
+- File target:
+  - `tests/live/report-pdf-delivery.spec.js`
+  - `tests/live/helpers/live-app.js`
+  - `docs/release-aq-gate.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Validasi:
+  - `npx eslint tests/live/helpers/live-app.js tests/live/release-smoke.spec.js tests/live/report-pdf-delivery.spec.js`
+  - `npx playwright test --config=playwright.live.config.js tests/live/report-pdf-delivery.spec.js`
+
+### [2026-04-23] `UCW-342` - Kunci coherence route assistant dan label CTA canonical
+- Status: `validated`
+- Ringkasan:
+  - Route assistant, tombol inline, callback action, dan deep link sekarang mengarah ke canonical target yang sama agar navigasi bot tidak drift lintas surface.
+  - Task ini tetap Bot/AI-only dan tidak menyentuh smoke, PDF, atau runtime delivery lain.
+- Addendum audit:
+  - `buildNavigateReply()` sekarang memakai `getAssistantRouteLabel()` bersama `assistantRouteTargets`, jadi label navigasi payroll/worker/ledger tetap konsisten dengan route canonical.
+  - CTA route assistant memakai target canonical `/payroll?tab=daily` untuk attendance dan `/payroll?tab=worker` untuk worker, lalu label tombol dibaca dari helper route canonical yang sama.
+  - Unit test routing menutup label payroll/ledger canonical serta attendance deep link roundtrip tanpa regresi.
+- File target:
+  - `api/telegram-assistant.js`
+  - `src/lib/telegram-assistant-links.js`
+  - `src/lib/telegram-assistant-routing.js`
+  - `tests/unit/telegram-assistant-routing.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Validasi:
+  - `node --test tests/unit/telegram-assistant-routing.test.js`
+  - `npx eslint api/telegram-assistant.js src/lib/telegram-assistant-routing.js tests/unit/telegram-assistant-routing.test.js`
+  - `npm run build`
+
+### [2026-04-23] `UCW-343` - Kembalikan detail faktur material dan surat jalan ke tab canonical transaksi
+- Status: `validated`
+- Ringkasan:
+  - Detail awal transaksi tetap berjalan di `TransactionDetailPage`, sementara rincian faktur/surat jalan dibuka lewat tab `Rincian Faktur` agar surface canonical tidak pecah.
+  - Route legacy `/material-invoice/:id` tetap hidup sebagai alias redirect ke `/transactions/:id` supaya link lama tidak putus.
+- Addendum audit:
+  - `TransactionDetailPage` sekarang memuat detail material invoice dari fetch ulang terpisah dan merender item breakdown di tab khusus tanpa mengganggu tab info/history/attachments.
+  - `MaterialInvoiceDetailPage` cukup jadi redirect alias, dan workspace route material invoice sekarang langsung mengarah ke `/transactions/:id`.
+  - Playwright coverage menutup redirect alias dan visibility tab invoice pada route canonical.
+- File target:
+  - `api/transactions.js`
+  - `src/components/MaterialInvoiceDetailPanel.jsx`
+  - `src/lib/material-invoice.js`
+  - `src/pages/MaterialInvoiceDetailPage.jsx`
+  - `src/pages/TransactionDetailPage.jsx`
+  - `tests/e2e/transactions.spec.js`
+  - `tests/e2e/helpers/routes.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+
+### [2026-04-23] `UCW-344` - Pulihkan tombol simpan income baru yang tidak submit
+- Status: `validated`
+- Ringkasan:
+  - `IncomeForm` sekarang kembali menempel ke `formId` yang sama dengan footer action bar, jadi tombol simpan di create income benar-benar memicu submit form.
+  - Flow create pemasukan proyek lain tetap sama; perubahan hanya di wiring form submit dan coverage e2e.
+- Addendum audit:
+  - bug root cause-nya ada di form `IncomeForm` yang tidak punya `id`, sehingga tombol footer tidak terhubung ke form target.
+  - e2e create income menutup path submit dari pemilihan proyek sampai `POST /api/transactions` terkirim dan toast sukses muncul.
+- File target:
+  - `src/components/IncomeForm.jsx`
+  - `tests/e2e/edit.spec.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+
+### [2026-04-24] `UCW-345` - Tambahkan badge status pembayaran di row jurnal
+- Status: `validated`
+- Ringkasan:
+  - Row jurnal di `TransactionsPage` sekarang menampilkan badge settlement kecil `Lunas / Dicicil / Belum` di stack kanan bawah creator badge saat record punya billing status.
+  - Layout row lain tetap aman karena mode badge-before-amount hanya diaktifkan untuk row yang memang punya status settlement.
+- Addendum audit:
+  - helper `getTransactionSettlementBadgeLabel()` menormalisasi status dari `ledger_summary`, `bill`, `salaryBill`, dan `loan` tanpa mengubah label summary yang sudah ada.
+  - `ActionCard` sekarang bisa menumpuk badge sebelum amount untuk surface yang butuh, sementara default rendering surface lain tetap dipertahankan.
+- File target:
+  - `src/components/ui/ActionCard.jsx`
+  - `src/lib/transaction-presentation.js`
+  - `src/pages/TransactionsPage.jsx`
+  - `tests/unit/transaction-presentation.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Validasi:
+  - `node --test tests/unit/transaction-presentation.test.js tests/unit/transaction-delete.test.js`
+  - `npx eslint src/components/ui/ActionCard.jsx src/lib/transaction-presentation.js src/pages/TransactionsPage.jsx tests/unit/transaction-presentation.test.js`
+  - `npm run build`
+
+### [2026-04-23] `UCW-334` - Tambahkan contract laporan per pihak untuk kreditur, supplier, dan pekerja
+- Status: `validated`
+- Ringkasan:
+  - `api/records.js` sekarang melayani `reportKind=party_statement` untuk `creditor`, `supplier`, dan `worker`, dengan summary saldo, rows kronologis, dan opening balance yang dihitung dari riwayat sebelum periode.
+  - `src/lib/reports-api.js` menambah helper `fetchPartyStatementFromApi()` supaya surface UI nanti bisa memanggil contract ini tanpa mengubah helper laporan yang lama.
+- File target:
+  - `api/records.js`
+  - `src/lib/reports-api.js`
+  - `tests/unit/party-statement.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - statement bergantung pada kelengkapan row `bill`/`attendance`/`loan` yang sudah ada; kalau ada record tanpa tanggal valid, ordering tetap jalan tetapi period cutoff bisa kurang presisi.
+  - helper report ini masih backend-only; surface PDF baru tetap perlu micro-task lanjutan untuk konsumsi UI.
+- Audit hasil:
+  - helper ledger pure yang diekspor dari `api/records.js` membuktikan sorting debit/credit, opening balance, dan closing balance berjalan sesuai contract.
+  - reporter backend menutup tiga domain utama: kreditur (`loan` + `loan_payment`), supplier (`supplier_bill` + `supplier_expense` + `bill_payment`), dan worker (`salary_bill` + `attendance` + `bill_payment`).
+  - contract belum mengubah store atau halaman PDF existing, jadi surface yang sudah live tetap aman.
+- Validasi:
+  - `node --test tests/unit/party-statement.test.js`
+  - `npx eslint api/records.js src/lib/reports-api.js tests/unit/party-statement.test.js`
+  - `npm run build`
+
+### [2026-04-23] `UCW-335` - Rilis statement PDF kreditur v1 dari `ProjectsPage`
+- Status: `validated`
+- Ringkasan:
+  - `ProjectsPage` sekarang menambah jalur laporan kreditur yang memanggil contract `party_statement` dengan `partyType=creditor`, lalu merender summary saldo dan riwayat transaksi ke PDF.
+  - Surface ini sengaja dibatasi ke kreditur dulu supaya supplier dan worker tetap bisa dikerjakan sebagai micro-task terpisah.
+- File target:
+  - `src/components/ProjectReport.jsx`
+  - `src/store/useReportStore.js`
+  - `src/lib/business-report.js`
+  - `src/lib/report-pdf.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - `ProjectsPage` sekarang mengenali `creditor_statement`, memuat daftar kreditur dari master data, dan menampilkan statement preview serta summary saldo yang sesuai dengan contract backend.
+  - PDF renderer `party_statement` memakai header/footer shared, badge tema, file name yang spesifik per kreditur, dan tabel ledger debit/kredit/saldo.
+  - state report menolak download saat kreditur belum dipilih sehingga jalur unduh tidak lagi menghasilkan PDF kosong.
+- Validasi:
+  - `node --test tests/unit/business-report.test.js tests/unit/party-statement.test.js`
+  - `npx eslint src/components/ProjectReport.jsx src/store/useReportStore.js src/lib/business-report.js src/lib/report-pdf.js tests/unit/business-report.test.js tests/unit/party-statement.test.js`
+  - `npm run build` masih gagal di baseline repo yang sudah ada: `fetchMaterialInvoiceByIdFromApi` tidak diekspor dari `src/lib/transactions-api.js`.
+
+### [2026-04-23] `UCW-336` - Rilis statement PDF supplier v1 dari `ProjectsPage`
+- Status: `validated`
+- Ringkasan:
+  - `ProjectsPage` sekarang menambah jalur laporan supplier yang memanggil contract `party_statement` dengan `partyType=supplier`, lalu merender summary saldo dan riwayat transaksi ke PDF.
+  - Surface ini sengaja dibatasi ke supplier dulu supaya worker tetap bisa dikerjakan sebagai micro-task terpisah.
+- File target:
+  - `src/components/ProjectReport.jsx`
+  - `src/store/useReportStore.js`
+  - `src/lib/business-report.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - picker supplier bergantung pada data master `suppliers`; kalau master belum termuat, UI akan tetap menahan download sampai pilihan ada.
+  - statement supplier memakai contract yang sama dengan kreditur, jadi regresi terbesar ada di branching UI/store yang harus tetap memetakan `partyType=supplier` dengan benar.
+- Audit hasil:
+  - `ProjectsPage` sekarang mengenali `supplier_statement`, menampilkan picker supplier dari master data, dan merender summary serta daftar transaksi supplier dengan label yang sesuai.
+  - `useReportStore` mengarah ke `fetchPartyStatementFromApi({ partyType: 'supplier' })` saat report kind supplier dipilih, dan reset `selectedPartyId` saat kind berubah supaya cache report tidak silang.
+  - `business-report` menambah option `Supplier` dan coverage test memastikan kind supplier serta label source supplier tetap terbaca.
+- Validasi:
+  - `node --test tests/unit/business-report.test.js tests/unit/party-statement.test.js`
+  - `npx eslint src/components/ProjectReport.jsx src/store/useReportStore.js src/lib/business-report.js tests/unit/business-report.test.js tests/unit/party-statement.test.js`
+  - `npm run build`
+
+### [2026-04-24] `UCW-337` - Rilis statement PDF pekerja v1 dari `ProjectsPage`
+- Status: `validated`
+- Ringkasan:
+  - `ProjectsPage` sekarang menambah jalur laporan pekerja yang memanggil contract `party_statement` dengan `partyType=worker`, lalu merender summary saldo dan riwayat transaksi ke PDF.
+  - Surface ini sengaja dibatasi ke pekerja dulu supaya perubahan UI/store tetap kecil dan bisa diaudit.
+- File target:
+  - `src/components/ProjectReport.jsx`
+  - `src/store/useReportStore.js`
+  - `src/lib/business-report.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - picker pekerja bergantung pada master `workers`; kalau data belum termuat, UI tetap menahan download sampai pilihan ada.
+  - statement pekerja memakai contract yang sama dengan kreditur/supplier, jadi regresi terbesar tetap pada branching UI/store yang memetakan `partyType=worker`.
+- Audit hasil:
+  - `ProjectsPage` sekarang mengenali `worker_statement`, memuat master pekerja, dan merender summary serta daftar transaksi pekerja dengan label yang sesuai.
+  - `useReportStore` mengarah ke `fetchPartyStatementFromApi({ partyType: 'worker' })` saat report kind pekerja dipilih, lalu menahan fetch jika pekerja belum dipilih.
+  - `business-report` menambah option `Pekerja` dan coverage test memastikan kind worker serta label source worker tetap terbaca.
+- Validasi:
+  - `node --test tests/unit/business-report.test.js tests/unit/party-statement.test.js`
+  - `npx eslint src/components/ProjectReport.jsx src/store/useReportStore.js src/lib/business-report.js tests/unit/business-report.test.js tests/unit/party-statement.test.js`
+  - `npm run build`
+
+### [2026-04-24] `UCW-338` - Redesign kwitansi create expense dan faktur material agar senada
+- Status: `validated`
+- Ringkasan:
+  - Kwitansi transaksi dan faktur material sekarang mengikuti shell visual yang sama dengan kwitansi pembayaran, termasuk watermark, header strip, footer, dan tonalitas warna brand.
+  - Task ini tetap dibatasi ke generator PDF notification dan smoke delivery, tanpa menyentuh contract laporan pihak.
+- File target:
+  - `api/notify.js`
+  - `src/lib/report-pdf.js`
+  - `tests/live/release-smoke.spec.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - shell receipt masih bergantung pada helper `jsPDF` yang sama; jika font metrics berubah di masa depan, truncation header/footer bisa bergeser sedikit.
+  - PDF notification memakai `generatedAt` dari payload runtime; kalau timestamp payload kosong, footer tetap aman tetapi waktu render bisa berbeda dari event asli.
+- Audit hasil:
+  - `renderPaymentReceiptShell()` menjadi source of truth untuk visual frame receipt dan dipakai oleh `createPaymentReceiptPdf()` serta generator kwitansi transaksi/faktur material di `api/notify.js`.
+  - `addPaymentReceiptFooter()` dipakai ulang di jalur transaction/material invoice sehingga footer halaman tetap konsisten dengan kwitansi pembayaran.
+  - `tests/unit/report-pdf-shell.test.js` menutup shared shell dan footer page marker, memastikan refactor ini tidak memutus contract visual dasar.
+- Validasi:
+  - `node --test tests/unit/report-pdf-shell.test.js tests/unit/business-report.test.js tests/unit/party-statement.test.js`
+  - `npx eslint api/notify.js src/lib/report-pdf.js tests/unit/report-pdf-shell.test.js tests/unit/business-report.test.js tests/unit/party-statement.test.js`
+  - `npm run build`
+
+### [2026-04-23] `UCW-341` - Harden assistant reply safety
+- Status: `validated`
+- Ringkasan:
+  - Reply writer assistant harus tetap read-only dan grounded pada fact packet, button route, serta konteks session; rewrite yang menambah fakta baru harus ditolak.
+  - Fallback deterministik tetap jadi jalur aman saat model melanggar safety gate.
+- Addendum audit:
+  - `isAssistantResponseSafe()` sekarang memblokir rewrite yang mengarang route, entity, atau aksi baru selain angka yang tidak grounded di fact packet.
+  - `tests/unit/telegram-assistant-writer.test.js` menutup jalur rewrite aman, klarifikasi, fallback angka, dan penolakan route/entity/aksi yang tidak valid.
+  - `npm run build` dan test/lint writer terkait lolos tanpa regresi.
+- File target:
+  - `api/telegram-assistant.js`
+  - `tests/unit/telegram-assistant-writer.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+
+### [2026-04-23] `UCW-340` - Dedikasikan detail faktur material dan poles delete UX lintas surface
+- Status: `validated`
+- Ringkasan:
+  - `MaterialInvoiceDetailPage` sekarang berdiri di route canonical `/material-invoice/:id` dengan satu card pusat untuk ringkasan, item, dan aksi.
+  - delete tetap terlihat di surface yang relevan; bila payment history sudah ada, dialog memberi fallback riwayat tagihan dan payroll history tetap read-only.
+- File target:
+  - `src/App.jsx`
+  - `api/transactions.js`
+  - `src/components/TransactionDeleteDialog.jsx`
+  - `src/lib/material-invoice.js`
+  - `src/lib/transaction-delete.js`
+  - `src/pages/MaterialInvoiceDetailPage.jsx`
+  - `src/pages/TransactionDetailPage.jsx`
+  - `src/pages/EditRecordPage.jsx`
+  - `src/pages/TransactionsPage.jsx`
+  - `tests/unit/transaction-delete.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - guard delete material invoice masih bergantung pada metadata `current_stock`; kalau metadata stok tidak ikut terhydrate, delete tetap diblok lebih awal.
+  - redirect riwayat tagihan canonical harus tetap konsisten supaya fallback dialog tidak memutus deep link history surface.
+- Audit hasil:
+  - route list/detail workspace material invoice sekarang menuju `/material-invoice/:id`, sementara `TransactionDeleteDialog` dipakai lintas surface untuk history fallback ketika payment history sudah ada.
+  - `TransactionsPage` tidak lagi menyembunyikan delete hanya karena `transaction.canDelete` false, dan `EditRecordPage`/`TransactionDetailPage` memakai helper history fallback yang sama.
+  - `PayrollWorkerDetailPage` tetap read-only di riwayat pembayaran; audit tidak menemukan aksi hapus/unduh kwitansi yang perlu ditambahkan atau dihapus.
+- Validasi:
+  - `node --test tests/unit/transaction-delete.test.js tests/unit/report-pdf-delivery.test.js`
+  - `npx eslint api/transactions.js src/App.jsx src/components/TransactionDeleteDialog.jsx src/lib/material-invoice.js src/lib/transaction-delete.js src/pages/EditRecordPage.jsx src/pages/MaterialInvoiceDetailPage.jsx src/pages/TransactionDetailPage.jsx src/pages/TransactionsPage.jsx tests/e2e/helpers/routes.js tests/unit/transaction-delete.test.js tests/unit/report-pdf-delivery.test.js`
+  - `npm run build`
+
+### [2026-04-23] `UCW-339` - Merge `ProjectsPage` dengan pengaturan PDF sebagai satu hub
+- Status: `validated`
+- Ringkasan:
+  - `ProjectsPage` sekarang memuat report `Unit Kerja` dan pengaturan PDF di satu surface, sehingga fungsi report dan branding PDF tidak lagi terpisah di route utama.
+  - route legacy `/projects/pdf-settings` tetap hidup sebagai alias kompatibilitas yang redirect ke anchor `#pdf-settings`.
+- File target:
+  - `src/pages/ProjectsPage.jsx`
+  - `src/pages/ProjectPdfSettingsPage.jsx`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - section settings menambah tinggi halaman `ProjectsPage`, jadi anchor scroll harus tetap stabil di layar kecil.
+  - alias redirect bergantung pada hash routing; kalau browser membuka route lama tanpa hash support, section tetap aman tapi tidak auto-scroll.
+- Audit hasil:
+  - `ProjectPdfSettingsSection` dipakai inline di `ProjectsPage`, dengan `FormSection` sebagai shell pengaturan PDF dan `FormLayout embedded` sebagai form action bar.
+  - `ProjectPdfSettingsPage` kini hanya redirect ke `/projects#pdf-settings`, sehingga route lama tetap kompatibel tanpa surface duplikat.
+  - tombol header di `ProjectsPage` mengarah ke hash section yang sama dan effect scroll menjaga section PDF tetap mudah ditemukan.
+- Validasi:
+  - `npx eslint src/pages/ProjectsPage.jsx src/pages/ProjectPdfSettingsPage.jsx`
+  - `npm run build`
+  - `npm run lint` *(gagal pada baseline existing di `playwright-report/trace/assets/*`; bukan dari patch ini)*
+
+### [2026-04-23] `UCW-332` - Ringkas CTA notifikasi grup Telegram jadi satu tombol dan tambahkan notifikasi save absensi
+- Status: `validated`
+- Ringkasan:
+  - notifikasi grup Telegram sekarang memakai satu tombol CTA canonical per event, jadi surface grup tetap ringkas dan tidak lagi menumpuk dua aksi di bawah chat.
+  - save sheet absensi sekarang memicu notifikasi summary baru ke grup dengan CTA `Review absensi` ke `/payroll?tab=daily`, tanpa memblokir penyimpanan sheet kalau delivery gagal.
+- File target:
+  - `api/notify.js`
+  - `src/components/AttendanceForm.jsx`
+  - `tests/unit/telegram-notify.test.js`
+  - `tests/live/release-smoke.spec.js`
+  - `tests/live/helpers/live-app.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - notifikasi attendance tetap bergantung pada `fetch /api/notify`; kalau endpoint Telegram gagal, sheet tetap tersimpan tetapi notifikasi grup tidak terkirim.
+  - live smoke memakai mock `/api/notify` untuk menghindari side effect Telegram nyata, jadi jalur notifikasi production tetap perlu diawasi lewat unit test dan runtime staging terpisah.
+- Audit hasil:
+  - `buildNotificationReplyMarkup()` sekarang mengembalikan satu tombol per event, termasuk `loan_payment` yang mengarah ke detail transaksi canonical surface riwayat.
+  - `AttendanceForm` mengirim payload summary sheet setelah `saveAttendanceSheet` sukses, dan payload summary itu dibaca oleh `api/notify.js` untuk membangun text notifikasi baru.
+  - live smoke menangkap request `/api/notify` saat absensi tersimpan, jadi proof coverage now membuktikan payload summary attendance benar-benar keluar dari UI save path.
+- Validasi:
+  - `node --test tests/unit/telegram-notify.test.js tests/unit/telegram-assistant-routing.test.js`
+  - `npx eslint api/notify.js src/components/AttendanceForm.jsx tests/unit/telegram-notify.test.js tests/live/release-smoke.spec.js tests/live/helpers/live-app.js`
+  - `npm run build`
+
+### [2026-04-23] `UCW-331` - Pulihkan preview lokal `vercel dev` untuk API auth
+- Status: `validated`
+- Ringkasan:
+  - `vercel.json` sekarang memberi kontrak dev/build Vite eksplisit dan memaksa upstream Vite bind ke `127.0.0.1`.
+  - `.vercelignore` membatasi scan/watch Vercel ke file runtime sehingga folder docs, test artifact, export legacy, cache, dan log tidak lagi memicu watcher `EPERM`.
+  - `npm run dev:api` menjadi command canonical untuk preview lokal dengan `/api/*`, sementara `npm run dev` tetap Vite UI-only.
+- File target:
+  - `.vercelignore`
+  - `vercel.json`
+  - `package.json`
+  - `playwright.live.config.js`
+  - `docs/release-aq-gate.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - `npm run dev:api` tetap membutuhkan Vercel CLI tersedia di PATH dan project link `.vercel/project.json` yang valid.
+  - `.vercelignore` harus dijaga jika nanti runtime deployment membutuhkan folder baru di luar `api`, `src`, `public`, atau root config.
+- Audit hasil:
+  - Reproduksi awal menunjukkan `npm run dev` memberi Vite-only API `404`, sedangkan `vercel dev` gagal karena watcher `EPERM`.
+  - Setelah patch, `vercel dev` mengabaikan folder non-runtime dan route root dilayani dari proxy Vercel lokal.
+  - GET `/api/auth` menghasilkan `405`, membuktikan request masuk ke serverless function, bukan lagi Vite fallback atau timeout.
+- Validasi:
+  - `vercel dev --debug --listen 127.0.0.1:3000 --yes`
+  - `Invoke-WebRequest http://127.0.0.1:3000/` -> `HTTP 200`
+  - `Invoke-WebRequest http://127.0.0.1:3000/api/auth` -> `HTTP 405`
+
+### [2026-04-23] `UCW-330` - Stabilkan env fallback delivery PDF Telegram untuk DM user terverifikasi
+- Status: `validated`
+- Ringkasan:
+  - `api/report-pdf-delivery.js` sekarang membaca `SUPABASE_URL` dengan fallback `VITE_SUPABASE_URL`, serta `SUPABASE_PUBLISHABLE_KEY` dengan fallback `VITE_SUPABASE_PUBLISHABLE_KEY` dan `VITE_SUPABASE_ANON_KEY`.
+  - lookup `telegram_user_id` tetap berjalan lewat client authenticated, lalu fallback ke metadata auth user bila query `profiles` tidak menghasilkan row yang bisa dipakai.
+- File target:
+  - `api/report-pdf-delivery.js`
+  - `tests/unit/report-pdf-delivery.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - kalau metadata auth user belum menyimpan `telegram_user_id`, delivery DM tetap bisa gagal pada guard verifikasi user.
+  - fallback ke public key tetap bergantung pada policy `profiles_select_own` atau metadata auth yang sudah sinkron.
+- Audit hasil:
+  - helper `resolveReportDeliveryEnv()` memusatkan fallback env dan dipakai handler sebelum auth/report processing.
+  - `resolveTelegramUserId()` tidak lagi hard-fail hanya karena query `profiles` error, selama metadata auth user tersedia.
+  - unit test baru membuktikan fallback `VITE_SUPABASE_URL` dan `VITE_SUPABASE_ANON_KEY` bekerja.
+- Validasi:
+  - `node --test tests/unit/report-pdf-delivery.test.js`
+  - `npx eslint api/report-pdf-delivery.js tests/unit/report-pdf-delivery.test.js`
+  - `npm run build`
 
 ### [2026-04-23] `UCW-329` - Tumpulkan Team Invite jadi field picker owner-only tanpa helper teks
 - Status: `validated`

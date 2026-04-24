@@ -29,6 +29,7 @@ import {
   getTransactionLedgerFilterOptions,
   getTransactionTitle,
   getTransactionCreatorLabel,
+  shouldHideTransactionAmount,
 } from '../lib/transaction-presentation'
 import { logPerf, nowMs, roundMs } from '../lib/timing'
 import { fetchHistoryTransactionPageFromApi } from '../lib/transactions-api'
@@ -531,7 +532,8 @@ export function HistoryWorkspace({ embedded = false, headerActionsTarget = null 
           {transactions.map((transaction) => {
             const presentation = getTransactionPresentation(transaction)
             const Icon = presentation.Icon
-            const amount = Math.abs(Number(transaction.amount ?? 0))
+            const hideAmount = shouldHideTransactionAmount(transaction)
+            const amount = hideAmount ? null : Math.abs(Number(transaction.amount ?? 0))
             const actions = [
               {
                 id: 'detail',
@@ -554,9 +556,13 @@ export function HistoryWorkspace({ embedded = false, headerActionsTarget = null 
                   'expense_date',
                 ])}
                 details={[getTransactionContextLabel(transaction)].filter(Boolean)}
-                amount={`${Number(transaction.amount ?? 0) < 0 || transaction.type === 'expense'
-                  ? '-'
-                  : '+'}${formatCurrency(amount)}`}
+                amount={
+                  amount == null
+                    ? null
+                    : `${Number(transaction.amount ?? 0) < 0 || transaction.type === 'expense'
+                      ? '-'
+                      : '+'}${formatCurrency(amount)}`
+                }
                 amountClassName={presentation.amountClassName}
                 badge={getTransactionCreatorLabel(transaction)}
                 actions={actions}

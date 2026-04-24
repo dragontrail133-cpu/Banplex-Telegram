@@ -76,6 +76,17 @@ export async function fetchBusinessReportFromApi(query = {}) {
   return result.reportData ?? null
 }
 
+export async function fetchPartyStatementFromApi(query = {}) {
+  const result = await requestRecordsApi('reports', {
+    query: {
+      ...query,
+      reportKind: 'party_statement',
+    },
+  })
+
+  return result.reportData ?? null
+}
+
 export async function fetchPdfSettingsFromApi(teamId) {
   const result = await requestRecordsApi('pdf-settings', {
     query: {

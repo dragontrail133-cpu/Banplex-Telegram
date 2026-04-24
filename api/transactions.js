@@ -846,6 +846,7 @@ function mapWorkspaceLoanRow(row) {
 
 function mapWorkspaceExpenseRow(row) {
   const hasPaidBill = toNumber(row?.bill_paid_amount) > 0
+  const detailRoute = `/transactions/${row.id}`
 
   return {
     ...normalizeExpenseRow(row),
@@ -857,7 +858,7 @@ function mapWorkspaceExpenseRow(row) {
     canView: true,
     canEdit: true,
     canDelete: !hasPaidBill,
-    detailRoute: `/transactions/${row.id}`,
+    detailRoute,
     editRoute: `/edit/expense/${row.id}`,
   }
 }

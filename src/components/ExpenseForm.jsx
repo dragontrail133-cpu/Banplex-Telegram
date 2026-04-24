@@ -459,7 +459,7 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
                 Deskripsi
               </span>
               <textarea
-                className="min-h-28 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                className="h-12 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                 name="description"
                 onChange={handleChange}
                 placeholder="Contoh: Pembelian alat kerja lapangan."
@@ -474,18 +474,26 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
             title="Catatan dan Lampiran"
             description="Tambahkan catatan tambahan, lampiran, lalu simpan dari footer halaman."
           >
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-[var(--app-text-color)]">
-                Catatan
-              </span>
-              <textarea
-                className="min-h-24 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                name="notes"
-                onChange={handleChange}
-                placeholder="Catatan tambahan opsional."
-                value={formData.notes}
-              />
-            </label>
+            <details className="group rounded-[22px] border border-dashed border-[var(--app-outline-soft)] bg-[var(--app-surface-low-color)] px-4 py-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-[var(--app-text-color)]">
+                <span>Catatan opsional</span>
+                <span className="text-xs font-medium text-[var(--app-hint-color)] group-open:hidden">
+                  Tampilkan
+                </span>
+                <span className="hidden text-xs font-medium text-[var(--app-hint-color)] group-open:inline">
+                  Sembunyikan
+                </span>
+              </summary>
+              <div className="pt-4">
+                <textarea
+                  className="h-12 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  name="notes"
+                  onChange={handleChange}
+                  placeholder="Catatan tambahan opsional."
+                  value={formData.notes}
+                />
+              </div>
+            </details>
 
             <ExpenseAttachmentSection
               deferUploadUntilParentSaved

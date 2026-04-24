@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import ActionCard, { ActionCardSheet } from '../components/ui/ActionCard'
+import TransactionDeleteDialog from '../components/TransactionDeleteDialog'
 import {
   AppButton,
   AppCardDashed,
@@ -22,7 +23,6 @@ import {
   PageHeader,
 } from '../components/ui/AppPrimitives'
 import {
-  canDeleteTransaction,
   canEditTransaction,
   canOpenTransactionPayment,
   formatCurrency,
@@ -34,9 +34,16 @@ import {
   getTransactionLedgerFilterOptions,
   getTransactionPaymentLabel,
   getTransactionPaymentRoute,
+  getTransactionSettlementBadgeLabel,
   getTransactionTitle,
   getTransactionCreatorLabel,
+  shouldHideTransactionAmount,
 } from '../lib/transaction-presentation'
+import {
+  canShowTransactionDelete,
+  getTransactionDeleteHistoryRoute,
+  hasTransactionPaymentHistory,
+} from '../lib/transaction-delete'
 import { logPerf, nowMs, roundMs } from '../lib/timing'
 import { fetchWorkspaceTransactionPageFromApi } from '../lib/transactions-api'
 import BillsPage from './BillsPage'
@@ -180,6 +187,9 @@ function TransactionsPage() {
   )
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false)
   const [historyHeaderActionsTarget, setHistoryHeaderActionsTarget] = useState(null)
+  const [pendingDeleteTransaction, setPendingDeleteTransaction] = useState(null)
+  const [pendingDeleteHistoryRoute, setPendingDeleteHistoryRoute] = useState(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const ledgerTab = useMemo(() => {
     const tab = new URLSearchParams(location.search).get('tab')
 
@@ -608,18 +618,30 @@ function TransactionsPage() {
     })
   }
 
-  const handleDeleteTransaction = async (transaction) => {
-    if (!(transaction.canDelete ?? canDeleteTransaction(transaction))) {
+  const openDeleteTransactionDialog = (transaction) => {
+    if (!canShowTransactionDelete(transaction)) {
       return
     }
 
-    const shouldDelete = window.confirm(`Hapus ${getTransactionTitle(transaction)}?`)
+    setActiveActionCard(null)
+    setActionError(null)
+    setPendingDeleteTransaction(transaction)
+    setPendingDeleteHistoryRoute(
+      hasTransactionPaymentHistory(transaction)
+        ? getTransactionDeleteHistoryRoute(transaction)
+        : null
+    )
+  }
 
-    if (!shouldDelete) {
+  const performDeleteTransaction = async () => {
+    const transaction = pendingDeleteTransaction
+
+    if (!transaction || pendingDeleteHistoryRoute) {
       return
     }
 
     try {
+      setIsDeleting(true)
       setActionError(null)
 
       if (transaction.sourceType === 'project-income') {
@@ -663,6 +685,10 @@ function TransactionsPage() {
         deleteError instanceof Error ? deleteError.message : 'Gagal menghapus mutasi.'
 
       setActionError(message)
+    } finally {
+      setIsDeleting(false)
+      setPendingDeleteTransaction(null)
+      setPendingDeleteHistoryRoute(null)
     }
   }
 
@@ -780,9 +806,11 @@ function TransactionsPage() {
               {transactions.map((transaction) => {
                 const presentation = getTransactionPresentation(transaction)
                 const Icon = presentation.Icon
-                const amount = Math.abs(Number(transaction.amount ?? 0))
+                const settlementBadgeLabel = getTransactionSettlementBadgeLabel(transaction)
+                const hideAmount = shouldHideTransactionAmount(transaction)
+                const amount = hideAmount ? null : Math.abs(Number(transaction.amount ?? 0))
                 const canEdit = Boolean(transaction.canEdit ?? canEditTransaction(transaction))
-                const canDelete = Boolean(transaction.canDelete ?? canDeleteTransaction(transaction))
+                const canDelete = canShowTransactionDelete(transaction)
                 const canPay = !isPayrollBillTransaction(transaction) && Boolean(
                   transaction.canPay ?? canOpenTransactionPayment(transaction)
                 )
@@ -820,7 +848,7 @@ function TransactionsPage() {
                           label: 'Hapus',
                           destructive: true,
                           icon: <Trash2 className="h-4 w-4" />,
-                          onClick: () => handleDeleteTransaction(transaction),
+                          onClick: () => openDeleteTransactionDialog(transaction),
                         },
                       ]
                     : []),
@@ -838,11 +866,17 @@ function TransactionsPage() {
                       'transaction_date',
                     ])}
                     details={[getTransactionContextLabel(transaction)].filter(Boolean)}
-                    amount={`${Number(transaction.amount ?? 0) < 0 || transaction.type === 'expense'
-                      ? '-'
-                      : '+'}${formatCurrency(amount)}`}
+                    amount={
+                      amount == null
+                        ? null
+                        : `${Number(transaction.amount ?? 0) < 0 || transaction.type === 'expense'
+                          ? '-'
+                          : '+'}${formatCurrency(amount)}`
+                    }
                     amountClassName={presentation.amountClassName}
                     badge={getTransactionCreatorLabel(transaction)}
+                    badges={settlementBadgeLabel ? [settlementBadgeLabel] : []}
+                    maxVisibleBadges={settlementBadgeLabel ? 2 : 1}
                     actions={actions}
                     menuMode="shared"
                     onOpenMenu={handleOpenActionMenu}
@@ -885,6 +919,47 @@ function TransactionsPage() {
         description={activeActionCard?.description ?? null}
         actions={activeActionCard?.actions ?? []}
         onClose={handleCloseActionMenu}
+      />
+      <TransactionDeleteDialog
+        confirmLabel="Hapus Transaksi"
+        description={getTransactionTitle(pendingDeleteTransaction)}
+        historyRoute={pendingDeleteHistoryRoute}
+        isConfirming={isDeleting}
+        open={Boolean(pendingDeleteTransaction)}
+        onClose={() => {
+          setPendingDeleteTransaction(null)
+          setPendingDeleteHistoryRoute(null)
+        }}
+        onConfirm={performDeleteTransaction}
+        onOpenHistory={(route) => {
+          const nextTransaction = pendingDeleteTransaction
+
+          setPendingDeleteTransaction(null)
+          setPendingDeleteHistoryRoute(null)
+
+          if (!route) {
+            return
+          }
+
+          navigate(route, {
+            state: nextTransaction
+              ? {
+                  transaction: nextTransaction,
+                  detailSurface: 'riwayat',
+                }
+              : undefined,
+          })
+        }}
+        title={
+          pendingDeleteHistoryRoute
+            ? 'Transaksi sudah memiliki pembayaran'
+            : `Konfirmasi Hapus ${getTransactionTitle(pendingDeleteTransaction)}`
+        }
+        warning={
+          pendingDeleteHistoryRoute
+            ? 'Transaksi ini sudah memiliki pembayaran. Buka riwayat tagihan untuk meninjau pembayaran sebelum memutuskan langkah berikutnya.'
+            : 'Transaksi akan dipindahkan ke arsip dan dapat dipulihkan dari halaman recycle bin.'
+        }
       />
       <AppSheet onClose={() => setIsFilterSheetOpen(false)} open={isFilterSheetOpen} title="Filter">
         <AppToggleGroup

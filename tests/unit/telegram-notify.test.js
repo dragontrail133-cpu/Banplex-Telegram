@@ -112,10 +112,6 @@ test('notify endpoint adds review buttons for project income text notifications'
           '/transactions/income-123'
         ),
       },
-      {
-        text: 'Buka jurnal',
-        url: buildTelegramAssistantLink('banplex_greenfield_bot', '/transactions'),
-      },
     ])
   } finally {
     fetchMock.restore()
@@ -178,11 +174,64 @@ test('notify endpoint adds review buttons for bill payment document notification
           '/transactions/bill-9?surface=riwayat'
         ),
       },
+    ])
+  } finally {
+    fetchMock.restore()
+    process.env.TELEGRAM_BOT_TOKEN = originalEnv.TELEGRAM_BOT_TOKEN
+    process.env.TELEGRAM_CHAT_ID = originalEnv.TELEGRAM_CHAT_ID
+    process.env.TELEGRAM_BOT_USERNAME = originalEnv.TELEGRAM_BOT_USERNAME
+  }
+})
+
+test('notify endpoint adds review button for loan payment notifications', async () => {
+  const originalEnv = {
+    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
+    TELEGRAM_BOT_USERNAME: process.env.TELEGRAM_BOT_USERNAME,
+  }
+
+  process.env.TELEGRAM_BOT_TOKEN = 'test-token'
+  process.env.TELEGRAM_CHAT_ID = '-1001234567890'
+  process.env.TELEGRAM_BOT_USERNAME = 'banplex_greenfield_bot'
+
+  const fetchMock = installTelegramFetchMock(async ({ options }) => {
+    const formData = options.body
+
+    return {
+      ok: true,
+      replyMarkup: formData.get('reply_markup'),
+    }
+  })
+
+  try {
+    const response = createResponse()
+
+    await notifyHandler(
+      createRequest({
+        notificationType: 'loan_payment',
+        loanId: 'loan-9',
+        paymentDate: '2026-04-23T03:00:00.000Z',
+        creditorName: 'Kreditur X',
+        amount: 200000,
+        remainingAmount: 300000,
+      }),
+      response
+    )
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.body.success, true)
+
+    const telegramRequest = fetchMock.calls[0]
+    const formData = telegramRequest.options.body
+    const replyMarkup = JSON.parse(formData.get('reply_markup'))
+
+    assert.equal(formData.get('caption').includes('Pembayaran Pinjaman'), true)
+    assert.deepEqual(replyMarkup.inline_keyboard[0], [
       {
-        text: 'Buka riwayat',
+        text: 'Review pinjaman',
         url: buildTelegramAssistantLink(
           'banplex_greenfield_bot',
-          '/transactions?tab=history'
+          '/transactions/loan-9?surface=riwayat'
         ),
       },
     ])
@@ -241,9 +290,65 @@ test('notify endpoint supports attendance notifications with payroll review butt
           '/payroll?tab=daily'
         ),
       },
+    ])
+  } finally {
+    fetchMock.restore()
+    process.env.TELEGRAM_BOT_TOKEN = originalEnv.TELEGRAM_BOT_TOKEN
+    process.env.TELEGRAM_CHAT_ID = originalEnv.TELEGRAM_CHAT_ID
+    process.env.TELEGRAM_BOT_USERNAME = originalEnv.TELEGRAM_BOT_USERNAME
+  }
+})
+
+test('notify endpoint supports attendance sheet summary notifications', async () => {
+  const originalEnv = {
+    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
+    TELEGRAM_BOT_USERNAME: process.env.TELEGRAM_BOT_USERNAME,
+  }
+
+  process.env.TELEGRAM_BOT_TOKEN = 'test-token'
+  process.env.TELEGRAM_CHAT_ID = '-1001234567890'
+  process.env.TELEGRAM_BOT_USERNAME = 'banplex_greenfield_bot'
+
+  const fetchMock = installTelegramFetchMock(async () => ({
+    ok: true,
+    result: {
+      message_id: 1,
+    },
+  }))
+
+  try {
+    const response = createResponse()
+
+    await notifyHandler(
+      createRequest({
+        notificationType: 'attendance',
+        projectName: 'Proyek A',
+        attendanceDate: '2026-04-23T03:00:00.000Z',
+        recordCount: 3,
+        totalPay: 225000,
+        userName: 'Admin Tim',
+      }),
+      response
+    )
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.body.success, true)
+
+    const telegramRequest = fetchMock.calls[0]
+    const telegramPayload = JSON.parse(telegramRequest.options.body)
+    const replyMarkup = telegramPayload.reply_markup
+
+    assert.equal(telegramPayload.text.includes('Sheet Absensi Baru Dicatat'), true)
+    assert.equal(telegramPayload.text.includes('Jumlah Record: <b>3</b>'), true)
+    assert.equal(telegramPayload.text.includes('Total Upah: <b>Rp 225.000</b>'), true)
+    assert.deepEqual(replyMarkup.inline_keyboard[0], [
       {
-        text: 'Buka payroll',
-        url: buildTelegramAssistantLink('banplex_greenfield_bot', '/payroll?tab=worker'),
+        text: 'Review absensi',
+        url: buildTelegramAssistantLink(
+          'banplex_greenfield_bot',
+          '/payroll?tab=daily'
+        ),
       },
     ])
   } finally {

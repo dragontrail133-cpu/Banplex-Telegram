@@ -19,7 +19,7 @@ Postur final produk:
 - `Riwayat` adalah completed/history surface,
 - `Recycle Bin` adalah deleted/recovery surface terpisah,
 - `Tim` adalah capability support/admin yang tetap masuk release core,
-- `Telegram assistant` adalah helper read-only finance core di bot Telegram; ia hanya membaca data yang sudah ada, mendukung intent `status/search/navigate/analytics/clarify/refuse`, surface command `/menu /status /cari /analytics /riwayat /buka`, inline keyboard callback/deep link read-only, hybrid transcript pendek per chat, dan hasil akhir boleh natural-language selama tetap tervalidasi backend dari fact packet yang aman,
+- `Telegram assistant` adalah helper read-only finance core di bot Telegram; ia hanya membaca data yang sudah ada, mendukung intent `status/search/navigate/analytics/clarify/refuse`, surface command step-by-step `/menu /tambah /buka /cari /status /riwayat /analytics`, inline keyboard callback/deep link read-only, hybrid transcript pendek per chat, dan hasil akhir boleh natural-language selama tetap tervalidasi backend dari fact packet yang aman,
 - `Referensi` / `Master` adalah jantung logika bisnis yang dipakai semua domain; secara product scope ia core release, walau beberapa boundary runtime masih transitional,
 - `HRD` dan `Penerima Manfaat` tetap ada di repo tetapi bukan gate release inti,
 - `Payment Receipt PDF` adalah supporting capability resmi fase awal untuk flow `Pembayaran`, bisa diregenerate, dan bukan source of truth,

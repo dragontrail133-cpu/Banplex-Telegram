@@ -88,9 +88,89 @@ function createAuthResponse(options = {}) {
   }
 }
 
+function createBusinessReportResponse() {
+  const generatedAt = '2026-04-24T12:00:00.000Z'
+  const period = {
+    dateFrom: '2026-04-01',
+    dateTo: '2026-04-24',
+  }
+  const projectSummary = {
+    project_id: 'project-e2e',
+    project_name: 'Proyek E2E',
+    project_status: 'active',
+    total_income: 18_000_000,
+    material_expense: 6_000_000,
+    operating_expense: 2_000_000,
+    salary_expense: 3_000_000,
+    net_profit_project: 7_000_000,
+  }
+  const summary = {
+    total_income: 18_000_000,
+    total_material_expense: 6_000_000,
+    total_operating_expense: 2_000_000,
+    total_salary_expense: 3_000_000,
+    total_expense: 11_000_000,
+    total_project_profit: 7_000_000,
+    total_company_overhead: 1_000_000,
+    net_consolidated_profit: 6_000_000,
+    total_bill_count: 3,
+    total_paid_bill: 4_500_000,
+    total_outstanding_bill: 1_500_000,
+    total_outstanding_salary: 2_250_000,
+  }
+
+  return {
+    success: true,
+    projectSummaries: [projectSummary],
+    portfolioSummary: {
+      total_income: summary.total_income,
+      total_material_expense: summary.total_material_expense,
+      total_operating_expense: summary.total_operating_expense,
+      total_salary_expense: summary.total_salary_expense,
+      total_expense: summary.total_expense,
+      total_project_profit: summary.total_project_profit,
+      total_company_overhead: summary.total_company_overhead,
+      net_consolidated_profit: summary.net_consolidated_profit,
+    },
+    reportData: {
+      reportKind: 'executive_finance',
+      title: 'LAPORAN KEUANGAN EKSEKUTIF',
+      reportTitle: 'LAPORAN KEUANGAN EKSEKUTIF',
+      generatedAt,
+      period,
+      summary,
+      projectSummaries: [projectSummary],
+      cashMutations: [
+        {
+          transaction_date: generatedAt,
+          type: 'inflow',
+          amount: 18_000_000,
+          source_table: 'project_incomes',
+          description: 'Pemasukan Proyek E2E',
+        },
+      ],
+      rows: [],
+      billingStats: {
+        total_bill_count: summary.total_bill_count,
+        total_paid_bill: summary.total_paid_bill,
+        total_outstanding_bill: summary.total_outstanding_bill,
+        total_outstanding_salary: summary.total_outstanding_salary,
+      },
+    },
+  }
+}
+
 async function openApp(page, path = '/', options = {}) {
   const telegramUser = options.telegram?.user
   const mockApi = options.mockApi ?? {}
+
+  await page.addInitScript(() => {
+    try {
+      window.sessionStorage.setItem('banplex.dev-auth-bypass', '1')
+    } catch {
+      return
+    }
+  })
 
   await page.route('**/api/auth', async (route) => {
     const responseBody = await mockApi.auth?.({
@@ -335,6 +415,10 @@ async function openApp(page, path = '/', options = {}) {
         }
       }
 
+      if (resource === 'reports') {
+        return createBusinessReportResponse()
+      }
+
       return {
         success: true,
       }
@@ -375,6 +459,12 @@ async function openApp(page, path = '/', options = {}) {
   }
 
   await page.goto(withDevAuthBypass(path), { waitUntil: 'domcontentloaded' })
+
+  await expect(
+    page.getByRole('heading', { name: 'Sedang memuat workspace', exact: true })
+  ).toBeHidden({
+    timeout: 25000,
+  })
 }
 
 async function expectHeading(page, heading) {

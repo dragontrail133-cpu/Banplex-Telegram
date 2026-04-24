@@ -30,6 +30,7 @@ import {
   getTransactionContextLabel,
   getTransactionCreatorLabel,
   getTransactionTitle,
+  shouldHideTransactionAmount,
 } from '../lib/transaction-presentation'
 import { logPerf, nowMs, roundMs } from '../lib/timing'
 import {
@@ -80,7 +81,7 @@ function getTransactionPresentation(transaction) {
       iconClassName: 'app-tone-neutral',
       amountClassName: 'text-[var(--app-destructive-color)]',
       amountPrefix: '-',
-      showAmount: true,
+      showAmount: !shouldHideTransactionAmount(transaction),
     }
   }
 
@@ -90,7 +91,7 @@ function getTransactionPresentation(transaction) {
       iconClassName: 'app-tone-warning',
       amountClassName: 'text-[var(--app-destructive-color)]',
       amountPrefix: '-',
-      showAmount: true,
+      showAmount: !shouldHideTransactionAmount(transaction),
     }
   }
 
@@ -100,7 +101,7 @@ function getTransactionPresentation(transaction) {
       iconClassName: 'app-tone-warning',
       amountClassName: 'text-[var(--app-destructive-color)]',
       amountPrefix: '-',
-      showAmount: true,
+      showAmount: !shouldHideTransactionAmount(transaction),
     }
   }
 
@@ -109,7 +110,7 @@ function getTransactionPresentation(transaction) {
     iconClassName: 'app-tone-success',
     amountClassName: 'text-[var(--app-success-color)]',
     amountPrefix: '+',
-    showAmount: true,
+    showAmount: !shouldHideTransactionAmount(transaction),
   }
 }
 

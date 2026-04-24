@@ -11,6 +11,7 @@ const appRoutes = {
   dashboard: '/',
   createAttendance: '/attendance/new',
   createMaterialInvoice: '/material-invoice/new',
+  materialInvoiceDetail: '/transactions/sample-expense-id',
   editExpense: '/edit/expense/sample-expense-id',
   paymentBill: '/payment/sample-payment-id',
   paymentLoan: '/loan-payment/sample-loan-payment-id',

@@ -5,6 +5,17 @@ function getEnv(name, fallback = '') {
   return String(globalThis.process?.env?.[name] ?? fallback).trim()
 }
 
+export function resolveReportDeliveryEnv() {
+  return {
+    supabaseUrl: getEnv('SUPABASE_URL', getEnv('VITE_SUPABASE_URL')),
+    publishableKey: getEnv(
+      'SUPABASE_PUBLISHABLE_KEY',
+      getEnv('VITE_SUPABASE_PUBLISHABLE_KEY', getEnv('VITE_SUPABASE_ANON_KEY'))
+    ),
+    telegramBotToken: getEnv('TELEGRAM_BOT_TOKEN'),
+  }
+}
+
 function createHttpError(status, message) {
   const error = new Error(message)
 
@@ -110,17 +121,12 @@ async function resolveTelegramUserId(adminClient, authUser) {
     .eq('id', authUser.id)
     .maybeSingle()
 
-  if (profileResult.error) {
-    throw profileResult.error
-  }
+  if (!profileResult.error) {
+    const profileTelegramUserId = normalizeText(profileResult.data?.telegram_user_id, null)
 
-  const profileTelegramUserId = normalizeText(
-    profileResult.data?.telegram_user_id,
-    null
-  )
-
-  if (profileTelegramUserId) {
-    return profileTelegramUserId
+    if (profileTelegramUserId) {
+      return profileTelegramUserId
+    }
   }
 
   return (
@@ -267,12 +273,9 @@ export default async function handler(req, res) {
     })
   }
 
-  const supabaseUrl = getEnv('SUPABASE_URL')
-  const serviceRoleKey = getEnv('SUPABASE_SERVICE_ROLE_KEY')
-  const publishableKey = getEnv('SUPABASE_PUBLISHABLE_KEY')
-  const telegramBotToken = getEnv('TELEGRAM_BOT_TOKEN')
+  const { supabaseUrl, publishableKey, telegramBotToken } = resolveReportDeliveryEnv()
 
-  if (!supabaseUrl || !serviceRoleKey || !publishableKey || !telegramBotToken) {
+  if (!supabaseUrl || !publishableKey || !telegramBotToken) {
     return res.status(500).json({
       success: false,
       error: 'Environment variable untuk pengiriman laporan Telegram belum lengkap.',
@@ -286,9 +289,9 @@ export default async function handler(req, res) {
       publishableKey,
       bearerToken,
     })
-    const adminClient = createDatabaseClient(
+    const authenticatedClient = createDatabaseClient(
       supabaseUrl,
-      serviceRoleKey,
+      publishableKey,
       bearerToken
     )
     const body = await parseRequestBody(req)
@@ -299,7 +302,7 @@ export default async function handler(req, res) {
       throw createHttpError(400, 'reportData wajib dikirim untuk fallback DM.')
     }
 
-    const telegramUserId = await resolveTelegramUserId(adminClient, authUser)
+    const telegramUserId = await resolveTelegramUserId(authenticatedClient, authUser)
 
     if (!telegramUserId) {
       throw createHttpError(400, 'Telegram user belum terverifikasi untuk delivery DM.')

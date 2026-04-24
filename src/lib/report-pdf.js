@@ -1,7 +1,7 @@
 ﻿import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { APP_TIME_ZONE, formatAppDateLabel, toAppDateKey } from './date-time.js'
-import { getBusinessSourceLabel } from './business-report.js'
+import { getBusinessSourceLabel, getPartyStatementSourceLabel } from './business-report.js'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -160,6 +160,15 @@ const BUSINESS_REPORT_THEMES = {
     sectionBorder: [253, 230, 138],
     kindLabel: 'KAS',
   },
+  party_statement: {
+    accent: [13, 148, 136],
+    accentSoft: [240, 253, 250],
+    accentBorder: [153, 246, 228],
+    accentMuted: [45, 212, 191],
+    sectionFill: [240, 253, 250],
+    sectionBorder: [153, 246, 228],
+    kindLabel: 'PIUTANG',
+  },
 }
 
 function formatReceiptDate(value) {
@@ -315,7 +324,51 @@ function truncatePdfText(doc, text, maxWidth) {
   return `${truncated}${ellipsis}`
 }
 
-function addPaymentReceiptFooter(doc, companyName, generatedAt) {
+export function renderPaymentReceiptShell(
+  doc,
+  {
+    companyName = 'BANPLEX GREENFIELD',
+    documentTitle = '',
+    secondaryText = null,
+    referenceLabel = 'DIBAYARKAN KEPADA',
+    referenceValue = '-',
+  } = {}
+) {
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const pageHeight = doc.internal.pageSize.getHeight()
+  const margin = 10
+
+  doc.setFillColor(...SYS_COLORS.primaryContainer)
+  doc.rect(0, 0, pageWidth, 1.5, 'F')
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(80)
+  doc.setTextColor(...SYS_COLORS.watermark)
+  doc.text('BG', pageWidth - 10, pageHeight / 2 - 10, { angle: -15, align: 'right' })
+
+  doc.setFontSize(12)
+  doc.setTextColor(...SYS_COLORS.primaryContainer)
+  doc.text(truncatePdfText(doc, companyName, pageWidth - margin * 2), margin, 14)
+
+  doc.setFontSize(6.5)
+  doc.setTextColor(...SYS_COLORS.mutedText)
+  doc.text(truncatePdfText(doc, documentTitle, pageWidth - margin * 2), margin, 18)
+
+  if (secondaryText) {
+    doc.setFontSize(6)
+    doc.text(truncatePdfText(doc, secondaryText, pageWidth - margin * 2), margin, 22)
+  }
+
+  doc.setFontSize(6)
+  doc.text(referenceLabel, pageWidth - margin, 13, { align: 'right' })
+  doc.setFontSize(8)
+  doc.setTextColor(...SYS_COLORS.onSurface)
+  doc.text(truncatePdfText(doc, referenceValue, 42), pageWidth - margin, 17, {
+    align: 'right',
+  })
+}
+
+export function addPaymentReceiptFooter(doc, companyName, generatedAt) {
   const pageCount = doc.internal.getNumberOfPages()
   const dateStr = formatReceiptDateTime(generatedAt)
   const pageWidth = doc.internal.pageSize.getWidth()
@@ -379,8 +432,6 @@ export function createPaymentReceiptPdf({
     unit: 'mm',
     format: 'a6',
   })
-  const pageWidth = doc.internal.pageSize.getWidth()
-  const pageHeight = doc.internal.pageSize.getHeight()
   const margin = 10
   const footerReservedSpace = 14
   let startY = margin
@@ -391,30 +442,14 @@ export function createPaymentReceiptPdf({
     author: companyName,
   })
 
-  doc.setFillColor(...SYS_COLORS.primaryContainer)
-  doc.rect(0, 0, pageWidth, 1.5, 'F')
+  renderPaymentReceiptShell(doc, {
+    companyName,
+    documentTitle: receiptTitle,
+    referenceLabel: 'DIBAYARKAN KEPADA',
+    referenceValue: referenceName,
+  })
 
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(80)
-  doc.setTextColor(...SYS_COLORS.watermark)
-  doc.text('BG', pageWidth - 10, pageHeight / 2 - 10, { angle: -15, align: 'right' })
-
-  startY += 4
-  doc.setFontSize(12)
-  doc.setTextColor(...SYS_COLORS.primaryContainer)
-  doc.text(truncatePdfText(doc, companyName, pageWidth - margin * 2), margin, startY)
-
-  doc.setFontSize(6.5)
-  doc.setTextColor(...SYS_COLORS.mutedText)
-  doc.text(truncatePdfText(doc, receiptTitle, pageWidth - margin * 2), margin, startY + 4)
-
-  doc.setFontSize(6)
-  doc.text('DIBAYARKAN KEPADA', pageWidth - margin, startY - 1, { align: 'right' })
-  doc.setFontSize(8)
-  doc.setTextColor(...SYS_COLORS.onSurface)
-  doc.text(truncatePdfText(doc, referenceName, 42), pageWidth - margin, startY + 3, { align: 'right' })
-
-  startY += 12
+  startY += 16
 
   doc.setFontSize(8)
   doc.setTextColor(...SYS_COLORS.primaryContainer)
@@ -560,7 +595,7 @@ function normalizeBusinessPdfSettings(pdfSettings = {}) {
 function normalizeBusinessReportKind(value) {
   const normalizedValue = normalizeText(value, 'executive_finance')
 
-  return ['executive_finance', 'project_pl', 'cash_flow'].includes(normalizedValue)
+  return ['executive_finance', 'project_pl', 'cash_flow', 'party_statement'].includes(normalizedValue)
     ? normalizedValue
     : 'executive_finance'
 }
@@ -681,9 +716,45 @@ function getProjectDocumentLabel(value) {
   return humanizeBusinessLabel(normalizedValue)
 }
 
+function getPartyStatementFileNamePrefix(partyType) {
+  if (partyType === 'creditor') {
+    return 'piutang-kreditur'
+  }
+
+  if (partyType === 'supplier') {
+    return 'hutang-supplier'
+  }
+
+  if (partyType === 'worker') {
+    return 'gaji-pekerja'
+  }
+
+  return 'statement-pihak'
+}
+
+function buildPartyStatementRowsBody(rows = []) {
+  return rows.map((row) => [
+    formatPdfDateTime(row?.transactionDate),
+    getPartyStatementSourceLabel(row?.sourceType),
+    normalizeText(row?.description, '-'),
+    row?.entryType === 'debit' ? formatCurrency(row?.amount) : '-',
+    row?.entryType === 'credit' ? formatCurrency(row?.amount) : '-',
+    formatCurrency(row?.balance),
+  ])
+}
+
 function buildBusinessReportKpis(reportData = {}) {
   const reportKind = normalizeBusinessReportKind(reportData?.reportKind)
   const summary = reportData?.summary ?? {}
+
+  if (reportKind === 'party_statement') {
+    return [
+      { label: 'Saldo Awal', value: formatCurrency(summary?.opening_balance) },
+      { label: 'Total Debit', value: formatCurrency(summary?.total_debit) },
+      { label: 'Total Kredit', value: formatCurrency(summary?.total_credit) },
+      { label: 'Saldo Akhir', value: formatCurrency(summary?.closing_balance ?? summary?.outstanding_amount) },
+    ]
+  }
 
   if (reportKind === 'project_pl') {
     return [
@@ -829,34 +900,45 @@ function formatBusinessSubtotalRow(label, amount, columnCount = 3) {
 function normalizeBusinessReportData(reportData = {}) {
   const reportKind = normalizeBusinessReportKind(reportData?.reportKind ?? reportData?.report_kind)
   const generatedAt = reportData?.generatedAt ?? reportData?.generated_at ?? new Date()
+  const partyProfile = reportData?.partyProfile ?? reportData?.party_profile ?? null
+  const partyType = normalizeText(reportData?.partyType ?? reportData?.party_type, null)
+  const partyId = normalizeText(reportData?.partyId ?? reportData?.party_id, null)
   const projectSummaries = Array.isArray(reportData?.projectSummaries)
     ? reportData.projectSummaries
     : []
   const projectDetail = reportData?.projectDetail?.summary ? reportData.projectDetail : null
   const cashMutations = Array.isArray(reportData?.cashMutations) ? reportData.cashMutations : []
+  const rows = Array.isArray(reportData?.rows) ? reportData.rows : []
   const billingStats = reportData?.billingStats ?? null
+  const defaultTitle = {
+    executive_finance: 'LAPORAN KEUANGAN EKSEKUTIF',
+    project_pl: 'LAPORAN LABA RUGI PROYEK',
+    cash_flow: 'LAPORAN ARUS KAS',
+    party_statement:
+      partyType === 'supplier'
+        ? 'LAPORAN HUTANG SUPPLIER'
+        : partyType === 'worker'
+          ? 'LAPORAN GAJI PEKERJA'
+          : 'LAPORAN PIUTANG KREDITUR',
+  }[reportKind] ?? 'LAPORAN BISNIS'
+  const title = normalizeText(reportData?.title ?? reportData?.reportTitle ?? defaultTitle, 'LAPORAN BISNIS')
 
   return {
     reportKind,
-    title: normalizeText(
-      reportData?.title ??
-        reportData?.reportTitle ??
-        {
-          executive_finance: 'LAPORAN KEUANGAN EKSEKUTIF',
-          project_pl: 'LAPORAN LABA RUGI PROYEK',
-          cash_flow: 'LAPORAN ARUS KAS',
-        }[reportKind],
-      'LAPORAN BISNIS'
-    ),
+    title,
     period: {
       dateFrom: normalizeText(reportData?.period?.dateFrom ?? reportData?.dateFrom, null),
       dateTo: normalizeText(reportData?.period?.dateTo ?? reportData?.dateTo, null),
     },
     generatedAt,
     summary: reportData?.summary ?? {},
+    partyProfile,
+    partyType,
+    partyId,
     projectSummaries,
     projectDetail,
     cashMutations,
+    rows,
     billingStats,
   }
 }
@@ -1008,6 +1090,11 @@ function buildBusinessHeaderLayout({
     doc.setTextColor(...SYS_COLORS.mutedText)
     doc.text(reportTitle, titleStartX, headerTop + 8)
 
+    if (reportData?.reportKind === 'party_statement' && reportData?.partyProfile?.name) {
+      doc.setFontSize(8)
+      doc.text(`Pihak: ${normalizeText(reportData.partyProfile.name, '-')}`, titleStartX, headerTop + 13)
+    }
+
     const kindBadgeLabel = getBusinessReportKindLabel(reportData?.reportKind)
     const badgeWidth = Math.max(22, doc.getTextWidth(kindBadgeLabel) + 6)
     doc.setFillColor(...theme.accentSoft)
@@ -1033,7 +1120,7 @@ function buildBusinessHeaderLayout({
       doc.text(`Telepon: ${settings.phone}`, pageWidth - margin, headerTop + 20, { align: 'right' })
     }
 
-    return (logoSize?.height ?? 14) + 12
+    return (logoSize?.height ?? 14) + (reportData?.reportKind === 'party_statement' ? 16 : 12)
   }
 
   if (headerLogo) {
@@ -1234,7 +1321,12 @@ export async function generateBusinessReportPdf(reportData = {}, pdfSettings = {
   const companyName = normalizedPdfSettings.companyName
   const reportTitle = normalizedReportData.title
   const generatedAt = normalizedReportData.generatedAt
-  const fileName = `laporan-${slugify(normalizedReportData.reportKind)}-${slugify(companyName)}-${toAppDateKey(generatedAt) || 'tanggal'}.pdf`
+  const fileName =
+    normalizedReportData.reportKind === 'party_statement'
+      ? `laporan-${getPartyStatementFileNamePrefix(normalizedReportData.partyType)}-${slugify(
+          normalizedReportData.partyProfile?.name ?? normalizedReportData.partyId ?? 'pihak'
+        )}-${toAppDateKey(generatedAt) || 'tanggal'}.pdf`
+      : `laporan-${slugify(normalizedReportData.reportKind)}-${slugify(companyName)}-${toAppDateKey(generatedAt) || 'tanggal'}.pdf`
   const pageWidth = doc.internal.pageSize.getWidth()
   const margin = 18
   const usableWidth = pageWidth - margin * 2
@@ -1262,7 +1354,16 @@ export async function generateBusinessReportPdf(reportData = {}, pdfSettings = {
       notes: Math.max(48, usableWidth - 22 - 44 - 28),
       amount: 28,
     },
+    partyStatement: {
+      date: 24,
+      source: 34,
+      description: Math.max(38, usableWidth - 24 - 34 - 25 - 25 - 28),
+      debit: 25,
+      credit: 25,
+      balance: 28,
+    },
   }
+  const partyStatementWidths = projectPlWidths.partyStatement
 
   doc.setProperties({
     title: reportTitle,
@@ -1385,6 +1486,39 @@ export async function generateBusinessReportPdf(reportData = {}, pdfSettings = {
         3: { cellWidth: 38 },
       },
       emptyText: 'Tidak ada mutasi kas di periode ini.',
+    })
+  } else if (normalizedReportData.reportKind === 'party_statement') {
+    startY = addBusinessSectionTitle(doc, 'RINGKASAN PIUTANG', margin, startY, theme)
+    startY = renderBusinessMetricCards(
+      doc,
+      buildBusinessReportKpis(normalizedReportData),
+      margin,
+      startY,
+      theme
+    )
+
+    startY = addBusinessSectionTitle(doc, 'RINCIAN TRANSAKSI', margin, startY, theme)
+    startY = renderBusinessReportTable({
+      doc,
+      startY,
+      head: [['TANGGAL', 'SUMBER', 'KETERANGAN', 'DEBIT', 'KREDIT', 'SALDO']],
+      body: buildPartyStatementRowsBody(normalizedReportData.rows),
+      margin,
+      headStyles: {
+        fillColor: theme.accentSoft,
+        textColor: theme.accent,
+        lineColor: theme.accentBorder,
+        fontSize: 7.2,
+      },
+      columnStyles: {
+        0: { cellWidth: partyStatementWidths.date },
+        1: { cellWidth: partyStatementWidths.source },
+        2: { cellWidth: partyStatementWidths.description },
+        3: { halign: 'right', textColor: theme.accent, fontStyle: 'bold', cellWidth: partyStatementWidths.debit },
+        4: { halign: 'right', textColor: theme.accent, fontStyle: 'bold', cellWidth: partyStatementWidths.credit },
+        5: { halign: 'right', textColor: theme.accent, fontStyle: 'bold', cellWidth: partyStatementWidths.balance },
+      },
+      emptyText: 'Tidak ada transaksi kreditur pada periode ini.',
     })
   } else if (normalizedReportData.reportKind === 'project_pl') {
     const projectSections = buildBusinessProjectPlSections(normalizedReportData.projectDetail)

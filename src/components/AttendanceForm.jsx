@@ -65,6 +65,55 @@ function normalizeText(value, fallback = '') {
   return normalizedValue.length > 0 ? normalizedValue : fallback
 }
 
+function getTelegramDisplayName(telegramUser, authUser) {
+  const authUserName = normalizeText(authUser?.name, '')
+  const telegramFullName = [telegramUser?.first_name, telegramUser?.last_name]
+    .filter(Boolean)
+    .join(' ')
+    .trim()
+  const telegramUsername = normalizeText(telegramUser?.username, '')
+
+  return normalizeText(authUserName || telegramFullName || telegramUsername, 'Pengguna Telegram')
+}
+
+function buildAttendanceNotificationPayload({
+  projectName,
+  attendanceDate,
+  recordCount,
+  totalPay,
+  userName,
+  routePath = '/payroll?tab=daily',
+} = {}) {
+  return {
+    notificationType: 'attendance',
+    projectName: normalizeText(projectName, 'Workspace'),
+    attendanceDate: normalizeText(attendanceDate, new Date().toISOString()),
+    recordCount: Number(recordCount ?? 0),
+    totalPay: Number(totalPay ?? 0),
+    userName: normalizeText(userName, 'Pengguna Telegram'),
+    routePath: normalizeText(routePath, '/payroll?tab=daily'),
+  }
+}
+
+async function notifyTelegram(payload) {
+  const response = await fetch('/api/notify', {
+    method: 'POST',
+    keepalive: true,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  const result = await response.json().catch(() => ({}))
+
+  if (!response.ok || !result?.success) {
+    throw new Error(result?.error || 'Gagal mengirim notifikasi Telegram.')
+  }
+
+  return result
+}
+
 const ATTENDANCE_STATUS_META = {
   full_day: { label: 'Penuh', tone: 'success' },
   half_day: { label: '½ Hari', tone: 'warning' },
@@ -552,6 +601,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
   const [isSettingsSheetOpen, setIsSettingsSheetOpen] = useState(false)
   const deferredSearchTerm = useDeferredValue(searchTerm)
   const telegramUserId = user?.id ?? authUser?.telegram_user_id ?? null
+  const telegramUserName = getTelegramDisplayName(user, authUser)
 
   const activeProjects = useMemo(() => {
     const allProjects = projects.filter(
@@ -1116,6 +1166,21 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
       setSuccessMessage(
         'Sheet absensi tersimpan. Record ini akan muncul di payroll dan bisa ditagihkan per worker.'
       )
+
+      void notifyTelegram(
+        buildAttendanceNotificationPayload({
+          projectName: selectedProject?.name ?? 'Proyek',
+          attendanceDate: selectedDate,
+          recordCount: nextSavedRows.length,
+          totalPay: nextSavedRows.reduce(
+            (sum, record) => sum + Number(record?.total_pay ?? 0),
+            0
+          ),
+          userName: telegramUserName,
+        })
+      ).catch((notifyError) => {
+        console.error('Notifikasi absensi gagal dikirim:', notifyError)
+      })
 
       if (typeof onSuccess === 'function') {
         await onSuccess(nextSavedRows)

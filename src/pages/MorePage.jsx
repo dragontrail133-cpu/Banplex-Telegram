@@ -53,7 +53,7 @@ const modules = [
   {
     title: 'Unit Kerja',
     description: null,
-    to: '/projects',
+    to: '/reports',
     icon: FolderKanban,
     toneClass: 'bg-[var(--app-tone-info-bg)] text-[var(--app-tone-info-text)]',
   },

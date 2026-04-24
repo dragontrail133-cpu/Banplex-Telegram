@@ -36,6 +36,38 @@ Implikasi wajib untuk agent:
 
 ---
 
+## Safety Gate Project (Wajib)
+1. Jika user menyatakan `proposal-only`, `read-only`, `audit-only`, atau `tanpa implementasi`, agent wajib berhenti di dokumen/proposal dan dilarang patch runtime code.
+2. Sebelum edit, sebutkan file target dan pastikan scope sesuai instruksi user.
+3. Jika worktree sudah dirty, jangan revert atau menormalkan perubahan lain; abaikan perubahan di luar scope dan laporkan bila relevan.
+4. Untuk task yang meminta diff, tampilkan diff hanya untuk file scope task, kecuali user meminta status repo penuh.
+5. Dilarang menjalankan command destruktif atau state-changing tanpa approval eksplisit, termasuk command database, deploy, reset, repair, rename massal, atau install dependency.
+6. Jika `git` menolak karena `safe.directory`, boleh gunakan override per-command `git -c safe.directory="C:/Project/Banplex Greenfield" ...`; jangan menulis config global kecuali user meminta.
+
+---
+
+## Source-of-Truth Rules (Wajib)
+1. Gunakan `docs/architecture-source-of-truth-audit-2026-04-24.md` sebagai baseline audit source-of-truth terbaru sampai ada dokumen pengganti.
+2. Untuk flow integration-critical, identifikasi dan tulis sumber final data: route UI, Zustand store, API/client wrapper, Vercel function, RPC/view/table Supabase.
+3. Jangan membuat kalkulasi duplikat di UI/store jika sudah ada canonical view, RPC, trigger, atau API wrapper.
+4. Jika source-of-truth masih `mixed`, `direct client`, atau `unknown`, jangan ubah kontrak sebelum ada proposal kecil dan approval user.
+5. Reporting dan dashboard harus dicek terhadap canonical reporting views sebelum mengubah total, saldo, paid amount, remaining amount, atau status.
+6. Payment, stock, attendance recap, restore, dan soft-delete harus dianggap high-risk karena menyentuh derived state, trigger/RPC, atau child records.
+
+---
+
+## Supabase Migration Restrictions (Wajib)
+1. Dilarang menjalankan `supabase db push`, `supabase db reset`, `supabase migration up`, `supabase migration repair`, `supabase db pull`, `apply_migration`, atau SQL DDL/DML tanpa approval eksplisit user.
+2. Dilarang rename, hapus, squash, atau membuat migration baru tanpa mandat eksplisit.
+3. Jika audit migration drift diminta, lakukan read-only compare saja: local filenames, MCP `list_migrations`, schema object check, dan dokumentasi mapping.
+4. Untuk drift local-only vs remote-only, klasifikasikan dulu sebagai `timestamp-equivalent`, `already-applied-out-of-band`, `truly-pending`, atau `obsolete`.
+5. `migration repair` hanya boleh diusulkan, bukan dijalankan, kecuali user memberi approval eksplisit setelah mapping dan risiko tertulis.
+6. Jangan mark migration sebagai applied jika object/column/index/function/view yang dimaksud belum terbukti ada di remote schema.
+7. Jangan apply migration yang berisi backfill/data mutation tanpa backup plan, expected row count, stop condition, dan rollback plan.
+8. Jika menyentuh RLS, storage policy, auth, trigger, function, atau view, wajib review security impact dan gunakan `security_invoker=true` untuk public views bila relevan.
+
+---
+
 ## Aturan Umum (Wajib)
 1. Selalu **baca struktur file** dan konteks lokal sebelum edit.
 2. Selalu jaga scope sempit: **1 task = 1 tujuan kecil**.

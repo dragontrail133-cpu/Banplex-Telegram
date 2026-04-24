@@ -35,6 +35,7 @@ import { logPerf, nowMs, roundMs } from '../lib/timing'
 import {
   formatTransactionTimestamp,
   getTransactionCreatorLabel,
+  shouldHideTransactionAmount,
 } from '../lib/transaction-presentation'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
@@ -82,7 +83,7 @@ const dashboardActions = [
   },
   {
     label: 'Unit Kerja',
-    to: '/projects',
+    to: '/reports',
     icon: FolderKanban,
     iconClassName: 'bg-[var(--app-brand-accent-muted)] text-[var(--app-brand-accent)]',
   },
@@ -632,7 +633,11 @@ function Dashboard() {
                   title={item.title}
                   subtitle={item.subtitle}
                   details={item.details}
-                  amount={`${item.amount < 0 ? '-' : '+'}${formatCurrency(Math.abs(item.amount))}`}
+                  amount={
+                    shouldHideTransactionAmount(item.raw)
+                      ? null
+                      : `${item.amount < 0 ? '-' : '+'}${formatCurrency(Math.abs(item.amount))}`
+                  }
                 amountClassName={item.amountColorClass}
                 badge={item.badge}
                 actions={[

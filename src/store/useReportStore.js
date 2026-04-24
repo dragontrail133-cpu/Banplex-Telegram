@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import {
   fetchBusinessReportFromApi,
+  fetchPartyStatementFromApi,
   fetchProjectDetailFromApi,
   fetchPdfSettingsFromApi,
   fetchProjectSummariesFromApi,
@@ -36,12 +37,13 @@ function createPortfolioSummary(rows = []) {
   }
 }
 
-function createReportQueryKey({ reportKind, dateFrom, dateTo, projectId }) {
+function createReportQueryKey({ reportKind, dateFrom, dateTo, projectId, partyId }) {
   return [
     normalizeReportKind(reportKind),
     formatDateInputValue(dateFrom),
     formatDateInputValue(dateTo),
     String(projectId ?? '').trim(),
+    String(partyId ?? '').trim(),
   ].join('|')
 }
 
@@ -52,6 +54,7 @@ const useReportStore = create((set, get) => ({
   reportKind: 'executive_finance',
   reportPeriod: getDefaultBusinessReportPeriod(),
   selectedProjectId: '',
+  selectedPartyId: '',
   reportData: null,
   reportDataKey: null,
   isReportLoading: false,
@@ -80,16 +83,13 @@ const useReportStore = create((set, get) => ({
       pdfDeliveryError: null,
     }),
   setReportKind: (reportKind) =>
-    set((state) => ({
+    set({
       reportKind: normalizeReportKind(reportKind),
       reportError: null,
       reportDataKey: null,
-      reportData:
-        normalizeReportKind(reportKind) === 'project_pl' &&
-        String(state.selectedProjectId ?? '').trim().length === 0
-          ? null
-          : null,
-    })),
+      reportData: null,
+      selectedPartyId: '',
+    }),
   setReportPeriod: (patch = {}) =>
     set((state) => ({
       reportPeriod: {
@@ -104,6 +104,13 @@ const useReportStore = create((set, get) => ({
   setSelectedProjectId: (projectId) =>
     set({
       selectedProjectId: String(projectId ?? '').trim(),
+      reportError: null,
+      reportDataKey: null,
+      reportData: null,
+    }),
+  setSelectedPartyId: (partyId) =>
+    set({
+      selectedPartyId: String(partyId ?? '').trim(),
       reportError: null,
       reportDataKey: null,
       reportData: null,
@@ -169,10 +176,18 @@ const useReportStore = create((set, get) => ({
     }
   },
   fetchBusinessReportData: async ({ force = false } = {}) => {
-    const { reportKind, reportPeriod, selectedProjectId, isReportLoading, reportDataKey, reportData } =
-      get()
+    const {
+      reportKind,
+      reportPeriod,
+      selectedProjectId,
+      selectedPartyId,
+      isReportLoading,
+      reportDataKey,
+      reportData,
+    } = get()
     const normalizedReportKind = normalizeReportKind(reportKind)
     const normalizedProjectId = String(selectedProjectId ?? '').trim()
+    const normalizedPartyId = String(selectedPartyId ?? '').trim()
     const dateFrom = formatDateInputValue(reportPeriod?.dateFrom)
     const dateTo = formatDateInputValue(reportPeriod?.dateTo)
     const queryKey = createReportQueryKey({
@@ -180,9 +195,26 @@ const useReportStore = create((set, get) => ({
       dateFrom,
       dateTo,
       projectId: normalizedProjectId,
+      partyId: normalizedPartyId,
     })
 
     if (normalizedReportKind === 'project_pl' && !normalizedProjectId) {
+      set({
+        reportData: null,
+        reportDataKey: queryKey,
+        isReportLoading: false,
+        reportError: null,
+      })
+
+      return null
+    }
+
+    if (
+      (normalizedReportKind === 'creditor_statement' ||
+        normalizedReportKind === 'supplier_statement' ||
+        normalizedReportKind === 'worker_statement') &&
+      !normalizedPartyId
+    ) {
       set({
         reportData: null,
         reportDataKey: queryKey,
@@ -204,12 +236,27 @@ const useReportStore = create((set, get) => ({
     })
 
     try {
-      const nextReportData = await fetchBusinessReportFromApi({
-        reportKind: normalizedReportKind,
-        dateFrom,
-        dateTo,
-        projectId: normalizedReportKind === 'project_pl' ? normalizedProjectId : null,
-      })
+      const nextReportData =
+        normalizedReportKind === 'creditor_statement' ||
+        normalizedReportKind === 'supplier_statement' ||
+        normalizedReportKind === 'worker_statement'
+          ? await fetchPartyStatementFromApi({
+              partyType:
+                normalizedReportKind === 'supplier_statement'
+                  ? 'supplier'
+                  : normalizedReportKind === 'worker_statement'
+                    ? 'worker'
+                    : 'creditor',
+              partyId: normalizedPartyId,
+              dateFrom,
+              dateTo,
+            })
+          : await fetchBusinessReportFromApi({
+              reportKind: normalizedReportKind,
+              dateFrom,
+              dateTo,
+              projectId: normalizedReportKind === 'project_pl' ? normalizedProjectId : null,
+            })
 
       set({
         reportData: nextReportData,

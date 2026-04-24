@@ -76,6 +76,73 @@ test('assistant writer accepts safe natural rewrite', async () => {
   }
 })
 
+test('assistant writer preserves clarification rewrite', async () => {
+  const originalFetch = globalThis.fetch
+
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () =>
+      JSON.stringify({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    text: 'Maksudnya yang tadi itu ID, nama proyek/supplier, nominal, tanggal, atau status?',
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+  })
+
+  try {
+    const replyText = await rewriteAssistantReply({
+      plan: {
+        intent: 'clarify',
+        language: 'id',
+        clarificationCode: 'specific_filter',
+      },
+      reply: {
+        text: 'Saya butuh filter yang lebih spesifik: ID, nama proyek/supplier, nominal, tanggal, atau status.',
+        needsClarification: true,
+        buttons: [],
+        facts: {
+          clarificationCode: 'specific_filter',
+          queryLabel: 'tagihan dindin',
+        },
+      },
+      workspaceName: 'Banplex',
+      session: {
+        pending_payload: {
+          context_summary: 'follow-up clarification',
+          last_turn: {
+            user_text: 'tagihan dindin',
+          },
+        },
+      },
+      providerConfigs: [
+        {
+          provider: 'gemini',
+          apiKey: 'test-key',
+          model: 'test-model',
+        },
+      ],
+    })
+
+    assert.equal(
+      replyText,
+      'Maksudnya yang tadi itu ID, nama proyek/supplier, nominal, tanggal, atau status?'
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('assistant writer falls back when model invents unsupported number', async () => {
   const originalFetch = globalThis.fetch
 
@@ -139,24 +206,43 @@ test('assistant writer falls back when model invents unsupported number', async 
   }
 })
 
-test('assistant response safety rejects unsupported numbers', () => {
-  assert.equal(
-    isAssistantResponseSafe('Ada 3 tagihan aktif untuk Dindin.', {
-      fallbackText: 'Ada 3 tagihan aktif untuk Dindin.',
-      facts: {
-        rowCount: 3,
+test('assistant response safety rejects unsupported route, entity, and action words', () => {
+  const factPacket = {
+    fallbackText: 'Saya menemukan 3 data paling relevan untuk "tagihan dindin":',
+    buttons: [
+      {
+        text: 'Buka Jurnal',
+        path: '/transactions',
       },
-    }),
+    ],
+    facts: {
+      rowCount: 3,
+      queryLabel: 'tagihan dindin',
+      items: [
+        {
+          index: 1,
+          primaryLabel: 'Dindin',
+        },
+      ],
+    },
+    context: {
+      summary: 'intent=status | query=tagihan dindin',
+      lastRoute: '/transactions?tab=history',
+      entityHints: ['supplier'],
+    },
+  }
+
+  assert.equal(
+    isAssistantResponseSafe('Ada 3 tagihan aktif untuk Dindin.', factPacket),
     true
   )
 
   assert.equal(
-    isAssistantResponseSafe('Ada 4 tagihan aktif untuk Dindin.', {
-      fallbackText: 'Ada 3 tagihan aktif untuk Dindin.',
-      facts: {
-        rowCount: 3,
-      },
-    }),
+    isAssistantResponseSafe('Ada 4 tagihan aktif untuk Dindin.', factPacket),
     false
   )
+
+  assert.equal(isAssistantResponseSafe('Buka Dashboard untuk Dindin.', factPacket), false)
+  assert.equal(isAssistantResponseSafe('Ada 3 tagihan aktif untuk Rizky.', factPacket), false)
+  assert.equal(isAssistantResponseSafe('Silakan hapus tagihan itu.', factPacket), false)
 })

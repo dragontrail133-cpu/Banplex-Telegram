@@ -5,7 +5,7 @@ import {
   getAppSectionLabel,
   getAppTodayKey,
   toAppDateKey,
-} from './date-time'
+} from './date-time.js'
 
 const currencyFormatter = new Intl.NumberFormat('id-ID', {
   style: 'currency',
@@ -17,6 +17,10 @@ function normalizeText(value, fallback = '') {
   const normalizedValue = String(value ?? '').trim()
 
   return normalizedValue.length > 0 ? normalizedValue : fallback
+}
+
+export function hasMeaningfulText(value) {
+  return normalizeText(value, '').length > 0
 }
 
 function toNumber(value) {
@@ -149,6 +153,109 @@ function normalizeBillStatus(transaction) {
     null
 
   return normalizeText(childBillStatus ?? transaction?.status, '').toLowerCase()
+}
+
+export function isDeliveryOrderTransaction(transaction) {
+  const documentType = normalizeText(transaction?.document_type ?? transaction?.documentType, '').toLowerCase()
+
+  return documentType === 'surat_jalan'
+}
+
+export function shouldHideTransactionAmount(transaction) {
+  return isDeliveryOrderTransaction(transaction)
+}
+
+function inferLoanSettlementStatus(transaction) {
+  const remainingAmount = toNumber(
+    transaction?.remainingAmount ??
+      transaction?.remaining_amount ??
+      transaction?.bill_remaining_amount ??
+      transaction?.loan?.remainingAmount ??
+      transaction?.loan?.remaining_amount
+  )
+  const paidAmount = toNumber(
+    transaction?.paid_amount ??
+      transaction?.bill_paid_amount ??
+      transaction?.loan?.paid_amount ??
+      transaction?.loan?.paidAmount ??
+      0
+  )
+  const targetAmount = toNumber(
+    transaction?.repayment_amount ??
+      transaction?.base_repayment_amount ??
+      transaction?.bill_amount ??
+      transaction?.loan?.repayment_amount ??
+      transaction?.loan?.base_repayment_amount ??
+      transaction?.amount
+  )
+
+  if (targetAmount <= 0) {
+    return null
+  }
+
+  if (remainingAmount <= 0 && paidAmount >= targetAmount) {
+    return 'paid'
+  }
+
+  if (paidAmount > 0 && remainingAmount > 0) {
+    return 'partial'
+  }
+
+  return 'unpaid'
+}
+
+function normalizeTransactionSettlementStatus(transaction) {
+  const sourceType = normalizeText(transaction?.sourceType).toLowerCase()
+  const candidateStatuses = [
+    transaction?.ledger_summary?.status,
+    transaction?.ledgerSummary?.status,
+    transaction?.bill?.status,
+    transaction?.bill_status,
+    transaction?.salaryBill?.status,
+    transaction?.salary_bill?.status,
+    transaction?.loan?.status,
+    transaction?.loan_status,
+  ]
+
+  if (
+    ['expense', 'project-income', 'bill', 'loan-disbursement', 'loan', 'attendance-record'].includes(
+      sourceType
+    )
+  ) {
+    candidateStatuses.push(transaction?.status)
+  }
+
+  for (const status of candidateStatuses) {
+    const normalizedStatus = normalizeText(status, '').toLowerCase()
+
+    if (['paid', 'partial', 'unpaid', 'overdue'].includes(normalizedStatus)) {
+      return normalizedStatus
+    }
+  }
+
+  if (['loan-disbursement', 'loan'].includes(sourceType)) {
+    return inferLoanSettlementStatus(transaction)
+  }
+
+  return null
+}
+
+export function getTransactionSettlementBadgeLabel(transaction) {
+  const status = normalizeTransactionSettlementStatus(transaction)
+
+  if (status === 'paid') {
+    return 'Lunas'
+  }
+
+  if (status === 'partial') {
+    return 'Dicicil'
+  }
+
+  if (status === 'unpaid' || status === 'overdue') {
+    return 'Belum'
+  }
+
+  return null
 }
 
 export function isPaidBillTransaction(transaction) {

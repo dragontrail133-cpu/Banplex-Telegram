@@ -17,9 +17,11 @@ import {
   normalizeAssistantPendingPayload,
 } from '../../src/lib/telegram-assistant-session.js'
 import {
+  assistantRouteTargets,
   buildAssistantCommandInput,
   buildAssistantCommandRawText,
   extractAssistantCommand,
+  getAssistantRouteLabel,
   resolveAssistantCallbackAction,
   shouldUseAssistantDmFallback,
 } from '../../src/lib/telegram-assistant-routing.js'
@@ -34,6 +36,13 @@ test('assistant command parser recognizes supported slash commands', () => {
     }
   )
 
+  assert.deepEqual(extractAssistantCommand('/tambah pemasukan', 'banplex_bot'), {
+    command: 'tambah',
+    args: 'pemasukan',
+    rawText: '/tambah pemasukan',
+  })
+
+  assert.equal(buildAssistantCommandRawText('tambah'), '/tambah')
   assert.equal(buildAssistantCommandRawText('riwayat'), '/riwayat')
   assert.equal(
     buildAssistantCommandInput('analytics', 'pengeluaran minggu ini'),
@@ -64,6 +73,12 @@ test('assistant callback routing maps quick action and clarification callbacks',
   assert.deepEqual(resolveAssistantCallbackAction('ta:cmd:riwayat'), {
     type: 'message',
     messageText: '/riwayat',
+    requiresSession: false,
+  })
+
+  assert.deepEqual(resolveAssistantCallbackAction('ta:cmd:tambah'), {
+    type: 'message',
+    messageText: '/tambah',
     requiresSession: false,
   })
 
@@ -169,6 +184,28 @@ test('assistant deep link builder keeps buka route canonical', () => {
   )
 })
 
+test('assistant deep link builder keeps create routes canonical', () => {
+  const createRoutes = [
+    assistantRouteTargets.dashboard,
+    assistantRouteTargets.incomeCreate,
+    assistantRouteTargets.expenseCreate,
+    assistantRouteTargets.loanCreate,
+    assistantRouteTargets.invoiceCreate,
+    assistantRouteTargets.attendanceCreate,
+  ]
+
+  for (const routePath of createRoutes) {
+    const startParam = buildTelegramAssistantStartParam(routePath)
+
+    assert.equal(startParam?.startsWith('nav_'), true)
+    assert.equal(parseTelegramAssistantStartParam(startParam), routePath)
+    assert.equal(
+      buildTelegramAssistantLink('banplex_greenfield_bot', routePath),
+      `https://t.me/banplex_greenfield_bot?startapp=${encodeURIComponent(startParam)}`
+    )
+  }
+})
+
 test('assistant deep link builder keeps transaction detail history canonical', () => {
   const routePath = '/transactions/bill-9?surface=riwayat'
   const startParam = buildTelegramAssistantStartParam(routePath)
@@ -176,6 +213,30 @@ test('assistant deep link builder keeps transaction detail history canonical', (
   assert.equal(startParam?.startsWith('nav_'), true)
   assert.equal(parseTelegramAssistantStartParam(startParam), routePath)
   assert.equal(normalizeAssistantRoutePath('/transactions/bill-9?surface=history'), routePath)
+  assert.equal(
+    buildTelegramAssistantLink('banplex_greenfield_bot', routePath),
+    `https://t.me/banplex_greenfield_bot?startapp=${encodeURIComponent(startParam)}`
+  )
+})
+
+test('assistant route labels stay canonical across payroll and ledger variants', () => {
+  assert.equal(getAssistantRouteLabel(assistantRouteTargets.dashboard), 'Dashboard')
+  assert.equal(getAssistantRouteLabel(assistantRouteTargets.ledger), 'Jurnal')
+  assert.equal(getAssistantRouteLabel(assistantRouteTargets.activeLedger), 'Jurnal')
+  assert.equal(getAssistantRouteLabel(assistantRouteTargets.billLedger), 'Tagihan')
+  assert.equal(getAssistantRouteLabel(assistantRouteTargets.history), 'Riwayat')
+  assert.equal(getAssistantRouteLabel(assistantRouteTargets.payment), 'Pembayaran')
+  assert.equal(getAssistantRouteLabel(assistantRouteTargets.payroll), 'Absensi')
+  assert.equal(getAssistantRouteLabel(assistantRouteTargets.attendance), 'Absensi')
+  assert.equal(getAssistantRouteLabel(assistantRouteTargets.worker), 'Pekerja')
+})
+
+test('assistant deep link builder keeps attendance canonical', () => {
+  const routePath = assistantRouteTargets.attendance
+  const startParam = buildTelegramAssistantStartParam(routePath)
+
+  assert.equal(startParam?.startsWith('nav_'), true)
+  assert.equal(parseTelegramAssistantStartParam(startParam), routePath)
   assert.equal(
     buildTelegramAssistantLink('banplex_greenfield_bot', routePath),
     `https://t.me/banplex_greenfield_bot?startapp=${encodeURIComponent(startParam)}`

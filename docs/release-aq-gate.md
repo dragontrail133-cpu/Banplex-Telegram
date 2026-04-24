@@ -46,6 +46,7 @@ Release dinyatakan `Ready` hanya jika tidak ada `blocker`.
    - `npm run lint`
    - `npm run build`
    - cek env app dan env verifier
+   - lint harus membaca source repo saja; artefak generated seperti `playwright-report/` dan `test-results/` tidak boleh ikut mengubah hasil gate
 2. `Mock regression`
    - `npm run test:e2e`
    - ini bukan bukti write real
@@ -72,6 +73,9 @@ Lane `tests/live/release-smoke.spec.js` sengaja memakai:
 - `devAuthBypass=1`
 - session Supabase nyata dari `/api/auth`
 - request bisnis nyata tanpa `page.route()` mocking
+
+Smoke report/PDF yang fokus ke browser download + `Kirim ke DM` dipisah ke `tests/live/report-pdf-delivery.spec.js` supaya lane itu bisa divalidasi tanpa menunggu serial smoke besar.
+Smoke report mock di `tests/e2e/report.spec.js` mengikuti route canonical `Jurnal` / `Tagihan` dan memakai fixture laporan deterministik supaya download PDF bisa ditrigger dari contract UI terbaru.
 
 Artifact yang dihasilkan:
 
@@ -109,7 +113,7 @@ Untuk lane live smoke:
 - `VITE_SUPABASE_PUBLISHABLE_KEY` atau `VITE_SUPABASE_ANON_KEY`
 - `OWNER_TELEGRAM_ID` atau `DEV_BYPASS_TELEGRAM_ID`
 - `E2E_BASE_URL` opsional, default `http://127.0.0.1:3000`
-- `E2E_LOCAL_SERVER_COMMAND` opsional, default `vercel dev --listen 127.0.0.1:3000 --yes`
+- `E2E_LOCAL_SERVER_COMMAND` opsional, default `npm run dev:api`
 - `E2E_SMOKE_PREFIX` opsional
 
 Untuk verifier:
@@ -144,7 +148,7 @@ Untuk verifier:
 | `Material invoice / surat jalan` | material, supplier material, project, dan stock context siap | sudah ada create `material invoice` unpaid dari UI create form | `expenses`, `bills`, `expense_line_items`, dan `stock_transactions` diverifikasi | edit invoice, `surat_jalan`, rollback stock saat delete/restore | ya |
 | `Attendance -> salary bill -> payment` | worker, wage rate, project, dan payroll seed siap | belum ada | belum ada | create attendance, generate salary bill, payment history, guard `billed` | ya |
 | `Attachment / file assets` | bucket storage, policy upload, dan metadata relation siap | belum ada | belum ada | upload, preview, relation, cleanup orphan | ya |
-| `Report / PDF` | data staging representatif dan env PDF/notifikasi siap | belum ada | belum ada | buka report, cocokkan angka, unduh PDF valid | ya |
+| `Report / PDF` | data staging representatif dan env PDF/notifikasi siap | smoke browser download PDF + trigger `Kirim ke DM` dari Mini Web di `tests/live/report-pdf-delivery.spec.js` | belum ada | buka report, cocokkan angka, unduh PDF valid | ya |
 | `Delete lifecycle` | row smoke parent-child tersedia untuk uji delete | belum ada | belum ada | soft delete, restore, permanent delete staging-only | ya |
 
 ## Next Smoke Priority
@@ -153,8 +157,7 @@ Urutan penutupan gap otomatis setelah lane live smoke dasar berjalan:
 
 1. `attendance -> salary bill -> payment`
 2. `attachment / file_assets`
-3. `report / PDF`
-4. `soft delete / restore / permanent delete`
+3. `soft delete / restore / permanent delete`
 
 ## Active Blockers
 
@@ -168,7 +171,8 @@ Urutan penutupan gap otomatis setelah lane live smoke dasar berjalan:
   - smoke attachment masih butuh strategi file disposable, proof relation `file_assets`, dan audit orphan cleanup
   - domain ini belum punya artifact verifier khusus
 - `Report / PDF`
-  - smoke PDF export ada di lane mock, tetapi live gate belum punya comparator angka source-vs-report yang deterministik
+  - smoke PDF export sekarang sudah divalidasi di lane dedicated browser + Mini Web DM trigger
+  - live gate masih belum punya comparator angka source-vs-report yang deterministik dan dataset staging-safe yang representatif
   - target UI/report juga tetap bergantung pada staging-safe dataset yang representatif
 - `Delete lifecycle`
   - soft delete/restore bisa diotomasi berikutnya, tetapi permanent delete masih perlu domain disposable yang aman dan verifier cascade child yang jelas

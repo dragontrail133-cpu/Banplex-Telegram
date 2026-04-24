@@ -54,6 +54,8 @@ function ActionCard({
   badge = null,
   badgeClassName = '',
   badges = [],
+  badgePlacement = 'afterAmount',
+  maxVisibleBadges = 1,
   actions = [],
   className = '',
   leadingIcon = null,
@@ -70,11 +72,39 @@ function ActionCard({
 
   const visibleBadges = useMemo(() => {
     const compactBadges = [badge, ...badges].filter(Boolean)
+    const badgeLimit = Math.max(Number(maxVisibleBadges ?? 1) || 0, 0)
 
-    return compactBadges.slice(0, 1)
-  }, [badge, badges])
+    return compactBadges.slice(0, badgeLimit)
+  }, [badge, badges, maxVisibleBadges])
 
   const hiddenBadgeCount = Math.max([badge, ...badges].filter(Boolean).length - visibleBadges.length, 0)
+  const amountNode = amount ? (
+    <span className={`truncate text-sm font-semibold text-[var(--app-text-color)] ${amountClassName}`}>
+      {amount}
+    </span>
+  ) : null
+  const badgeStack =
+    visibleBadges.length > 0 || hiddenBadgeCount > 0 ? (
+      <div className="flex min-w-0 flex-col items-end gap-1">
+        {visibleBadges.map((visibleBadge, index) => (
+          <span
+            key={`${title}-${index}-${visibleBadge}`}
+            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+              index === 0
+                ? `border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] text-[var(--app-text-color)] ${badgeClassName}`
+                : 'border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] text-[var(--app-hint-color)]'
+            }`}
+          >
+            {visibleBadge}
+          </span>
+        ))}
+        {hiddenBadgeCount > 0 ? (
+          <span className="inline-flex items-center rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] px-2 py-0.5 text-[11px] font-medium text-[var(--app-hint-color)]">
+            +{hiddenBadgeCount}
+          </span>
+        ) : null}
+      </div>
+    ) : null
 
   const handleActionClick = (action) => {
     setIsMenuOpen(false)
@@ -140,25 +170,17 @@ function ActionCard({
 
         <div className="flex shrink-0 items-start gap-2">
           <div className="flex min-w-0 flex-col items-end gap-1">
-            {amount ? (
-              <span
-                className={`truncate text-sm font-semibold text-[var(--app-text-color)] ${amountClassName}`}
-              >
-                {amount}
-              </span>
-            ) : null}
-            {visibleBadges.length > 0 ? (
-              <span
-                className={`inline-flex items-center rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-2 py-0.5 text-[11px] font-medium text-[var(--app-text-color)] ${badgeClassName}`}
-              >
-                {visibleBadges[0]}
-              </span>
-            ) : null}
-            {hiddenBadgeCount > 0 ? (
-              <span className="inline-flex items-center rounded-full border border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-2 py-0.5 text-[11px] font-medium text-[var(--app-hint-color)]">
-                +{hiddenBadgeCount}
-              </span>
-            ) : null}
+            {badgePlacement === 'beforeAmount' ? (
+              <>
+                {badgeStack}
+                {amountNode}
+              </>
+            ) : (
+              <>
+                {amountNode}
+                {badgeStack}
+              </>
+            )}
           </div>
         </div>
       </button>

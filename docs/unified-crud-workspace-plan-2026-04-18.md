@@ -2403,9 +2403,9 @@ Saat ada brief baru yang masih terkait stream ini, update dokumen dengan format:
   - Scope target: `src/components/ui/GlobalToast.jsx`.
   - Dependensi: `UCW-273`.
 - [x] UCW-275 - Pisahkan rumah PDF settings dan laporan profesional Unit Kerja
-  - PDF settings harus punya rumah UI mandiri di `/projects/pdf-settings`, bukan menumpuk di report hub utama.
+  - PDF settings sekarang di-merge ke `ProjectsPage` sebagai section `PDF & Laporan`; `/projects/pdf-settings` tetap hidup sebagai alias kompatibilitas.
   - `/projects` menjadi report hub `Unit Kerja` yang report-kind first untuk `Executive Finance`, `Project P&L`, dan `Cash Flow`, dengan data laporan bisnis yang diolah dari source data repo yang sudah ada.
-  - Scope target: `src/components/ProjectReport.jsx`, `src/pages/ProjectPdfSettingsPage.jsx`, `src/lib/business-report.js`, `src/lib/report-pdf.js`, `src/lib/reports-api.js`, `src/store/useReportStore.js`, `api/records.js`, `src/App.jsx`, `src/components/ui/AppPrimitives.jsx`.
+  - Scope target: `src/components/ProjectReport.jsx`, `src/pages/ProjectsPage.jsx`, `src/pages/ProjectPdfSettingsPage.jsx`, `src/lib/business-report.js`, `src/lib/report-pdf.js`, `src/lib/reports-api.js`, `src/store/useReportStore.js`, `api/records.js`, `src/App.jsx`, `src/components/ui/AppPrimitives.jsx`.
 - [x] UCW-276 - Backfill snapshot payroll legacy dan read fallback worker aggregate
   - Payroll bill legacy yang masih kosong snapshot harus dibackfill dari `workers.name` dengan fallback deskripsi bila join worker gagal.
   - Read fallback detail payroll harus tetap aman walau ada row legacy yang belum sempat dibackfill, tanpa mengubah amount/status/relasi.
@@ -2647,11 +2647,11 @@ Saat ada brief baru yang masih terkait stream ini, update dokumen dengan format:
   - Scope target: `api/telegram-assistant.js`, `src/lib/telegram-assistant-links.js`, `src/lib/telegram-assistant-routing.js`, `tests/unit/telegram-assistant-routing.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
   - Dependensi: `UCW-319`, `UCW-320`.
   - Addendum audit: fallback conversational state tetap read-only, membedakan grup vs DM, dan DM pribadi dipakai untuk follow-up terverifikasi tanpa membuat source of truth baru.
-- [ ] UCW-322 - Smoke browser, Mini Web Telegram, dan fallback DM untuk laporan bisnis
+- [x] UCW-322 - Smoke browser, Mini Web Telegram, dan fallback DM untuk laporan bisnis
   - Harus ada bukti smoke bahwa browser tetap bisa unduh PDF, Telegram Mini Web menyediakan jalur `Kirim ke DM`, dan delivery DM benar-benar memanggil endpoint server-side untuk user terverifikasi.
-  - Scope target: `tests/live/*` atau smoke yang setara, `docs/progress/unified-crud-workspace-progress-log.md`, `docs/release-aq-gate.md`.
+  - Scope target: `tests/live/report-pdf-delivery.spec.js`, `tests/live/helpers/live-app.js`, `docs/progress/unified-crud-workspace-progress-log.md`, `docs/release-aq-gate.md`.
   - Dependensi: `UCW-319`.
-  - Addendum audit: smoke ini fokus ke report/PDF surface dan menjadi gate sebelum fallback DM dianggap production-ready.
+  - Addendum audit: smoke report/PDF dipindah ke spec khusus supaya bisa divalidasi tanpa menunggu baseline serial smoke yang lebih berat; browser download + DM trigger sekarang lolos di `tests/live/report-pdf-delivery.spec.js` terhadap `ProjectsPage`.
 - [x] UCW-323 - Audit smoke deep soft-delete, restore, dan permanent delete lintas domain
   - Browser/unit smoke harus membuktikan label UI aktual (`Jurnal`, `Arsip`, `Arsip Master`) dan policy recycle-bin untuk document restore-only, master restore-only, attendance permanent delete, serta payment leaf restore/permanent delete.
   - Scope target: `tests/e2e/transactions.spec.js`, `tests/e2e/restore.spec.js`, `tests/e2e/payment.spec.js`, `tests/unit/attachment-permissions.test.js`, `docs/progress/unified-crud-workspace-progress-log.md`.
@@ -2687,3 +2687,136 @@ Saat ada brief baru yang masih terkait stream ini, update dokumen dengan format:
   - Scope target: `src/pages/TeamInvitePage.jsx`, `src/components/TeamInviteManager.jsx`, `src/components/ui/MasterPickerField.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
   - Dependensi: `UCW-124`, `UCW-125`, `UCW-324`, `UCW-326`.
   - Addendum audit: surface invite boleh tetap punya action link/copy dan list anggota, tetapi tanpa deskripsi panjang, helper text, atau search field di picker.
+- [x] UCW-330 - Stabilkan env fallback delivery PDF Telegram untuk DM user terverifikasi
+  - Endpoint delivery PDF harus menerima fallback `VITE_SUPABASE_URL` dan `VITE_SUPABASE_PUBLISHABLE_KEY`/`VITE_SUPABASE_ANON_KEY`, lalu tetap bisa melanjutkan lookup profile Telegram untuk delivery DM tanpa berhenti di env incomplete.
+  - Scope target: `api/report-pdf-delivery.js`, `tests/unit/report-pdf-delivery.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-319`.
+  - Addendum audit: brief ini skip smoke dulu; fokusnya menutup failure env di jalur kirim PDF ke DM dan menambah coverage unit untuk fallback runtime.
+- [x] UCW-331 - Pulihkan preview lokal `vercel dev` untuk API auth
+  - Preview lokal full runtime harus bisa melayani Vite dan Vercel serverless API di Windows tanpa watcher `EPERM`, serta punya command npm yang jelas untuk membedakan UI-only dev dan API dev.
+  - Scope target: `.vercelignore`, `vercel.json`, `package.json`, `playwright.live.config.js`, `docs/release-aq-gate.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-317`.
+  - Addendum audit: `vercel.json` memaksa Vite upstream bind ke `127.0.0.1`, `.vercelignore` membatasi watcher ke file runtime, dan `npm run dev:api` menjadi command full preview lokal.
+- [x] UCW-332 - Ringkas CTA notifikasi grup Telegram jadi satu tombol dan tambahkan notifikasi save absensi
+  - Notifikasi grup operasional harus tetap ringkas dengan satu tombol CTA canonical per event, dan save sheet absensi harus memicu notifikasi summary yang mengarah ke review payroll harian.
+  - Scope target: `api/notify.js`, `src/components/AttendanceForm.jsx`, `tests/unit/telegram-notify.test.js`, `tests/live/release-smoke.spec.js`, `tests/live/helpers/live-app.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-320`, `UCW-327`, `UCW-331`.
+  - Addendum audit: `loan_payment` kini menuju detail transaksi canonical pada surface riwayat, `AttendanceForm` mengirim summary sheet ke `/api/notify` setelah save sukses, dan live smoke meng-capture request notify tanpa side effect Telegram nyata.
+- [x] UCW-334 - Tambahkan contract laporan per pihak untuk kreditur, supplier, dan pekerja
+  - Laporan statement harus punya contract backend domain-native untuk `creditor`, `supplier`, dan `worker`, lalu mengekspos summary saldo + rows transaksi supaya PDF baru bisa dibangun di atas source of truth yang sama.
+  - Scope target: `api/records.js`, `src/lib/reports-api.js`, `tests/unit/party-statement.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-88`, `UCW-275`, `UCW-332`.
+  - Addendum audit: ledger statement memakai row obligation/payment yang disortir kronologis, opening balance dihitung dari riwayat sebelum periode, dan helper client expose `fetchPartyStatementFromApi()` untuk surface UI nanti.
+- [x] UCW-335 - Rilis statement PDF kreditur v1 dari `ProjectsPage`
+  - Statement kreditur harus bisa dipilih dari hub `ProjectsPage`, mengambil row dari contract `party_statement`, lalu menghasilkan PDF dengan ringkasan saldo dan daftar transaksi.
+  - Scope target: `src/components/ProjectReport.jsx`, `src/store/useReportStore.js`, `src/lib/business-report.js`, `src/lib/report-pdf.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-334`, `UCW-339`.
+  - Addendum audit: kreditur dulu untuk v1; supplier dan worker tetap micro-task terpisah supaya scope tetap kecil.
+  - Addendum audit final: `ProjectsPage` sekarang punya toggle `Kreditur`, picker kreditur, summary saldo awal/debit/kredit/saldo akhir, daftar transaksi kreditur, dan PDF statement memakai palette `pdf_settings` yang sama dengan shell bisnis existing.
+- [x] UCW-336 - Rilis statement PDF supplier v1 dari `ProjectsPage`
+  - Statement supplier harus bisa dipilih dari hub `ProjectsPage`, mengambil row dari contract `party_statement`, lalu menghasilkan PDF dengan ringkasan saldo dan daftar transaksi.
+  - Scope target: `src/components/ProjectReport.jsx`, `src/store/useReportStore.js`, `src/lib/business-report.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-334`, `UCW-335`, `UCW-339`.
+  - Addendum audit: supplier v1 ikut pola statement yang sama dengan kreditur, tapi tetap dipisah supaya perubahan UI/store tetap kecil dan mudah diaudit.
+  - Addendum audit final: `ProjectsPage` sekarang punya toggle `Supplier`, picker supplier, summary saldo awal/debit/kredit/saldo akhir, daftar transaksi supplier, dan `useReportStore` mengarah ke `party_statement` dengan `partyType=supplier`.
+- [x] UCW-337 - Rilis statement PDF pekerja v1 dari `ProjectsPage`
+  - Statement pekerja harus bisa dipilih dari hub `ProjectsPage`, mengambil row dari contract `party_statement`, lalu menghasilkan PDF dengan ringkasan saldo dan daftar transaksi.
+  - Scope target: `src/components/ProjectReport.jsx`, `src/store/useReportStore.js`, `src/lib/business-report.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-334`, `UCW-335`, `UCW-336`, `UCW-339`.
+  - Addendum audit: pekerja v1 ikut pola statement yang sama dengan kreditur dan supplier, tapi tetap dipisah supaya perubahan UI/store tetap kecil dan mudah diaudit.
+- [x] UCW-338 - Redesign kwitansi create expense dan faktur material agar senada
+  - Kwitansi transaksi dan faktur material harus memakai shell visual yang sama dengan kwitansi pembayaran supaya branding, header, dan feel PDF tetap konsisten.
+  - Scope target: `api/notify.js`, `src/lib/report-pdf.js`, `tests/live/release-smoke.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-335`, `UCW-336`, `UCW-339`.
+  - Addendum audit: task ini akan fokus ke generator PDF kwitansi/faktur yang sudah ada tanpa mengubah contract laporan pihak.
+  - Addendum audit final: `renderPaymentReceiptShell()` dan `addPaymentReceiptFooter()` sekarang dipakai bersama oleh kwitansi pembayaran, kwitansi transaksi, dan faktur material sehingga header, watermark, footer, dan tonalitas brand tetap konsisten.
+- [x] UCW-339 - Merge `ProjectsPage` dengan pengaturan PDF sebagai satu hub
+  - Surface `ProjectReport` dan pengaturan PDF harus tampil dalam `ProjectsPage` yang sama, sementara `/projects/pdf-settings` tetap hidup sebagai alias kompatibilitas yang mendarat ke section `PDF & Laporan`.
+  - Scope target: `src/pages/ProjectsPage.jsx`, `src/pages/ProjectPdfSettingsPage.jsx`, `src/App.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-88`, `UCW-275`, `UCW-332`.
+  - Addendum audit: `ProjectsPage` sekarang memuat report dan section pengaturan PDF secara inline, route legacy `/projects/pdf-settings` hanya redirect ke anchor section yang sama, dan kontrak data settings / generator PDF bisnis tetap tidak berubah.
+- [x] UCW-340 - Dedikasikan detail faktur material dan poles delete UX lintas surface
+  - Route canonical `Material Invoice` harus berdiri sendiri, detail page memakai satu card pusat, tombol hapus tetap terlihat lalu memberi fallback riwayat saat payment history sudah ada, dan history payroll worker tetap read-only tanpa aksi hapus/kwitansi.
+  - Scope target: `src/App.jsx`, `api/transactions.js`, `src/components/TransactionDeleteDialog.jsx`, `src/lib/material-invoice.js`, `src/lib/transaction-delete.js`, `src/pages/MaterialInvoiceDetailPage.jsx`, `src/pages/TransactionDetailPage.jsx`, `src/pages/EditRecordPage.jsx`, `src/pages/TransactionsPage.jsx`, `tests/unit/transaction-delete.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-03`, `UCW-26`, `UCW-28`, `UCW-93`, `UCW-236`.
+  - Addendum audit: route canonical `/material-invoice/:id` sekarang dipakai untuk detail workspace, delete dialog reuse lintas surface menampilkan fallback riwayat saat payment history ada, dan guard stock material tetap mencegah delete bila rollback tidak aman.
+- [x] UCW-341 - Harden assistant reply safety
+  - Reply writer assistant harus tetap grounded pada fact packet, button route, dan konteks session; rewrite yang mengarang angka, entity, route, atau aksi baru harus fallback ke teks deterministik.
+  - Scope target: `api/telegram-assistant.js`, `tests/unit/telegram-assistant-writer.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-332`, `UCW-340`.
+  - Addendum audit: safety gate writer sekarang menolak rewrite yang mengarang angka, entity, route, atau aksi baru di luar fact packet, klarifikasi tetap lolos, dan fallback deterministik tetap jadi jalur aman.
+- [x] UCW-342 - Kunci coherence route assistant dan label CTA canonical
+  - Navigate reply, tombol inline, callback action, dan deep link assistant harus menunjuk ke route canonical yang sama tanpa drift label atau target.
+  - Scope target: `api/telegram-assistant.js`, `src/lib/telegram-assistant-links.js`, `src/lib/telegram-assistant-routing.js`, `tests/unit/telegram-assistant-routing.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-332`, `UCW-341`.
+  - Addendum audit: label reply dan CTA sekarang dibaca dari satu source of truth route canonical; attendance CTA mengarah ke `/payroll?tab=daily`, worker CTA ke `/payroll?tab=worker`, navigate reply payroll tetap memetakan label yang sama, dan deep link attendance roundtrip lolos unit test.
+- [x] UCW-343 - Kembalikan detail faktur material dan surat jalan ke tab canonical transaksi
+  - Surface detail awal tetap sama di `TransactionDetailPage`, rincian faktur/surat jalan dibuka lewat tab, dan route legacy `/material-invoice/:id` cukup jadi alias redirect ke `/transactions/:id`.
+  - Scope target: `api/transactions.js`, `src/components/MaterialInvoiceDetailPanel.jsx`, `src/lib/material-invoice.js`, `src/pages/MaterialInvoiceDetailPage.jsx`, `src/pages/TransactionDetailPage.jsx`, `tests/e2e/transactions.spec.js`, `tests/e2e/helpers/routes.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-340`.
+  - Addendum audit: tab `Rincian Faktur` sekarang dibangun dari detail material invoice yang difetch ulang, sementara route legacy tetap hidup sebagai redirect supaya link lama tidak putus.
+- [x] UCW-344 - Pulihkan tombol simpan income baru yang tidak submit
+  - Tombol simpan pada form pemasukan proyek baru harus submit beneran lewat wiring `formId`, tanpa mengubah flow create income lain.
+  - Scope target: `src/components/IncomeForm.jsx`, `tests/e2e/edit.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-336`.
+  - Addendum audit: form `IncomeForm` kembali punya `id` yang cocok dengan footer action bar, dan e2e create income sekarang membuktikan request `POST /api/transactions` benar-benar terkirim.
+- [x] UCW-345 - Tambahkan badge status pembayaran di row jurnal
+  - Row jurnal di `TransactionsPage` menampilkan badge status kecil `Lunas / Dicicil / Belum` di stack kanan bawah badge creator, dengan amount tetap di bawahnya saat billing status tersedia.
+  - Scope target: `src/components/ui/ActionCard.jsx`, `src/lib/transaction-presentation.js`, `src/pages/TransactionsPage.jsx`, `tests/unit/transaction-presentation.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-340`, `UCW-343`.
+  - Addendum audit: badge status hanya muncul untuk row yang memang punya settlement/billing status; row tanpa status tetap memakai layout lama agar perubahan tetap kecil dan terukur.
+- [x] UCW-346 - Koreksi badge row jurnal dan sembunyikan amount surat jalan
+  - Row jurnal tetap menaruh amount di atas, creator badge tetap jadi chip utama, status settlement ikut badge yang berbeda, loan tetap menampilkan status dari bill/amount fallback, dan amount surat jalan disembunyikan di surface transaksi yang relevan.
+  - Scope target: `src/components/MaterialInvoiceDetailPanel.jsx`, `src/components/ui/ActionCard.jsx`, `src/lib/transaction-presentation.js`, `src/pages/Dashboard.jsx`, `src/pages/DeletedTransactionDetailPage.jsx`, `src/pages/HistoryPage.jsx`, `src/pages/TransactionDetailPage.jsx`, `src/pages/TransactionsPage.jsx`, `src/pages/TransactionsRecycleBinPage.jsx`, `tests/unit/transaction-presentation.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-345`.
+  - Addendum audit: revisi ini menutup mismatch layout amount vs badge, membedakan creator dan status secara visual, dan menyembunyikan amount pada delivery order tanpa mengganggu faktur normal.
+- [x] UCW-347 - Ringkas field deskripsi/catatan dan sembunyikan notes kosong di detail
+  - Field textarea deskripsi dan catatan pada form aktif perlu lebih hemat tinggi, sementara notes kosong tidak boleh dirender lagi di surface detail/history mana pun.
+  - Scope target: `src/components/ui/AppPrimitives.jsx`, `src/components/ExpenseForm.jsx`, `src/components/IncomeForm.jsx`, `src/components/LoanForm.jsx`, `src/components/MaterialInvoiceForm.jsx`, `src/components/HrdPipeline.jsx`, `src/pages/PaymentPage.jsx`, `src/pages/TransactionDetailPage.jsx`, `src/pages/PayrollWorkerDetailPage.jsx`, `src/pages/PaymentsPage.jsx`, `src/components/MaterialInvoiceDetailPanel.jsx`, `src/lib/transaction-presentation.js`, `tests/unit/transaction-presentation.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-343`, `UCW-346`.
+  - Addendum audit: compact textarea target diturunkan dari 28px ke 24px agar form tidak terlalu tinggi; note yang kosong disembunyikan sepenuhnya di surface detail, bukan diganti placeholder.
+- [x] UCW-348 - Susun command bot step-by-step dengan `tambah`
+  - Surface `Telegram assistant` harus bergerak step-by-step: `/tambah` membuka submenu domain input, `/buka` membuka core surface, `/cari` domain-first search picker, `/status` dan `/riwayat` menampilkan summary bucket, serta `/analytics` memakai metric-first clarification.
+  - Scope target: `api/telegram-assistant.js`, `src/lib/telegram-assistant-links.js`, `src/lib/telegram-assistant-routing.js`, `tests/unit/telegram-assistant-routing.test.js`, `docs/freeze/01-planning-decision-freeze.md`, `docs/freeze/02-prd-master.md`, `docs/freeze/03-source-of-truth-contract-map.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-341`, `UCW-342`.
+  - Addendum audit: command surface tetap read-only dan code-owned; BotFather hanya visibility command list, `tambah` hanya deep-link ke form input mini app, `buka/cari` mendarat ke route picker canonical, dan `status/riwayat/analytics` tetap summary-first atau clarification-first tanpa menambah jalur mutasi.
+- [x] UCW-349 - Rapikan gate lint agar artefak generated tidak mengotori audit repo
+  - `npm run lint` harus kembali memeriksa source repo saja; artefak `playwright-report`, `test-results`, dan output generated lain tidak boleh membuat audit source code gagal palsu.
+  - Scope target: `eslint.config.js`, `.gitignore`, `docs/release-aq-gate.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-312`, `UCW-323`.
+  - Addendum audit: `eslint` global ignore sekarang menutup `playwright-report/**` dan `test-results/**`, jadi `npm run lint` kembali memotret source repo aktif tanpa noise artefak smoke/test.
+- [x] UCW-350 - Stabilkan unit test lifecycle invite token agar tidak bergantung tanggal hari ini
+  - Unit test mapping invite tidak boleh gagal hanya karena tanggal absolut pada fixture sudah lewat; lifecycle invite harus diuji dengan jam referensi deterministik atau fixture yang relatif.
+  - Scope target: `src/lib/team-invite.js`, `tests/unit/team-invite-store.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-349`.
+  - Addendum audit: boundary yang disentuh hanya helper invite dan unit test store tim; helper lifecycle menerima jam referensi opsional supaya fixture test bisa deterministik tanpa mengubah workflow invite lintas UI/server.
+- [x] UCW-351 - Stabilkan bootstrap auth mock browser dan first-route smoke
+  - Harness Playwright mock harus bisa membuka `/`, `/attendance/new`, dan route shell lain tanpa macet di `Sedang memuat workspace`, timeout `goto`, atau `ERR_CONNECTION_REFUSED` yang tidak deterministik.
+  - Scope target: `tests/e2e/helpers/app.js`, `playwright.config.js`, `src/store/useAuthStore.js`, `src/lib/dev-auth-bypass.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-182`, `UCW-349`.
+  - Addendum audit: targetnya menormalkan auth bootstrap dan startup harness; helper smoke sekarang menanam bypass storage sebelum navigation dan menunggu loading screen workspace hilang sebelum assert route, tanpa mengubah mode produk browser-first di luar contract dev/reviewer.
+- [x] UCW-352 - Sinkronkan smoke mock `Tagihan` dan PDF dengan contract UI terbaru
+  - Suite mock report harus mengikuti route canonical terbaru: `/tagihan` mendarat ke `Jurnal` tab `Tagihan`, dan smoke PDF harus memakai data/mock yang benar-benar cukup untuk memicu download atau dipisah tegas dari lane live.
+  - Scope target: `tests/e2e/report.spec.js`, `tests/e2e/helpers/app.js`, `src/pages/TransactionsPage.jsx`, `src/components/ProjectReport.jsx`, `src/store/useReportStore.js`, `docs/release-aq-gate.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-351`, `UCW-322`.
+  - Addendum audit: task ini tidak boleh mengubah source of truth report; smoke mock sekarang mengikuti route `Jurnal` / `Tagihan` canonical dan memakai fixture laporan deterministik supaya unduhan PDF benar-benar terjadi pada lane mock, bukan bergantung pada live seed.
+- [x] UCW-353 - Stabilkan submit mobile create `project-income` pada routed form
+  - Tombol `Simpan Termin Proyek` di viewport mobile tidak boleh tertutup layer form atau gagal diklik; request `POST /api/transactions` harus benar-benar terkirim dari surface routed form.
+  - Scope target: `src/components/IncomeForm.jsx`, `src/pages/EditRecordPage.jsx`, `src/components/layouts/FormLayout.jsx`, `tests/e2e/edit.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-344`, `UCW-351`.
+  - Addendum audit: fokus hanya pada submit path mobile create income; footer routed form tetap di satu shell yang sama, tetapi action bar kini tetap terlihat di mobile dan tetap bisa menerima pointer event saat field terakhir masih fokus.
+- [ ] UCW-354 - Sinkronkan AQ gate dengan coverage smoke aktual dan gap yang masih tersisa
+  - Dokumen AQ harus mencatat coverage live yang sudah nyata untuk `attendance -> salary bill -> payment` serta report/PDF dedicated smoke, sambil membiarkan gap attachment, delete lifecycle, comparator report, dan staging-safe target tetap eksplisit.
+  - Scope target: `docs/release-aq-gate.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-322`, `UCW-312`, `UCW-315`.
+  - Addendum audit: task ini docs-only; tidak membuka write smoke baru sebelum target staging-safe terbukti aman.
+- [x] UCW-355 - Audit entrypoint dan arsitektur `/reports` untuk PDF hub
+  - Sebelum implementasi runtime route baru, entrypoint unduh PDF laporan Kreditur/Supplier/Pekerja harus dipetakan dari repo aktual, pilihan arsitektur user harus dikunci, dan micro-task berikutnya harus ditulis tanpa asumsi liar.
+  - Scope target: `docs/report-pdf-hub-entrypoint-audit-2026-04-24.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-334`, `UCW-335`, `UCW-336`, `UCW-337`, `UCW-339`, `UCW-352`.
+  - Addendum audit: canonical target dikunci ke `/reports`, `/projects` tetap alias kompatibilitas, PDF generation tetap on-demand hybrid, dan batch ini berhenti di dokumen audit/plan tanpa menyentuh runtime.
+- [ ] UCW-356 - Tambahkan canonical route `/reports` tanpa mengubah generator PDF
+  - Route report hub canonical harus mendarat ke `ProjectsPage` yang sama, sementara `/projects`, `/projects/pdf-settings`, dan `/proyek` tetap berfungsi sebagai alias kompatibilitas direct ke `/reports` / `/reports#pdf-settings`.
+  - Scope target: `src/App.jsx`, `src/pages/ProjectsPage.jsx`, `src/pages/ProjectPdfSettingsPage.jsx`, `src/pages/Dashboard.jsx`, `src/pages/MorePage.jsx`, `tests/e2e/report.spec.js`, `tests/live/report-pdf-delivery.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-355`.
+  - Addendum audit: canonical route dipilih ke `/reports`; alias lama tetap hidup, PDF generator dan source data report tidak berubah, dan naming UI `Unit Kerja` tetap ditahan untuk task lanjutan.

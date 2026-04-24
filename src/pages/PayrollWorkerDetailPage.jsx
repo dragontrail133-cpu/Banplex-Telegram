@@ -17,6 +17,7 @@ import {
 } from '../lib/records-api'
 import {
   formatCurrency,
+  hasMeaningfulText,
   formatPayrollSettlementLabel,
   getPayrollBillGroupHistoryRows,
   getPayrollBillGroupSummary,
@@ -630,9 +631,11 @@ function PayrollWorkerDetailPage() {
                   <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--app-hint-color)]">
                     Catatan
                   </p>
-                  <p className="text-sm leading-6 text-[var(--app-text-color)]">
-                    {normalizeText(row.notes, 'Tidak ada catatan.')}
-                  </p>
+                  {hasMeaningfulText(normalizeText(row.notes, '')) ? (
+                    <p className="text-sm leading-6 text-[var(--app-text-color)]">
+                      {normalizeText(row.notes, '')}
+                    </p>
+                  ) : null}
                 </AppCardStrong>
               </div>
             </details>
@@ -690,9 +693,11 @@ function PayrollWorkerDetailPage() {
                 <p className="mt-1 text-xs leading-5 text-[var(--app-hint-color)]">
                   {entry.workerLabel}
                 </p>
-                <p className="mt-1 text-xs leading-5 text-[var(--app-hint-color)]">
-                  {normalizeText(entry.notes, 'Tanpa catatan')}
-                </p>
+                {hasMeaningfulText(normalizeText(entry.notes, '')) ? (
+                  <p className="mt-1 text-xs leading-5 text-[var(--app-hint-color)]">
+                    {normalizeText(entry.notes, '')}
+                  </p>
+                ) : null}
               </div>
 
               <div className="flex shrink-0 flex-col items-end gap-1">

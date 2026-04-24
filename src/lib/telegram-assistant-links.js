@@ -94,6 +94,18 @@ function normalizeAssistantRoutePath(path) {
     return null
   }
 
+  if (pathname === '/attendance/new' && !search) {
+    return '/attendance/new'
+  }
+
+  if (pathname === '/material-invoice/new' && !search) {
+    return '/material-invoice/new'
+  }
+
+  if (/^\/edit\/(project-income|expense|loan)\/new$/.test(pathname) && !search) {
+    return pathname
+  }
+
   if (pathname === '/pembayaran' && !search) {
     return '/pembayaran'
   }

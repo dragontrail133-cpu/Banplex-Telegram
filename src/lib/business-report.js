@@ -16,6 +16,21 @@ const REPORT_KIND_OPTIONS = [
     label: 'Kas',
     description: 'Arus kas masuk dan keluar.',
   },
+  {
+    value: 'creditor_statement',
+    label: 'Kreditur',
+    description: 'Statement piutang kreditur.',
+  },
+  {
+    value: 'supplier_statement',
+    label: 'Supplier',
+    description: 'Statement hutang supplier.',
+  },
+  {
+    value: 'worker_statement',
+    label: 'Pekerja',
+    description: 'Statement gaji pekerja.',
+  },
 ]
 
 const BUSINESS_SOURCE_LABELS = {
@@ -23,6 +38,16 @@ const BUSINESS_SOURCE_LABELS = {
   loan_payments: 'Angsuran Pinjaman',
   project_incomes: 'Pemasukan Proyek',
   loans: 'Pencairan Pinjaman',
+}
+
+const PARTY_STATEMENT_SOURCE_LABELS = {
+  attendance: 'Absensi',
+  bill_payment: 'Pembayaran Tagihan',
+  loan: 'Pencairan Pinjaman',
+  loan_payment: 'Pembayaran Pinjaman',
+  salary_bill: 'Tagihan Gaji',
+  supplier_bill: 'Tagihan Supplier',
+  supplier_expense: 'Biaya Supplier',
 }
 
 function normalizeReportKind(value) {
@@ -77,6 +102,16 @@ function getBusinessSourceLabel(value) {
   }
 
   return BUSINESS_SOURCE_LABELS[normalizedValue] ?? humanizeSnakeLabel(normalizedValue)
+}
+
+function getPartyStatementSourceLabel(value) {
+  const normalizedValue = String(value ?? '').trim().toLowerCase()
+
+  if (!normalizedValue) {
+    return '-'
+  }
+
+  return PARTY_STATEMENT_SOURCE_LABELS[normalizedValue] ?? humanizeSnakeLabel(normalizedValue)
 }
 
 function getDefaultBusinessReportPeriod() {
@@ -153,6 +188,7 @@ export {
   formatDateInputValue,
   formatReportPeriodLabel,
   getDefaultBusinessReportPeriod,
+  getPartyStatementSourceLabel,
   getReportKindOption,
   normalizeReportKind,
   normalizePdfColor,
