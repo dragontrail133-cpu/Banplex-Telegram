@@ -28,15 +28,19 @@ test.describe('report surfaces', () => {
   test('redirects the project report alias to reports', async ({ page }) => {
     await openApp(page, '/projects')
     await expect(page).toHaveURL(/\/reports(?:\?.*)?$/)
+    await expect(page.getByRole('button', { name: 'Pengaturan PDF' })).toBeVisible({
+      timeout: 15000,
+    })
     await expect(page.getByRole('button', { name: 'Unduh PDF' })).toBeVisible({
       timeout: 15000,
     })
   })
 
-  test('redirects pdf settings alias to reports anchor', async ({ page }) => {
+  test('opens the dedicated pdf settings page', async ({ page }) => {
     await openApp(page, '/projects/pdf-settings')
-    await expect(page).toHaveURL(/\/reports(?:\?.*)?#pdf-settings$/)
-    await expect(page.getByRole('button', { name: 'Pengaturan PDF' })).toBeVisible({
+    await expect(page).toHaveURL(/\/reports\/pdf-settings(?:\?.*)?$/)
+    await expectHeading(page, 'Pengaturan PDF')
+    await expect(page.getByRole('button', { name: 'Laporan' })).toBeVisible({
       timeout: 15000,
     })
   })

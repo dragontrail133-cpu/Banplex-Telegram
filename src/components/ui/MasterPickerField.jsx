@@ -38,8 +38,11 @@ function MasterPickerField({
   helperText = null,
   title = null,
   sheetDescription = null,
+  sheetContentClassName = null,
+  sheetMaxHeightClassName = null,
   name = null,
   searchable = true,
+  optionColumns = 1,
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
@@ -139,6 +142,8 @@ function MasterPickerField({
 
       <AppSheet
         description={sheetDescription ?? (searchable ? title ?? label : null)}
+        contentClassName={sheetContentClassName}
+        maxHeightClassName={sheetMaxHeightClassName ?? undefined}
         open={isOpen}
         onClose={() => {
           setIsOpen(false)
@@ -155,7 +160,20 @@ function MasterPickerField({
             />
           ) : null}
 
-          <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+          <div
+            className={
+              optionColumns > 1
+                ? 'grid max-h-[60vh] gap-2 overflow-y-auto pr-1'
+                : 'max-h-[60vh] space-y-2 overflow-y-auto pr-1'
+            }
+            style={
+              optionColumns > 1
+                ? {
+                    gridTemplateColumns: `repeat(${optionColumns}, minmax(0, 1fr))`,
+                  }
+                : undefined
+            }
+          >
             {filteredOptions.length > 0 ? (
               filteredOptions.map((option) => {
                 const isActive = option.value === normalizeText(value, '')
@@ -165,6 +183,7 @@ function MasterPickerField({
                     key={option.value}
                     className={[
                       'flex w-full items-start gap-3 rounded-[20px] border px-4 py-3 text-left transition',
+                      optionColumns > 1 ? 'h-full min-h-[6.5rem]' : '',
                       isActive
                         ? 'border-[var(--app-accent-color)] bg-[var(--app-brand-accent-muted)]'
                         : 'border-[var(--app-outline-soft)] bg-[var(--app-surface-strong-color)]',

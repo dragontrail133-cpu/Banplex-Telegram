@@ -3,6 +3,10 @@ import test from 'node:test'
 
 import {
   answerTelegramCallback,
+  deleteTelegramMessage,
+  editTelegramMessageText,
+  sendTelegramMessage,
+  sendTelegramChatAction,
 } from '../../src/lib/telegram-assistant-transport.js'
 import {
   buildTelegramAssistantLink,
@@ -23,8 +27,60 @@ import {
   extractAssistantCommand,
   getAssistantRouteLabel,
   resolveAssistantCallbackAction,
+  resolveAssistantMenuCommandFromText,
   shouldUseAssistantDmFallback,
 } from '../../src/lib/telegram-assistant-routing.js'
+import {
+  buildAssistantMainMenuReplyMarkup,
+  buildAnalyticsFollowUpRows,
+  buildAssistantSummaryMessageState,
+  buildSettlementBucketDetailReply,
+  buildSettlementBucketReply,
+  buildStatusReply,
+  getTelegramMessageIdFromResponse,
+  processAssistantCommand,
+  sendAssistantHybridSummaryReply,
+  shouldProcessTelegramMessage,
+  stripAssistantSummaryMessageState,
+} from '../../api/telegram-assistant.js'
+
+function createTelegramApiFetchMock() {
+  const calls = []
+
+  const fetch = async (url, init = {}) => {
+    const endpoint = String(url).split('/').pop()
+    const body = init.body ? JSON.parse(init.body) : null
+
+    calls.push({
+      url: String(url),
+      endpoint,
+      body,
+    })
+
+    const result =
+      endpoint === 'sendChatAction'
+        ? true
+        : endpoint === 'sendMessage' || endpoint === 'editMessageText'
+          ? {
+              message_id: 202,
+            }
+          : true
+
+    return {
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          ok: true,
+          result,
+        }),
+    }
+  }
+
+  return {
+    calls,
+    fetch,
+  }
+}
 
 test('assistant command parser recognizes supported slash commands', () => {
   assert.deepEqual(
@@ -47,6 +103,70 @@ test('assistant command parser recognizes supported slash commands', () => {
   assert.equal(
     buildAssistantCommandInput('analytics', 'pengeluaran minggu ini'),
     'ringkas pengeluaran minggu ini'
+  )
+})
+
+test('assistant menu resolver maps reply keyboard text back to existing commands', () => {
+  assert.equal(
+    resolveAssistantMenuCommandFromText('Menu', {
+      menu: 'Menu',
+      add: 'Tambah',
+      open: 'Buka',
+      search: 'Cari',
+      status: 'Status',
+      history: 'Riwayat',
+      analytics: 'Analytics',
+    }),
+    'menu'
+  )
+
+  assert.equal(
+    resolveAssistantMenuCommandFromText('Muka', {
+      menu: 'Menu',
+      add: 'Tambah',
+      open: 'Muka',
+      search: 'Cari',
+      status: 'Status',
+      history: 'Riwayat',
+      analytics: 'Analytics',
+    }),
+    'buka'
+  )
+
+  assert.equal(
+    resolveAssistantMenuCommandFromText('Status', {
+      menu: 'Menu',
+      add: 'Tambah',
+      open: 'Buka',
+      search: 'Cari',
+      status: 'Status',
+      history: 'Riwayat',
+      analytics: 'Analytics',
+    }),
+    'status'
+  )
+})
+
+test('assistant group reply keyboard labels are accepted by message gate', () => {
+  assert.equal(
+    shouldProcessTelegramMessage({
+      message: {
+        chat: { type: 'group' },
+      },
+      session: null,
+      botUsername: 'banplex_bot',
+      messageText: 'Analytics',
+      menuLabels: {
+        menu: 'Menu',
+        add: 'Tambah',
+        open: 'Buka',
+        search: 'Cari',
+        status: 'Status',
+        history: 'Riwayat',
+        analytics: 'Analytics',
+      },
+    }),
+    true
   )
 })
 
@@ -94,7 +214,444 @@ test('assistant callback routing maps quick action and clarification callbacks',
     requiresSession: true,
   })
 
+  assert.deepEqual(resolveAssistantCallbackAction('ta:sb:status:paid'), {
+    type: 'settlement_summary',
+    surface: 'status',
+    status: 'paid',
+    requiresSession: true,
+  })
+
   assert.equal(resolveAssistantCallbackAction('ta:cmd:hapus'), null)
+})
+
+test('assistant settlement summary reply uses inline callbacks only', () => {
+  const sampleRows = [
+    {
+      bill_status: 'paid',
+      source_type: 'bill',
+      bill_type: 'Tagihan',
+      bill_amount: 120000,
+      bill_remaining_amount: 0,
+      bill_description: 'Tagihan A',
+      description: 'Tagihan A',
+      sort_at: '2026-04-24',
+    },
+    {
+      bill_status: 'paid',
+      source_type: 'loan-disbursement',
+      bill_type: 'Pinjaman',
+      bill_amount: 250000,
+      bill_remaining_amount: 0,
+      creditor_name_snapshot: 'Kreditur A',
+      description: 'Pinjaman A',
+      sort_at: '2026-04-24',
+    },
+  ]
+
+  const bucketReply = buildSettlementBucketReply('id', sampleRows, 'status')
+  const detailReply = buildSettlementBucketDetailReply('id', sampleRows, 'status', 'paid')
+  const statusReply = buildStatusReply(sampleRows, { language: 'id', search: {} })
+
+  assert.equal(bucketReply.parseMode, 'HTML')
+  assert.equal(detailReply.parseMode, 'HTML')
+  assert.equal(statusReply.parseMode, 'HTML')
+  assert.equal(bucketReply.text.startsWith('<blockquote>'), true)
+  assert.equal(detailReply.text.startsWith('<blockquote>'), true)
+  assert.equal(statusReply.text.startsWith('<blockquote>'), true)
+  assert.equal(bucketReply.text.includes('SUMMARY SEMUA DATA'), true)
+  assert.equal(detailReply.text.includes('SUMMARY LUNAS'), true)
+  assert.equal(bucketReply.buttonRows[0][0].callbackData, 'ta:sb:status:paid')
+  assert.equal(bucketReply.buttonRows.at(-1)[0].callbackData, 'ta:cmd:menu')
+  assert.equal(bucketReply.buttonRows.flat().every((button) => !button.path && !button.url), true)
+  assert.equal(bucketReply.text.includes('<i>Pilih bucket lain atau Menu.</i>'), true)
+  assert.equal(detailReply.buttonRows.at(-1)[0].callbackData, 'ta:cmd:menu')
+  assert.equal(detailReply.buttonRows.flat().every((button) => !button.path && !button.url), true)
+  assert.equal(detailReply.appendQuickActions, false)
+  assert.equal(detailReply.text.includes('<i>Pilih bucket lain atau Menu.</i>'), true)
+})
+
+test('assistant settlement summary escapes dynamic html fields', () => {
+  const escapedReply = buildSettlementBucketDetailReply(
+    'id',
+    [
+      {
+        bill_status: 'paid',
+        source_type: 'expense',
+        bill_type: 'Tagihan',
+        bill_amount: 125000,
+        bill_remaining_amount: 0,
+        supplier_name_snapshot: 'CV <Sumber> & Co',
+        bill_description: 'Faktur <material>',
+        description: 'Catatan <teks>',
+        sort_at: '2026-04-24',
+      },
+    ],
+    'status',
+    'paid'
+  )
+
+  assert.equal(escapedReply.text.includes('&lt;Sumber&gt; &amp; Co'), true)
+  assert.equal(escapedReply.text.includes('&lt;teks&gt;'), true)
+})
+
+test('assistant analytics follow-up rows stay callback-only', () => {
+  const followUpRows = buildAnalyticsFollowUpRows('id', 'cash_outflow')
+  const flattenedButtons = followUpRows.flat()
+
+  assert.equal(flattenedButtons.at(-1).callbackData, 'ta:cmd:menu')
+  assert.equal(flattenedButtons.every((button) => !button.path && !button.url), true)
+  assert.equal(flattenedButtons.some((button) => button.callbackData?.startsWith('ta:aw:')), true)
+})
+
+test('assistant analytics slash command replies with loading fallback and cleanup', async () => {
+  const originalFetch = globalThis.fetch
+  const { calls, fetch } = createTelegramApiFetchMock()
+  globalThis.fetch = fetch
+
+  const adminClient = {
+    from: () => ({
+      upsert: async () => ({
+        error: null,
+      }),
+    }),
+  }
+
+  try {
+    const result = await processAssistantCommand({
+      adminClient,
+      botToken: 'test-token',
+      chatId: '123456',
+      replyToMessageId: 11,
+      telegramUserId: '999',
+      chatType: 'private',
+      rawText: '/analytics',
+      command: {
+        command: 'analytics',
+        args: '',
+      },
+      session: {
+        team_id: 'team-1',
+        state: 'idle',
+        pending_payload: {
+          summary_message_id: 41,
+          transient_message_ids: [42, 43],
+        },
+      },
+      memberships: [
+        {
+          team_id: 'team-1',
+          team_name: 'Workspace A',
+          is_default: true,
+          team_is_active: true,
+          role: 'member',
+        },
+      ],
+    })
+
+    assert.equal(result.processed, true)
+    assert.equal(result.messageId, 202)
+    assert.equal(calls[0].endpoint, 'sendChatAction')
+    assert.deepEqual(calls[0].body, {
+      chat_id: '123456',
+      action: 'typing',
+    })
+    assert.equal(calls[1].endpoint, 'sendMessage')
+    assert.equal(calls[1].body.text, 'Bot sedang memproses analytics...')
+    assert.equal(calls[1].body.reply_to_message_id, 11)
+    assert.equal(calls[2].endpoint, 'editMessageText')
+    assert.equal(calls[2].body.message_id, 202)
+    assert.equal(Boolean(calls[2].body.reply_markup?.inline_keyboard?.length), true)
+    assert.equal(calls.some((call) => call.endpoint === 'deleteMessage' && call.body.message_id === 41), true)
+    assert.equal(calls.some((call) => call.endpoint === 'deleteMessage' && call.body.message_id === 42), true)
+    assert.equal(calls.some((call) => call.endpoint === 'deleteMessage' && call.body.message_id === 43), true)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('assistant summary helper sends loading before final edit', async () => {
+  const originalFetch = globalThis.fetch
+  const { calls, fetch } = createTelegramApiFetchMock()
+  globalThis.fetch = fetch
+
+  const adminClient = {
+    from: () => ({
+      upsert: async () => ({
+        error: null,
+      }),
+    }),
+  }
+
+  try {
+    const result = await sendAssistantHybridSummaryReply({
+      adminClient,
+      botToken: 'test-token',
+      chatId: '123456',
+      replyToMessageId: 21,
+      telegramUserId: '999',
+      session: {
+        pending_payload: {
+          summary_message_id: 51,
+          transient_message_ids: [52],
+        },
+      },
+      sessionPayload: {
+        summary_message_id: 51,
+        transient_message_ids: [52],
+      },
+      selectedMembership: {
+        team_id: 'team-1',
+        team_name: 'Workspace A',
+      },
+      plan: {
+        intent: 'status',
+        language: 'id',
+      },
+      reply: {
+        text: '<blockquote><b>SUMMARY</b></blockquote>',
+        parseMode: 'HTML',
+        buttonRows: [],
+        needsClarification: false,
+      },
+      turnData: {
+        userText: 'status',
+        intent: 'status',
+        language: 'id',
+        workspaceName: 'Workspace A',
+      },
+    })
+
+    assert.equal(result.processed, true)
+    assert.equal(calls[0].endpoint, 'sendChatAction')
+    assert.equal(calls[1].endpoint, 'sendMessage')
+    assert.equal(calls[1].body.text, 'Bot sedang memproses ringkasan...')
+    assert.equal(calls[2].endpoint, 'editMessageText')
+    assert.equal(calls[2].body.text, '<blockquote><b>SUMMARY</b></blockquote>')
+    assert.equal(calls.some((call) => call.endpoint === 'deleteMessage' && call.body.message_id === 51), true)
+    assert.equal(calls.some((call) => call.endpoint === 'deleteMessage' && call.body.message_id === 52), true)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('assistant summary session message state keeps active and transient ids', () => {
+  const initialState = buildAssistantSummaryMessageState(
+    {
+      summary_message_id: 21,
+      transient_message_ids: [3, '7', 21],
+      other_field: 'keep-me',
+    },
+    21
+  )
+  const nextState = buildAssistantSummaryMessageState(initialState, 42)
+
+  assert.equal(initialState.summary_message_id, 21)
+  assert.deepEqual(initialState.transient_message_ids, [3, 7])
+  assert.equal(nextState.summary_message_id, 42)
+  assert.deepEqual(nextState.transient_message_ids, [3, 7, 21])
+  assert.deepEqual(
+    stripAssistantSummaryMessageState(nextState),
+    {
+      other_field: 'keep-me',
+    }
+  )
+})
+
+test('assistant telegram message id extractor reads Telegram sendMessage response shape', () => {
+  assert.equal(
+    getTelegramMessageIdFromResponse({
+      ok: true,
+      result: {
+        message_id: 77,
+      },
+    }),
+    77
+  )
+
+  assert.equal(getTelegramMessageIdFromResponse({ message_id: 12 }), 12)
+})
+
+test('assistant telegram transport edits summary messages with inline markup', async () => {
+  const originalFetch = globalThis.fetch
+  let capturedRequest = null
+
+  globalThis.fetch = async (url, init) => {
+    capturedRequest = {
+      url,
+      init,
+    }
+
+    return {
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          ok: true,
+          result: {
+            message_id: 99,
+          },
+        }),
+    }
+  }
+
+  try {
+    const response = await editTelegramMessageText({
+      botToken: 'test-token',
+      chatId: '123456',
+      messageId: 17,
+      text: 'Ringkasan status',
+      parseMode: 'HTML',
+      replyMarkup: {
+        inline_keyboard: [[{ text: 'Menu', callback_data: 'ta:cmd:menu' }]],
+      },
+    })
+
+    assert.equal(capturedRequest.url.endsWith('/editMessageText'), true)
+    assert.deepEqual(JSON.parse(capturedRequest.init.body), {
+      chat_id: '123456',
+      message_id: 17,
+      text: 'Ringkasan status',
+      disable_web_page_preview: true,
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [[{ text: 'Menu', callback_data: 'ta:cmd:menu' }]],
+      },
+    })
+    assert.equal(response.result.message_id, 99)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('assistant telegram transport sends html parse mode for summary messages', async () => {
+  const originalFetch = globalThis.fetch
+  let capturedRequest = null
+
+  globalThis.fetch = async (url, init) => {
+    capturedRequest = {
+      url,
+      init,
+    }
+
+    return {
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          ok: true,
+          result: {
+            message_id: 101,
+          },
+        }),
+    }
+  }
+
+  try {
+    const response = await sendTelegramMessage({
+      botToken: 'test-token',
+      chatId: '123456',
+      text: '<blockquote><b>SUMMARY</b></blockquote>',
+      parseMode: 'HTML',
+    })
+
+    assert.equal(capturedRequest.url.endsWith('/sendMessage'), true)
+    assert.deepEqual(JSON.parse(capturedRequest.init.body), {
+      chat_id: '123456',
+      text: '<blockquote><b>SUMMARY</b></blockquote>',
+      disable_web_page_preview: true,
+      parse_mode: 'HTML',
+    })
+    assert.equal(response.result.message_id, 101)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('assistant telegram transport sends chat action for loading feedback', async () => {
+  const originalFetch = globalThis.fetch
+  let capturedRequest = null
+
+  globalThis.fetch = async (url, init) => {
+    capturedRequest = {
+      url,
+      init,
+    }
+
+    return {
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          ok: true,
+          result: true,
+        }),
+    }
+  }
+
+  try {
+    const response = await sendTelegramChatAction({
+      botToken: 'test-token',
+      chatId: '123456',
+      action: 'typing',
+    })
+
+    assert.equal(capturedRequest.url.endsWith('/sendChatAction'), true)
+    assert.deepEqual(JSON.parse(capturedRequest.init.body), {
+      chat_id: '123456',
+      action: 'typing',
+    })
+    assert.equal(response.result, true)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('assistant telegram transport deletes summary messages', async () => {
+  const originalFetch = globalThis.fetch
+  let capturedRequest = null
+
+  globalThis.fetch = async (url, init) => {
+    capturedRequest = {
+      url,
+      init,
+    }
+
+    return {
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          ok: true,
+          result: true,
+        }),
+    }
+  }
+
+  try {
+    const response = await deleteTelegramMessage({
+      botToken: 'test-token',
+      chatId: '123456',
+      messageId: 17,
+    })
+
+    assert.equal(capturedRequest.url.endsWith('/deleteMessage'), true)
+    assert.deepEqual(JSON.parse(capturedRequest.init.body), {
+      chat_id: '123456',
+      message_id: 17,
+    })
+    assert.equal(response.ok, true)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('assistant main menu reply markup is persistent and resizeable', () => {
+  const replyMarkup = buildAssistantMainMenuReplyMarkup('id')
+
+  assert.deepEqual(replyMarkup.keyboard, [
+    [{ text: 'Tambah' }, { text: 'Buka' }, { text: 'Cari' }],
+    [{ text: 'Status' }, { text: 'Riwayat' }, { text: 'Analytics' }],
+    [{ text: 'Menu' }],
+  ])
+  assert.equal(replyMarkup.resize_keyboard, true)
+  assert.equal(replyMarkup.is_persistent, true)
+  assert.equal(replyMarkup.input_field_placeholder, 'Pilih aksi assistant yang dibutuhkan.')
 })
 
 test('assistant session payload keeps summary, route, entity hints, and compact transcript', () => {

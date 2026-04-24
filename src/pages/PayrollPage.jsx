@@ -5,6 +5,7 @@ import ProtectedRoute from '../components/ProtectedRoute'
 import { PageHeader, PageShell } from '../components/ui/AppPrimitives'
 import { capabilityContracts } from '../lib/capabilities'
 import { getAppTodayKey } from '../lib/date-time'
+import useMutationToast from '../hooks/useMutationToast'
 import { createAttendanceRecapFromApi } from '../lib/records-api'
 import {
   getPayrollBillGroupPaymentTarget,
@@ -12,7 +13,6 @@ import {
 } from '../lib/transaction-presentation'
 import useAuthStore from '../store/useAuthStore'
 import useBillStore from '../store/useBillStore'
-import useToastStore from '../store/useToastStore'
 import useTelegram from '../hooks/useTelegram'
 
 function getWorkerName(record) {
@@ -204,7 +204,9 @@ function PayrollPage() {
   const fetchUnpaidBills = useBillStore((state) => state.fetchUnpaidBills)
   const userDisplayName = useMemo(() => getUserDisplayName(user, authUser), [authUser, user])
   const [refreshToken, setRefreshToken] = useState(0)
-  const showToast = useToastStore((state) => state.showToast)
+  const { begin, clear, fail, succeed } = useMutationToast()
+
+  useEffect(() => () => clear(), [clear])
 
   useEffect(() => {
     if (!currentTeamId) {
@@ -217,13 +219,7 @@ function PayrollPage() {
   const resolveWorkerPaymentTarget = useCallback(
     (group) => {
       const workerId = String(group?.workerId ?? '').trim()
-      const workerName = String(group?.workerName ?? '')
-        .trim()
-        .toLowerCase()
-
-      if (!workerId && !workerName) {
-        return null
-      }
+      const workerName = String(group?.workerName ?? '').trim().toLowerCase()
 
       const matchedBills = bills.filter((bill) => {
         if (!isPayrollBillSummary(bill)) {
@@ -293,6 +289,11 @@ function PayrollPage() {
       throw new Error('Tidak ada absensi yang bisa direkap.')
     }
 
+    begin({
+      title: 'Membuat rekap gaji',
+      message: 'Mohon tunggu sampai tagihan selesai dibuat.',
+    })
+
     try {
       const results = await Promise.allSettled(
         recapGroups.map((group) =>
@@ -332,12 +333,18 @@ function PayrollPage() {
       const skippedRecordCount = Math.max(totalRecordCount - processedRecordCount, 0)
       const isPartialResult = rejectedResults.length > 0 || skippedRecordCount > 0
 
-      showToast({
+      succeed({
         tone: isPartialResult ? 'info' : 'success',
         title: isPartialResult ? 'Rekap sebagian' : 'Rekap berhasil',
         message: `${processedRecordCount} absensi · ${formatCurrency(processedTotalAmount)}`,
       })
       return true
+    } catch (error) {
+      fail({
+        title: 'Rekap gagal',
+        message: error instanceof Error ? error.message : 'Rekap gagal.',
+      })
+      throw error
     } finally {
       setRefreshToken((value) => value + 1)
     }

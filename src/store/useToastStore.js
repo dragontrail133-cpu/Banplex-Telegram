@@ -43,7 +43,7 @@ function normalizeToastInput(input = {}) {
     title: input.title ?? null,
     message,
     durationMs,
-    dismissible: input.dismissible ?? true,
+    dismissible: input.dismissible ?? (tone === 'loading' ? false : true),
   }
 }
 

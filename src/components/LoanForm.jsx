@@ -4,6 +4,7 @@ import useAuthStore from '../store/useAuthStore'
 import useIncomeStore from '../store/useIncomeStore'
 import useMasterStore from '../store/useMasterStore'
 import { getAppTodayKey } from '../lib/date-time'
+import useMutationToast from '../hooks/useMutationToast'
 import {
   buildLoanTermsSnapshot,
   calculateLoanLateCharge,
@@ -129,12 +130,14 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
   const isMasterLoading = useMasterStore((state) => state.isLoading)
   const masterError = useMasterStore((state) => state.error)
   const fetchMasters = useMasterStore((state) => state.fetchMasters)
+  const clearMasterError = useMasterStore((state) => state.clearError)
   const addFundingCreditor = useMasterStore((state) => state.addFundingCreditor)
   const addLoan = useIncomeStore((state) => state.addLoan)
   const updateLoan = useIncomeStore((state) => state.updateLoan)
   const isSubmitting = useIncomeStore((state) => state.isSubmitting)
   const error = useIncomeStore((state) => state.error)
   const clearError = useIncomeStore((state) => state.clearError)
+  const { begin, fail, succeed } = useMutationToast()
   const isEditMode = Boolean(recordId)
   const telegramUserId = getTelegramUserId(user, authUser)
   const userName = getUserDisplayName(user, authUser)
@@ -205,6 +208,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
   const isCreditorDisabled =
     isSubmitting || isMasterLoading || fundingCreditors.length === 0
   const isMasterDataReady = !isMasterLoading && fundingCreditors.length > 0
+  const showInlineMutationFeedback = false
 
   useEffect(() => {
     fetchMasters().catch((fetchError) => {
@@ -237,6 +241,11 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
     }
 
     try {
+      begin({
+        title: 'Menyimpan kreditur',
+        message: 'Mohon tunggu sampai kreditur baru selesai disimpan.',
+      })
+
       const createdCreditor = await addFundingCreditor({
         creditor_name: normalizedName,
       })
@@ -246,11 +255,24 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
         ...current,
         creditorId: createdCreditor.id,
       }))
+
+      succeed({
+        title: 'Kreditur tersimpan',
+        message: 'Kreditur baru berhasil disimpan.',
+      })
     } catch (createError) {
-      console.error(
+      const message =
         createError instanceof Error
           ? createError.message
           : 'Gagal menambah kreditur pendanaan.'
+
+      fail({
+        title: 'Kreditur gagal disimpan',
+        message,
+      })
+      clearMasterError()
+      console.error(
+        message
       )
     }
   }
@@ -266,6 +288,11 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
       if (!selectedCreditor) {
         throw new Error('Kreditur wajib dipilih.')
       }
+
+      begin({
+        title: isEditMode ? 'Memperbarui pinjaman' : 'Menyimpan pinjaman',
+        message: 'Mohon tunggu sampai data pinjaman selesai diproses.',
+      })
 
       const payload = {
         telegram_user_id: telegramUserId,
@@ -303,6 +330,13 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
         setFormData(createInitialFormData())
       }
 
+      succeed({
+        title: isEditMode ? 'Pinjaman diperbarui' : 'Pinjaman tersimpan',
+        message: isEditMode
+          ? 'Perubahan pinjaman berhasil disimpan.'
+          : 'Data pinjaman berhasil disimpan.',
+      })
+
     } catch (submitError) {
       const message =
         submitError instanceof Error
@@ -310,6 +344,10 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
           : 'Gagal menyimpan pinjaman.'
 
       console.error(message)
+      fail({
+        title: isEditMode ? 'Pinjaman gagal diperbarui' : 'Pinjaman gagal disimpan',
+        message,
+      })
     }
   }
 
@@ -689,7 +727,9 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
               </div>
             </details>
 
-            {error ? <AppErrorState description={error} title="Form belum valid" /> : null}
+            {showInlineMutationFeedback && error ? (
+              <AppErrorState description={error} title="Form belum valid" />
+            ) : null}
 
             {masterError ? (
               <AppErrorState description={masterError} title="Master data belum siap" />

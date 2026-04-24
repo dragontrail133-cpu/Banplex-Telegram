@@ -224,7 +224,21 @@ export function calculateLoanLateCharge({
 }
 
 export function buildLoanTermsSnapshot(loan = {}) {
-  const principalAmount = roundAmount(loan?.principal_amount ?? loan?.principalAmount ?? loan?.amount)
+  const principalAmount = roundAmount(
+    loan?.principal_amount ??
+      loan?.principalAmount ??
+      loan?.amount ??
+      loan?.total_amount ??
+      loan?.totalAmount
+  )
+  const amount = roundAmount(
+    loan?.amount ??
+      loan?.total_amount ??
+      loan?.totalAmount ??
+      loan?.principal_amount ??
+      loan?.principalAmount ??
+      principalAmount
+  )
   const interestType = normalizeLoanInterestType(loan?.interest_type ?? loan?.interestType)
   const interestRate = Math.max(toNumber(loan?.interest_rate ?? loan?.interestRate, 0), 0)
   const tenorMonths = Math.max(
@@ -259,12 +273,24 @@ export function buildLoanTermsSnapshot(loan = {}) {
     interestRate,
     tenorMonths,
   })
+  const explicitRepaymentAmount = toNumber(
+    loan?.repayment_amount ??
+      loan?.repaymentAmount ??
+      loan?.total_repayment_amount ??
+      loan?.totalRepaymentAmount,
+    NaN
+  )
   const dueDate = calculateLoanDueDate(transactionDate || disbursedDate, tenorMonths)
+  const repaymentAmount = roundAmount(
+    Number.isFinite(explicitRepaymentAmount) && explicitRepaymentAmount >= 0
+      ? explicitRepaymentAmount
+      : baseRepaymentAmount
+  )
 
   return {
     principal_amount: principalAmount,
-    amount: roundAmount(loan?.amount ?? loan?.principal_amount ?? principalAmount),
-    repayment_amount: baseRepaymentAmount,
+    amount,
+    repayment_amount: repaymentAmount,
     interest_type: interestType,
     interest_rate: interestType === 'interest' ? interestRate : null,
     tenor_months: tenorMonths > 0 ? tenorMonths : null,

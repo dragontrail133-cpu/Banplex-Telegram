@@ -6,7 +6,6 @@ import {
   AppCardDashed,
   AppCardStrong,
   AppEmptyState,
-  AppErrorState,
   AppInput,
   AppSelect,
   AppSheet,
@@ -14,6 +13,7 @@ import {
   AppTextarea,
   PageSection,
 } from './ui/AppPrimitives'
+import useMutationToast from '../hooks/useMutationToast'
 import { formatAppDateLabel } from '../lib/date-time'
 import useHrStore, { beneficiaryStatusOptions } from '../store/useHrStore'
 
@@ -37,23 +37,7 @@ function createInitialFormData() {
   }
 }
 
-function renderSheetFeedback(feedbackError, helperText) {
-  if (feedbackError) {
-    const title =
-      feedbackError.kind === 'submit'
-        ? feedbackError.mode === 'update'
-          ? 'Gagal memperbarui penerima manfaat'
-          : 'Gagal menyimpan penerima manfaat'
-        : 'Form penerima manfaat belum lengkap'
-
-    return (
-      <AppErrorState
-        description={feedbackError.message}
-        title={title}
-      />
-    )
-  }
-
+function renderSheetFeedback(helperText) {
   return (
     <AppCardDashed className="px-4 py-3 text-sm leading-6 text-[var(--app-hint-color)]">
       {helperText}
@@ -65,7 +49,6 @@ function BeneficiaryList() {
   const [formData, setFormData] = useState(createInitialFormData)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
-  const [localError, setLocalError] = useState(null)
   const formId = 'beneficiary-form'
   const beneficiaries = useHrStore((state) => state.beneficiaries)
   const isLoading = useHrStore((state) => state.isLoading)
@@ -76,6 +59,7 @@ function BeneficiaryList() {
   const addBeneficiary = useHrStore((state) => state.addBeneficiary)
   const updateBeneficiary = useHrStore((state) => state.updateBeneficiary)
   const deleteBeneficiary = useHrStore((state) => state.deleteBeneficiary)
+  const { begin, fail, succeed } = useMutationToast()
   useEffect(() => {
     fetchBeneficiaries({ force: true }).catch((fetchError) => {
       console.error('Gagal memuat penerima manfaat:', fetchError)
@@ -85,7 +69,6 @@ function BeneficiaryList() {
   const resetModalState = () => {
     setFormData(createInitialFormData())
     setEditingId(null)
-    setLocalError(null)
     clearError()
   }
 
@@ -108,7 +91,6 @@ function BeneficiaryList() {
       status: beneficiary.status ?? 'active',
       notes: beneficiary.notes ?? '',
     })
-    setLocalError(null)
     clearError()
     setIsModalOpen(true)
   }
@@ -120,10 +102,6 @@ function BeneficiaryList() {
       ...current,
       [name]: value,
     }))
-
-    if (localError) {
-      setLocalError(null)
-    }
 
     if (error) {
       clearError()
@@ -140,11 +118,19 @@ function BeneficiaryList() {
     const notes = normalizeText(formData.notes, '')
 
     if (!name) {
-      setLocalError({ kind: 'validation', message: 'Nama penerima manfaat wajib diisi.' })
+      fail({
+        title: 'Form penerima manfaat belum lengkap',
+        message: 'Nama penerima manfaat wajib diisi.',
+      })
       return
     }
 
     try {
+      begin({
+        title: editingId ? 'Memperbarui penerima manfaat' : 'Menyimpan penerima manfaat',
+        message: 'Mohon tunggu sampai data penerima manfaat selesai diproses.',
+      })
+
       if (editingId) {
         await updateBeneficiary(editingId, {
           name,
@@ -166,17 +152,53 @@ function BeneficiaryList() {
       await fetchBeneficiaries({ force: true })
 
       handleCloseModal()
-      } catch (submitError) {
+      succeed({
+        title: editingId ? 'Penerima manfaat diperbarui' : 'Penerima manfaat tersimpan',
+        message: editingId
+          ? 'Perubahan data penerima manfaat berhasil disimpan.'
+          : 'Data penerima manfaat berhasil disimpan.',
+      })
+    } catch (submitError) {
       const message =
         submitError instanceof Error
           ? submitError.message
           : 'Gagal menyimpan data penerima manfaat.'
 
-      setLocalError({
-        kind: 'submit',
-        mode: editingId ? 'update' : 'create',
+      fail({
+        title: editingId ? 'Penerima manfaat gagal diperbarui' : 'Penerima manfaat gagal disimpan',
         message,
       })
+      clearError()
+    }
+  }
+
+  const handleDeleteBeneficiary = async (beneficiary) => {
+    if (!beneficiary?.id || isSubmitting) {
+      return
+    }
+
+    begin({
+      title: 'Menghapus penerima manfaat',
+      message: 'Mohon tunggu sampai data hilang dari daftar.',
+    })
+
+    try {
+      await deleteBeneficiary(beneficiary.id)
+      await fetchBeneficiaries({ force: true })
+      succeed({
+        title: 'Penerima manfaat dihapus',
+        message: 'Data penerima manfaat berhasil dihapus.',
+      })
+    } catch (deleteError) {
+      const message =
+        deleteError instanceof Error ? deleteError.message : 'Gagal menghapus penerima manfaat.'
+
+      fail({
+        title: 'Penerima manfaat gagal dihapus',
+        message,
+      })
+      clearError()
+      console.error('Gagal menghapus penerima manfaat:', deleteError)
     }
   }
 
@@ -249,9 +271,7 @@ function BeneficiaryList() {
                   label: 'Hapus',
                   destructive: true,
                   onClick: () => {
-                    void deleteBeneficiary(beneficiary.id).catch((deleteError) => {
-                      console.error('Gagal menghapus penerima manfaat:', deleteError)
-                    })
+                    void handleDeleteBeneficiary(beneficiary)
                   },
                 },
               ]}
@@ -278,7 +298,7 @@ function BeneficiaryList() {
                 form={formId}
                 type="submit"
               >
-                {isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
+                Simpan Data
               </AppButton>
             </div>
           }
@@ -289,7 +309,6 @@ function BeneficiaryList() {
         >
           <form id={formId} className="space-y-5" onSubmit={handleSubmit}>
             {renderSheetFeedback(
-              localError,
               editingId ? 'Perbarui data penerima manfaat di bawah.' : 'Isi data penerima manfaat di bawah.'
             )}
 

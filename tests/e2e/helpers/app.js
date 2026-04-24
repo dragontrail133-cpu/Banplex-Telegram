@@ -262,6 +262,43 @@ async function openApp(page, path = '/', options = {}) {
     await fulfillJson(route, { success: true })
   })
 
+  await page.route('**/storage/v1/**', async (route) => {
+    const request = route.request()
+    const requestUrl = new URL(request.url())
+    let requestBody = null
+
+    try {
+      requestBody = request.postDataJSON()
+    } catch {
+      requestBody = request.postData()
+    }
+
+    const responseBody = await mockApi.storage?.({
+      route,
+      url: requestUrl,
+      method: request.method(),
+      body: requestBody,
+      telegramUser,
+    })
+
+    if (responseBody !== undefined) {
+      await fulfillJson(route, responseBody)
+      return
+    }
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({ status: 204 })
+      return
+    }
+
+    const objectPath = requestUrl.pathname.split('/object/').at(-1) ?? 'attachment.bin'
+
+    await fulfillJson(route, {
+      Id: `e2e-storage-${Date.now()}`,
+      Key: objectPath,
+    })
+  })
+
   await page.route('**/api/transactions**', async (route) => {
     const request = route.request()
     const requestUrl = new URL(route.request().url())

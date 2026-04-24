@@ -16,7 +16,6 @@ import {
   saveTransactionRecordFromApi,
   softDeleteTransactionFromApi,
 } from '../lib/transactions-api'
-import useToastStore from './useToastStore'
 
 function normalizeText(value, fallback = null) {
   const normalizedValue = String(value ?? '').trim()
@@ -58,9 +57,7 @@ async function notifyTelegram(payload) {
   return result
 }
 
-function showToast(toast) {
-  useToastStore.getState().showToast(toast)
-}
+function showToast() {}
 
 const loanSelectColumns =
   'id, telegram_user_id, created_by_user_id, team_id, creditor_id, transaction_date, disbursed_date, principal_amount, repayment_amount, interest_type, interest_rate, tenor_months, late_interest_rate, late_interest_basis, late_penalty_type, late_penalty_amount, loan_terms_snapshot, amount, description, notes, creditor_name_snapshot, status, paid_amount, created_at, updated_at, deleted_at'
@@ -152,6 +149,71 @@ function mapBillSummaryRow(bill) {
   }
 }
 
+function getAggregatedBillStatus(totalAmount, paidAmount) {
+  if (totalAmount > 0 && paidAmount >= totalAmount) {
+    return 'paid'
+  }
+
+  if (paidAmount > 0) {
+    return 'partial'
+  }
+
+  return 'unpaid'
+}
+
+function aggregateBillSummaries(bills = []) {
+  const mappedBills = bills.map(mapBillSummaryRow).filter(Boolean)
+
+  if (mappedBills.length === 0) {
+    return {
+      bill: null,
+      bills: [],
+    }
+  }
+
+  if (mappedBills.length === 1) {
+    return {
+      bill: mappedBills[0],
+      bills: mappedBills,
+    }
+  }
+
+  const amount = mappedBills.reduce((sum, bill) => sum + toNumber(bill.amount, 0), 0)
+  const paidAmount = mappedBills.reduce((sum, bill) => sum + toNumber(bill.paidAmount, 0), 0)
+  const dueDates = mappedBills.map((bill) => normalizeText(bill.dueDate, null)).filter(Boolean).sort()
+  const paidAtValues = mappedBills
+    .map((bill) => normalizeText(bill.paidAt, null))
+    .filter(Boolean)
+    .sort()
+  const projectName = normalizeText(mappedBills[0]?.projectName, 'Proyek belum terhubung')
+  const descriptions = [...new Set(mappedBills.map((bill) => normalizeText(bill.description, null)).filter(Boolean))]
+
+  return {
+    bill: {
+      id: null,
+      billIds: mappedBills.map((bill) => bill.id),
+      projectIncomeId: mappedBills[0]?.projectIncomeId ?? null,
+      teamId: mappedBills[0]?.teamId ?? null,
+      billType: 'fee',
+      description:
+        descriptions.length === 1
+          ? descriptions[0]
+          : `Fee termin (${mappedBills.length} tagihan)`,
+      amount,
+      paidAmount,
+      remainingAmount: Math.max(amount - paidAmount, 0),
+      dueDate: dueDates[0] ?? null,
+      status: getAggregatedBillStatus(amount, paidAmount),
+      paidAt: paidAtValues.at(-1) ?? null,
+      supplierName: mappedBills.length === 1 ? mappedBills[0].supplierName : `${mappedBills.length} fee staff`,
+      projectName,
+      deletedAt: null,
+      updatedAt: null,
+    },
+    bills: mappedBills,
+  }
+}
+
 function mapLoanRow(loan) {
   const loanTermsSnapshot = buildLoanTermsSnapshot(loan)
   const repaymentAmount = toNumber(loan?.repayment_amount ?? loanTermsSnapshot.repayment_amount, 0)
@@ -205,7 +267,8 @@ async function loadProjectIncomeById(projectIncomeId) {
       .select(billSelectColumns)
       .eq('project_income_id', normalizedId)
       .is('deleted_at', null)
-      .maybeSingle(),
+      .order('due_date', { ascending: true })
+      .order('created_at', { ascending: false }),
   ])
 
   if (incomeResult.error) {
@@ -220,9 +283,12 @@ async function loadProjectIncomeById(projectIncomeId) {
     return null
   }
 
+  const { bill, bills } = aggregateBillSummaries(billResult.data ?? [])
+
   return {
     ...mapProjectIncomeRow(incomeResult.data),
-    bill: mapBillSummaryRow(billResult.data),
+    bill,
+    bills,
   }
 }
 

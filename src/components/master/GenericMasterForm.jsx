@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { CheckSquare2, FileText, Layers3 } from 'lucide-react'
+import useMutationToast from '../../hooks/useMutationToast'
 import {
   AppBadge,
   AppButton,
@@ -99,6 +100,8 @@ function GenericMasterForm({
     buildFormState(config.fields, initialData)
   )
   const [localError, setLocalError] = useState(null)
+  const { begin, fail, succeed } = useMutationToast()
+  const isEditMode = Boolean(initialData?.id)
 
   const handleChange = (fieldName, nextValue) => {
     setFormState((current) => ({
@@ -116,11 +119,26 @@ function GenericMasterForm({
 
     try {
       const payload = parseFormValues(config.fields, formState)
+      begin({
+        title: isEditMode ? `Memperbarui ${config.label}` : `Menyimpan ${config.label}`,
+        message: 'Mohon tunggu sampai data master selesai diproses.',
+      })
+
       await onSubmit(payload)
+
+      succeed({
+        title: isEditMode ? `${config.label} diperbarui` : `${config.label} tersimpan`,
+        message: isEditMode
+          ? `Perubahan ${config.label.toLowerCase()} berhasil disimpan.`
+          : `Data ${config.label.toLowerCase()} berhasil disimpan.`,
+      })
     } catch (error) {
-      setLocalError(
-        error instanceof Error ? error.message : 'Gagal menyimpan master data.'
-      )
+      const message = error instanceof Error ? error.message : 'Gagal menyimpan master data.'
+
+      fail({
+        title: isEditMode ? `${config.label} gagal diperbarui` : `${config.label} gagal disimpan`,
+        message,
+      })
     }
   }
 
@@ -297,7 +315,7 @@ function GenericMasterForm({
           </AppButton>
 
           <AppButton disabled={isSubmitting} type="submit">
-            {isSubmitting ? 'Menyimpan...' : 'Simpan'}
+            Simpan
           </AppButton>
         </div>
       )}

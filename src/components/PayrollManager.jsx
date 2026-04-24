@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileClock, Loader2 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import useTelegram from '../hooks/useTelegram'
 import useAuthStore from '../store/useAuthStore'
 import useAttendanceStore from '../store/useAttendanceStore'
 import { formatAppDateLabel, getAppTodayKey } from '../lib/date-time'
+import useMutationToast from '../hooks/useMutationToast'
 import {
   AppButton,
   AppCardDashed,
@@ -119,7 +119,6 @@ function notifyTelegram(payload) {
 }
 
 function PayrollManager({ onSuccess, recapContext = null }) {
-  const navigate = useNavigate()
   const { user } = useTelegram()
   const authUser = useAuthStore((state) => state.user)
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
@@ -132,10 +131,9 @@ function PayrollManager({ onSuccess, recapContext = null }) {
   )
   const clearError = useAttendanceStore((state) => state.clearError)
   const [activeWorkerId, setActiveWorkerId] = useState(null)
-  const [successMessage, setSuccessMessage] = useState(null)
-  const [lastCreatedBillId, setLastCreatedBillId] = useState(null)
   const groupRefs = useRef(new Map())
   const lastFocusedRecapKeyRef = useRef('')
+  const { begin, clear, fail, succeed } = useMutationToast()
 
   const highlightedWorkerIds = useMemo(() => {
     if (recapContext?.tab === 'daily') {
@@ -231,6 +229,7 @@ function PayrollManager({ onSuccess, recapContext = null }) {
   }, [currentTeamId, fetchUnbilledAttendances])
 
   useEffect(() => () => clearError(), [clearError])
+  useEffect(() => () => clear(), [clear])
 
   const handleCreateBill = async (group) => {
     if (
@@ -243,8 +242,10 @@ function PayrollManager({ onSuccess, recapContext = null }) {
     }
 
     setActiveWorkerId(group.workerId)
-    setSuccessMessage(null)
-    setLastCreatedBillId(null)
+    begin({
+      title: 'Membuat tagihan gaji',
+      message: 'Mohon tunggu sampai tagihan selesai dibuat.',
+    })
 
     try {
       const recordIds = group.records.map((record) => record.id)
@@ -276,11 +277,6 @@ function PayrollManager({ onSuccess, recapContext = null }) {
         description,
       })
 
-      setSuccessMessage(
-        `Tagihan gaji untuk ${group.workerName} sebesar ${formatCurrency(group.totalAmount)} telah dibuat.`
-      )
-      setLastCreatedBillId(newBillId ? String(newBillId) : null)
-
       await fetchUnbilledAttendances({
         teamId: currentTeamId,
         force: true,
@@ -289,12 +285,21 @@ function PayrollManager({ onSuccess, recapContext = null }) {
       if (typeof onSuccess === 'function') {
         await onSuccess()
       }
+
+      succeed({
+        title: 'Tagihan gaji tersimpan',
+        message: `Tagihan gaji untuk ${group.workerName} berhasil dibuat.`,
+      })
     } catch (billError) {
       const message =
         billError instanceof Error
           ? billError.message
           : 'Gagal membuat tagihan gaji.'
 
+      fail({
+        title: 'Tagihan gaji gagal dibuat',
+        message,
+      })
       console.error(message)
     } finally {
       setActiveWorkerId(null)
@@ -313,30 +318,6 @@ function PayrollManager({ onSuccess, recapContext = null }) {
           description={error}
           title="Rekap gaji gagal dimuat"
         />
-      ) : null}
-
-      {successMessage ? (
-        <div className="space-y-3">
-          <AppCardDashed className="border-emerald-200 bg-emerald-50 text-sm leading-6 text-emerald-700">
-            {successMessage}
-          </AppCardDashed>
-          {lastCreatedBillId ? (
-              <AppButton
-                onClick={() =>
-                  navigate(`/payment/${lastCreatedBillId}`, {
-                    state: {
-                      surface: 'tagihan',
-                      detailSurface: 'tagihan',
-                    },
-                  })
-                }
-                type="button"
-                variant="secondary"
-              >
-                Buka Tagihan Gaji
-              </AppButton>
-          ) : null}
-        </div>
       ) : null}
 
       {isLoading && orderedGroupedAttendances.length === 0 ? (
@@ -429,10 +410,9 @@ function PayrollManager({ onSuccess, recapContext = null }) {
                   className="mt-4"
                   disabled={isProcessing || Number(group.totalAmount ?? 0) <= 0}
                   onClick={() => handleCreateBill(group)}
-                  leadingIcon={isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                   type="button"
                 >
-                  {isProcessing ? 'Membuat Tagihan...' : 'Buat Tagihan Gaji'}
+                  Buat Tagihan Gaji
                 </AppButton>
               </article>
             )

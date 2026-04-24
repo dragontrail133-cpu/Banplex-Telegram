@@ -26,6 +26,7 @@ import {
   PageSection,
   PageShell,
 } from '../components/ui/AppPrimitives'
+import useMutationToast from '../hooks/useMutationToast'
 import {
   createManualStockOutFromApi,
   fetchStockOverviewFromApi,
@@ -274,7 +275,7 @@ function StockPageContent() {
   const [manualOutMaterialId, setManualOutMaterialId] = useState('')
   const [manualOutQuantity, setManualOutQuantity] = useState('')
   const [isManualOutSubmitting, setIsManualOutSubmitting] = useState(false)
-  const [manualOutError, setManualOutError] = useState(null)
+  const { begin, fail, succeed } = useMutationToast()
   const canManageManualStockOut = canUseCapability(
     currentRole,
     capabilityContracts.manual_stock_out.key
@@ -323,7 +324,6 @@ function StockPageContent() {
         return
       }
 
-      setManualOutError(null)
       setManualOutProjectId('')
       setManualOutProjectSearch('')
       setManualOutMaterialId(materialId)
@@ -339,7 +339,6 @@ function StockPageContent() {
     }
 
     setIsManualOutSheetOpen(false)
-    setManualOutError(null)
     setManualOutProjectId('')
     setManualOutProjectSearch('')
     setManualOutQuantity('')
@@ -448,7 +447,10 @@ function StockPageContent() {
       event.preventDefault()
 
       if (!canManageManualStockOut) {
-        setManualOutError('Role Anda tidak diizinkan untuk stock-out manual.')
+        fail({
+          title: 'Stock-out gagal disimpan',
+          message: 'Role Anda tidak diizinkan untuk stock-out manual.',
+        })
         return
       }
 
@@ -456,24 +458,37 @@ function StockPageContent() {
       const selectedProject = projectOptions.find((project) => project.value === manualOutProjectId)
 
       if (!selectedMaterial) {
-        setManualOutError('Material wajib dipilih.')
+        fail({
+          title: 'Stock-out gagal disimpan',
+          message: 'Material wajib dipilih.',
+        })
         return
       }
 
       if (!selectedProject) {
-        setManualOutError('Unit Kerja wajib dipilih.')
+        fail({
+          title: 'Stock-out gagal disimpan',
+          message: 'Unit Kerja wajib dipilih.',
+        })
         return
       }
 
       const quantity = Math.trunc(Number(manualOutQuantity))
 
       if (!Number.isFinite(quantity) || quantity <= 0) {
-        setManualOutError('Qty keluar harus lebih dari 0.')
+        fail({
+          title: 'Stock-out gagal disimpan',
+          message: 'Qty keluar harus lebih dari 0.',
+        })
         return
       }
 
       setIsManualOutSubmitting(true)
-      setManualOutError(null)
+
+      begin({
+        title: 'Menyimpan stock-out',
+        message: 'Mohon tunggu sampai stok keluar manual selesai diproses.',
+      })
 
       try {
         await createManualStockOutFromApi({
@@ -490,26 +505,36 @@ function StockPageContent() {
         setManualOutQuantity('')
         setManualOutMaterialId('')
         await loadOverview({ preserveSearch: true })
+        succeed({
+          title: 'Stock-out tersimpan',
+          message: 'Pergerakan stok berhasil diperbarui.',
+        })
       } catch (requestError) {
         const message =
           requestError instanceof Error
             ? requestError.message
             : 'Gagal menyimpan stock-out manual.'
 
-        setManualOutError(message)
+        fail({
+          title: 'Stock-out gagal disimpan',
+          message,
+        })
       } finally {
         setIsManualOutSubmitting(false)
       }
     },
     [
       canManageManualStockOut,
+      begin,
       currentTeamId,
+      fail,
       loadOverview,
       manualOutMaterialId,
       manualOutProjectId,
       manualOutQuantity,
       materials,
       projectOptions,
+      succeed,
     ]
   )
 
@@ -741,7 +766,7 @@ function StockPageContent() {
                 size="sm"
                 type="submit"
               >
-                {isManualOutSubmitting ? 'Menyimpan...' : 'Simpan stock-out'}
+                Simpan stock-out
               </AppButton>
             </div>
           }
@@ -750,13 +775,6 @@ function StockPageContent() {
           title="Stok Keluar Manual"
         >
           <form className="space-y-4 pt-2" id="manual-stock-out-form" onSubmit={submitManualStockOut}>
-            {manualOutError ? (
-              <AppErrorState
-                description={manualOutError}
-                title="Stock-out manual gagal diproses"
-              />
-            ) : null}
-
           <div className="space-y-2">
             <div className="space-y-1">
               <span className="text-sm font-semibold text-[var(--app-text-color)]">
@@ -810,7 +828,6 @@ function StockPageContent() {
                         .join(' ')}
                       onClick={() => {
                         setManualOutProjectId(option.value)
-                        setManualOutError(null)
                       }}
                       type="button"
                     >

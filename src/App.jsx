@@ -34,6 +34,7 @@ const PaymentPage = lazy(() => import('./pages/PaymentPage'))
 const PayrollPage = lazy(() => import('./pages/PayrollPage'))
 const PayrollWorkerDetailPage = lazy(() => import('./pages/PayrollWorkerDetailPage'))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'))
+const ProjectPdfSettingsPage = lazy(() => import('./pages/ProjectPdfSettingsPage'))
 const StockPage = lazy(() => import('./pages/StockPage'))
 const TeamInvitePage = lazy(() => import('./pages/TeamInvitePage'))
 const TransactionDetailPage = lazy(() => import('./pages/TransactionDetailPage'))
@@ -241,12 +242,18 @@ function App() {
         />
         <Route path="/pembayaran/pinjaman/:id" element={<PaymentPage paymentType="loan" />} />
         <Route path="/reports" element={<ProjectsPage />} />
+        <Route
+          path="/reports/pdf-settings"
+          element={
+            <ProtectedRoute allowedRoles={['Owner', 'Admin']}>
+              {renderStandaloneLazyRoute(ProjectPdfSettingsPage)}
+            </ProtectedRoute>
+          }
+        />
         <Route path="/projects" element={<Navigate to="/reports" replace />} />
         <Route
           path="/projects/pdf-settings"
-          element={
-            <Navigate replace to="/reports#pdf-settings" />
-          }
+          element={<Navigate replace to="/reports/pdf-settings" />}
         />
         <Route path="/stock" element={<StockPage />} />
         <Route path="/master" element={<MasterPage />} />

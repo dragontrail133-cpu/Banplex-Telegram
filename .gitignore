@@ -11,6 +11,7 @@ stitch_telegram_finance_dashboard
 node_modules
 dist
 dist-ssr
+.vite-build-check/
 .codex
 .env
 *.local

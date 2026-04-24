@@ -806,10 +806,46 @@ function normalizeBillSummaryRow(row) {
 
 function mapWorkspaceProjectIncomeRow(row) {
   const billPaidAmount = toNumber(row?.bill_paid_amount)
+  const billAmount = toNumber(row?.bill_amount)
+  const hasBillSummary =
+    Number.isFinite(billAmount) ||
+    Number.isFinite(billPaidAmount) ||
+    normalizeText(row?.bill_status, null) !== null
+  const bill = hasBillSummary
+    ? {
+        id: row?.bill_id ?? null,
+        billIds: Array.isArray(row?.bill_ids) ? row.bill_ids : [],
+        billType: row?.bill_type ?? 'fee',
+        description: row?.bill_description ?? null,
+        amount: Number.isFinite(billAmount) ? billAmount : 0,
+        paidAmount: Number.isFinite(billPaidAmount) ? billPaidAmount : 0,
+        remainingAmount: Math.max(
+          (Number.isFinite(billAmount) ? billAmount : 0) -
+            (Number.isFinite(billPaidAmount) ? billPaidAmount : 0),
+          0
+        ),
+        dueDate: row?.bill_due_date ?? null,
+        status: normalizeText(row?.bill_status, 'unpaid'),
+        paidAt: row?.bill_paid_at ?? null,
+        supplierName:
+          row?.bill_supplier_name_snapshot ?? row?.bill_worker_name_snapshot ?? 'Fee termin',
+        projectName: row?.bill_project_name_snapshot ?? row?.project_name_snapshot ?? '-',
+      }
+    : null
+
   return {
     ...mapProjectIncomeRow(row),
     sort_at: row?.sort_at ?? row?.updated_at ?? row?.created_at ?? null,
     bill_paid_at: row?.bill_paid_at ?? null,
+    bill,
+    bill_count: Number(row?.bill_count ?? (bill ? 1 : 0)),
+    ledger_summary: bill
+      ? {
+          label: 'Fee bill',
+          status: bill.status,
+          remainingAmount: bill.remainingAmount,
+        }
+      : null,
     sourceType: 'project-income',
     canView: true,
     canEdit: billPaidAmount <= 0,
@@ -822,8 +858,8 @@ function mapWorkspaceProjectIncomeRow(row) {
 function mapWorkspaceLoanRow(row) {
   const paymentAmount = toNumber(row?.paid_amount)
   const loanAmount = toNumber(
-    row?.loan_terms_snapshot?.base_repayment_amount ??
-      row?.loan_terms_snapshot?.repayment_amount ??
+    row?.loan_terms_snapshot?.repayment_amount ??
+      row?.loan_terms_snapshot?.base_repayment_amount ??
       row?.repayment_amount ??
       row?.principal_amount ??
       row?.amount
@@ -1702,6 +1738,182 @@ function applyWorkspaceTransactionViewCursor(query, cursor) {
   )
 }
 
+function getWorkspaceViewSortValue(row) {
+  return new Date(
+    String(
+      row?.sort_at ??
+        row?.transaction_date ??
+        row?.income_date ??
+        row?.expense_date ??
+        row?.due_date ??
+        row?.created_at ??
+        ''
+    )
+  ).getTime()
+}
+
+function compareWorkspaceViewRows(left, right) {
+  const timestampDifference = getWorkspaceViewSortValue(right) - getWorkspaceViewSortValue(left)
+
+  if (timestampDifference !== 0) {
+    return timestampDifference
+  }
+
+  return String(right?.id ?? '').localeCompare(String(left?.id ?? ''))
+}
+
+function getAggregatedProjectIncomeBillStatus(totalAmount, paidAmount, billCount) {
+  if (billCount <= 0) {
+    return null
+  }
+
+  if (totalAmount > 0 && paidAmount >= totalAmount) {
+    return 'paid'
+  }
+
+  if (paidAmount > 0) {
+    return 'partial'
+  }
+
+  return 'unpaid'
+}
+
+export function aggregateProjectIncomeViewRows(rows = []) {
+  const aggregatedRows = []
+  const projectIncomeGroups = new Map()
+
+  for (const row of rows) {
+    if (normalizeText(row?.source_type, '') !== 'project-income') {
+      aggregatedRows.push(row)
+      continue
+    }
+
+    const groupKey = String(row?.id ?? '')
+
+    if (!groupKey) {
+      aggregatedRows.push(row)
+      continue
+    }
+
+    const existingGroup = projectIncomeGroups.get(groupKey)
+    const billAmount = toNumber(row?.bill_amount)
+    const billPaidAmount = toNumber(row?.bill_paid_amount)
+    const hasBill = normalizeText(row?.bill_id, null) !== null
+
+    if (!existingGroup) {
+      projectIncomeGroups.set(groupKey, {
+        ...row,
+        sort_at: row?.sort_at ?? null,
+        bill_id: row?.bill_id ?? null,
+        bill_type: hasBill ? row?.bill_type ?? 'fee' : row?.bill_type ?? null,
+        bill_status: hasBill ? row?.bill_status ?? 'unpaid' : row?.bill_status ?? null,
+        bill_amount: hasBill ? billAmount : row?.bill_amount ?? null,
+        bill_paid_amount: hasBill ? billPaidAmount : row?.bill_paid_amount ?? null,
+        bill_remaining_amount: hasBill
+          ? Math.max((Number.isFinite(billAmount) ? billAmount : 0) - (Number.isFinite(billPaidAmount) ? billPaidAmount : 0), 0)
+          : row?.bill_remaining_amount ?? null,
+        bill_due_date: row?.bill_due_date ?? null,
+        bill_paid_at: row?.bill_paid_at ?? null,
+        bill_description: row?.bill_description ?? null,
+        bill_project_name_snapshot: row?.bill_project_name_snapshot ?? null,
+        bill_supplier_name_snapshot: row?.bill_supplier_name_snapshot ?? null,
+        bill_worker_name_snapshot: row?.bill_worker_name_snapshot ?? null,
+        bill_ids: hasBill ? [row.bill_id] : [],
+        bill_count: hasBill ? 1 : 0,
+        search_text: normalizeText(row?.search_text, ''),
+      })
+      continue
+    }
+
+    const existingBillAmount = toNumber(existingGroup.bill_amount)
+    const existingBillPaidAmount = toNumber(existingGroup.bill_paid_amount)
+    const nextBillAmount = Number.isFinite(billAmount) ? billAmount : 0
+    const nextBillPaidAmount = Number.isFinite(billPaidAmount) ? billPaidAmount : 0
+    const nextSearchParts = new Set(
+      [existingGroup.search_text, normalizeText(row?.search_text, '')].filter(Boolean)
+    )
+    const nextSortAt =
+      getWorkspaceViewSortValue(row) > getWorkspaceViewSortValue(existingGroup)
+        ? row?.sort_at ?? existingGroup.sort_at ?? null
+        : existingGroup.sort_at ?? row?.sort_at ?? null
+    const nextDueDateCandidates = [
+      normalizeText(existingGroup.bill_due_date, null),
+      normalizeText(row?.bill_due_date, null),
+    ].filter(Boolean).sort()
+    const nextPaidAtCandidates = [
+      normalizeText(existingGroup.bill_paid_at, null),
+      normalizeText(row?.bill_paid_at, null),
+    ].filter(Boolean).sort()
+    const nextBillCount = existingGroup.bill_count + (hasBill ? 1 : 0)
+    const totalBillAmount = (Number.isFinite(existingBillAmount) ? existingBillAmount : 0) + nextBillAmount
+    const totalBillPaidAmount =
+      (Number.isFinite(existingBillPaidAmount) ? existingBillPaidAmount : 0) + nextBillPaidAmount
+
+    projectIncomeGroups.set(groupKey, {
+      ...existingGroup,
+      sort_at: nextSortAt,
+      bill_id: nextBillCount <= 1 ? existingGroup.bill_id ?? row?.bill_id ?? null : null,
+      bill_type: nextBillCount > 0 ? 'fee' : null,
+      bill_status: getAggregatedProjectIncomeBillStatus(
+        totalBillAmount,
+        totalBillPaidAmount,
+        nextBillCount
+      ),
+      bill_amount: nextBillCount > 0 ? totalBillAmount : null,
+      bill_paid_amount: nextBillCount > 0 ? totalBillPaidAmount : null,
+      bill_remaining_amount:
+        nextBillCount > 0 ? Math.max(totalBillAmount - totalBillPaidAmount, 0) : null,
+      bill_due_date: nextDueDateCandidates[0] ?? null,
+      bill_paid_at: nextPaidAtCandidates.at(-1) ?? null,
+      bill_description:
+        nextBillCount <= 1
+          ? normalizeText(existingGroup.bill_description ?? row?.bill_description, null)
+          : `Fee termin (${nextBillCount} tagihan)`,
+      bill_project_name_snapshot:
+        existingGroup.bill_project_name_snapshot ?? row?.bill_project_name_snapshot ?? null,
+      bill_supplier_name_snapshot: nextBillCount <= 1
+        ? existingGroup.bill_supplier_name_snapshot ?? row?.bill_supplier_name_snapshot ?? null
+        : null,
+      bill_worker_name_snapshot: nextBillCount <= 1
+        ? existingGroup.bill_worker_name_snapshot ?? row?.bill_worker_name_snapshot ?? null
+        : `${nextBillCount} fee staff`,
+      bill_ids: hasBill
+        ? [...existingGroup.bill_ids, row.bill_id]
+        : existingGroup.bill_ids,
+      bill_count: nextBillCount,
+      search_text: [...nextSearchParts].join(' '),
+    })
+  }
+
+  return [...aggregatedRows, ...projectIncomeGroups.values()].sort(compareWorkspaceViewRows)
+}
+
+function applyWorkspaceCursorToRows(rows = [], cursor = null) {
+  const decodedCursor = decodeWorkspaceCursor(cursor)
+
+  if (!decodedCursor) {
+    return rows
+  }
+
+  const cursorTimestamp = Number(decodedCursor.timestamp)
+  const cursorId = String(decodedCursor.id)
+
+  return rows.filter((row) => {
+    const rowTimestamp = getWorkspaceViewSortValue(row)
+    const rowId = String(row?.id ?? '')
+
+    if (rowTimestamp < cursorTimestamp) {
+      return true
+    }
+
+    if (rowTimestamp > cursorTimestamp) {
+      return false
+    }
+
+    return rowId.localeCompare(cursorId) < 0
+  })
+}
+
 function buildTransactionViewQuery(
   adminClient,
   viewName,
@@ -1772,16 +1984,20 @@ async function loadTransactionViewRows(
   } = {}
 ) {
   const startedAt = nowMs()
+  const shouldAggregateProjectIncome = [
+    'vw_workspace_transactions',
+    'vw_history_transactions',
+  ].includes(viewName)
   const { normalizedLimit, query } = buildTransactionViewQuery(
     adminClient,
     viewName,
     teamId,
     {
-      cursor,
+      cursor: shouldAggregateProjectIncome ? null : cursor,
       limit,
       search,
       filter,
-      fetchAll,
+      fetchAll: shouldAggregateProjectIncome ? true : fetchAll,
       transactionId,
     }
   )
@@ -1793,17 +2009,21 @@ async function loadTransactionViewRows(
     throw error
   }
 
+  const normalizedRows = shouldAggregateProjectIncome
+    ? aggregateProjectIncomeViewRows(data ?? [])
+    : data ?? []
+
   let creatorMetadata = new Map()
   let creatorMetadataMs = 0
 
   if (includeCreatorMetadata) {
     const creatorMetadataStartedAt = nowMs()
-    creatorMetadata = await loadWorkspaceTransactionCreatorMetadata(adminClient, teamId, data ?? [])
+    creatorMetadata = await loadWorkspaceTransactionCreatorMetadata(adminClient, teamId, normalizedRows)
     creatorMetadataMs = nowMs() - creatorMetadataStartedAt
   }
 
   const mapStartedAt = nowMs()
-  const mappedRows = (data ?? [])
+  const mappedRows = normalizedRows
     .map((row) => {
       const mappedRow = mapWorkspaceTransactionViewRow(row)
 
@@ -1840,16 +2060,17 @@ async function loadTransactionViewRows(
     }
   }
 
-  const hasMore = mappedRows.length > normalizedLimit
-  const pageRows = hasMore ? mappedRows.slice(0, normalizedLimit) : mappedRows
-  const nextCursorRow = hasMore ? data?.[normalizedLimit - 1] ?? null : null
+  const cursorFilteredRows = applyWorkspaceCursorToRows(mappedRows, cursor)
+  const hasMore = cursorFilteredRows.length > normalizedLimit
+  const pageRows = hasMore ? cursorFilteredRows.slice(0, normalizedLimit) : cursorFilteredRows
+  const nextCursorRow = hasMore ? cursorFilteredRows[normalizedLimit - 1] ?? null : null
 
   return {
     rows: pageRows,
     pageInfo: {
       hasMore,
       nextCursor: hasMore ? encodeWorkspaceViewCursor(nextCursorRow) : null,
-      totalCount: pageRows.length + (hasMore ? 1 : 0),
+      totalCount: cursorFilteredRows.length,
     },
     timing,
   }
@@ -1866,6 +2087,7 @@ async function loadWorkspaceTransactionViewRows(
     fetchAll = false,
     includeCreatorMetadata = false,
     debugTiming = false,
+    transactionId = null,
   } = {}
 ) {
   return loadTransactionViewRows(adminClient, 'vw_workspace_transactions', teamId, {
@@ -1876,6 +2098,7 @@ async function loadWorkspaceTransactionViewRows(
     fetchAll,
     includeCreatorMetadata,
     debugTiming,
+    transactionId,
   })
 }
 
@@ -2084,14 +2307,7 @@ async function syncLoanStatusFromPayments(adminClient, loanId) {
     (sum, row) => sum + Number(row?.amount ?? 0),
     0
   )
-  const targetAmount = Number(
-    loanResult.data.loan_terms_snapshot?.base_repayment_amount ??
-      loanResult.data.loan_terms_snapshot?.repayment_amount ??
-      loanResult.data.repayment_amount ??
-      loanResult.data.principal_amount ??
-      loanResult.data.amount ??
-      0
-  )
+  const targetAmount = getLoanPaymentTargetAmount(loanResult.data)
 
   const { data: updatedLoan, error } = await adminClient
     .from('loans')
@@ -2120,8 +2336,8 @@ async function syncLoanStatusFromPayments(adminClient, loanId) {
 
 function getLoanPaymentTargetAmount(loan) {
   return Number(
-    loan?.loan_terms_snapshot?.base_repayment_amount ??
-      loan?.loan_terms_snapshot?.repayment_amount ??
+    loan?.loan_terms_snapshot?.repayment_amount ??
+      loan?.loan_terms_snapshot?.base_repayment_amount ??
       loan?.repayment_amount ??
       loan?.principal_amount ??
       loan?.amount ??
@@ -2187,14 +2403,7 @@ async function createLoanPayment(adminClient, body, telegramUserId) {
     (sum, row) => sum + Number(row?.amount ?? 0),
     0
   )
-  const targetAmount = Number(
-    loan.loan_terms_snapshot?.base_repayment_amount ??
-      loan.loan_terms_snapshot?.repayment_amount ??
-      loan.repayment_amount ??
-      loan.principal_amount ??
-      loan.amount ??
-      0
-  )
+  const targetAmount = getLoanPaymentTargetAmount(loan)
   const nextPaidAmount = totalPaidBeforePayment + amount
 
   if (targetAmount > 0 && nextPaidAmount > targetAmount) {

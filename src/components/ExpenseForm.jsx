@@ -1,16 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import useTelegram from '../hooks/useTelegram'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
 import useTransactionStore from '../store/useTransactionStore'
 import { getAppTodayKey } from '../lib/date-time'
+import useMutationToast from '../hooks/useMutationToast'
 import ExpenseAttachmentSection from './ExpenseAttachmentSection'
 import FormLayout from './layouts/FormLayout'
 import { supplierTypeGroups } from './master/masterTabs'
 import MasterPickerField from './ui/MasterPickerField'
 import {
   AppCard,
-  AppErrorState,
   AppNominalInput,
   AppToggleGroup,
   FormSection,
@@ -96,8 +96,8 @@ function hasExpensePaymentHistory(expense = null) {
 
 function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' }) {
   const [formData, setFormData] = useState(() => createInitialFormData(initialData))
-  const [successMessage, setSuccessMessage] = useState(null)
   const [savedExpenseId, setSavedExpenseId] = useState(initialData?.id ?? null)
+  const [attachmentResetRequestId, setAttachmentResetRequestId] = useState(null)
   const { user } = useTelegram()
   const authUser = useAuthStore((state) => state.user)
   const projects = useMasterStore((state) => state.projects)
@@ -112,6 +112,7 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
   const isSubmitting = useTransactionStore((state) => state.isSubmitting)
   const error = useTransactionStore((state) => state.error)
   const clearError = useTransactionStore((state) => state.clearError)
+  const { begin, clear, fail, succeed } = useMutationToast()
   const telegramUserId = getTelegramUserId(user, authUser)
   const userName = getUserDisplayName(user, authUser)
 
@@ -122,6 +123,7 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
   }, [fetchMasters])
 
   useEffect(() => () => clearError(), [clearError])
+  useEffect(() => () => clear(), [clear])
 
   const selectableCategories = useMemo(() => {
     const nonMaterialCategories = categories.filter((category) => {
@@ -163,6 +165,8 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
     !isMasterLoading && projects.length > 0 && selectableCategories.length > 0
   const isPaymentLocked = hasExpensePaymentHistory(initialData)
   const isLocked = Boolean(initialData?.deleted_at) || isPaymentLocked
+  const isCreateMode = !initialData?.id
+  const isAttachmentResetPending = isCreateMode && Boolean(attachmentResetRequestId)
   const activeExpenseId = savedExpenseId ?? initialData?.id ?? null
   const submitLabel = initialData?.id ? 'Perbarui Pengeluaran' : 'Simpan Pengeluaran'
   const projectPickerOptions = useMemo(
@@ -203,6 +207,30 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
     [availableSuppliers]
   )
 
+  const handleAttachmentResetSettled = useCallback(
+    async (requestId) => {
+      if (!isCreateMode || !requestId || requestId !== attachmentResetRequestId) {
+        return
+      }
+
+      setAttachmentResetRequestId(null)
+      setSavedExpenseId(null)
+      setFormData(createInitialFormData(initialData))
+
+      try {
+        await onSuccess?.()
+      } catch (refreshError) {
+        console.error('Gagal memperbarui ringkasan setelah pengeluaran:', refreshError)
+      }
+
+      succeed({
+        title: 'Pengeluaran tersimpan',
+        message: 'Pengeluaran berhasil dicatat.',
+      })
+    },
+    [attachmentResetRequestId, initialData, isCreateMode, onSuccess, succeed]
+  )
+
   const handleChange = (event) => {
     const { name, value } = event.target
 
@@ -214,16 +242,12 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
     if (error) {
       clearError()
     }
-
-    if (successMessage) {
-      setSuccessMessage(null)
-    }
   }
 
   const handleSubmit = async (event) => {
     event.preventDefault()
 
-    if (isSubmitting || !isMasterDataReady || isLocked) {
+    if (isSubmitting || !isMasterDataReady || isLocked || isAttachmentResetPending) {
       return
     }
 
@@ -259,14 +283,22 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
         notes: normalizeText(formData.notes, null),
       }
 
+      begin({
+        title: initialData?.id ? 'Memperbarui pengeluaran' : 'Menyimpan pengeluaran',
+        message: 'Mohon tunggu sampai proses selesai.',
+      })
+
       const nextExpense = initialData?.id
         ? await updateExpense(initialData.id, payload)
         : await submitExpense(payload)
 
       if (nextExpense?.id) {
         setSavedExpenseId(nextExpense.id)
-      } else {
-        setSavedExpenseId(initialData?.id ?? null)
+      }
+
+      if (!initialData?.id && nextExpense?.id) {
+        setAttachmentResetRequestId(nextExpense.id)
+        return
       }
 
       try {
@@ -276,17 +308,21 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
       }
 
       setFormData(createInitialFormData(initialData))
-      setSuccessMessage(
-        initialData?.id
-          ? 'Pengeluaran berhasil diperbarui ke jalur relasional final.'
-          : 'Pengeluaran berhasil disimpan ke jalur relasional final.'
-      )
+
+      succeed({
+        title: 'Pengeluaran diperbarui',
+        message: 'Perubahan pengeluaran berhasil disimpan.',
+      })
     } catch (submitError) {
       const message =
         submitError instanceof Error
           ? submitError.message
           : 'Gagal menyimpan pengeluaran.'
 
+      fail({
+        title: initialData?.id ? 'Pengeluaran gagal diperbarui' : 'Pengeluaran gagal disimpan',
+        message,
+      })
       console.error(message)
     }
   }
@@ -316,7 +352,7 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
               description: 'Tambahkan catatan tambahan dan simpan perubahan.',
             },
           ]}
-          submitDisabled={!isMasterDataReady || isLocked}
+          submitDisabled={!isMasterDataReady || isLocked || isAttachmentResetPending}
         >
           <FormSection
             eyebrow="Relasi"
@@ -496,17 +532,12 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
             </details>
 
             <ExpenseAttachmentSection
+              attachmentResetRequestId={isCreateMode ? attachmentResetRequestId : null}
               deferUploadUntilParentSaved
               expenseId={activeExpenseId}
+              onAttachmentResetSettled={isCreateMode ? handleAttachmentResetSettled : null}
               title="Lampiran Bukti"
             />
-
-            {error ? (
-              <AppErrorState
-                description={error}
-                title="Pengeluaran belum tersimpan"
-              />
-            ) : null}
 
             {masterError ? (
               <AppCard className="app-tone-warning">
@@ -528,17 +559,6 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
                   <p className="text-sm leading-6">
                     Pengeluaran yang sudah memiliki pembayaran tidak bisa diubah atau dihapus.
                   </p>
-                </div>
-              </AppCard>
-            ) : null}
-
-            {successMessage ? (
-              <AppCard className="app-tone-success">
-                <div className="space-y-2">
-                  <p className="app-meta text-[var(--app-tone-success-text)]">
-                    Pengeluaran tersimpan
-                  </p>
-                  <p className="text-sm leading-6">{successMessage}</p>
                 </div>
               </AppCard>
             ) : null}

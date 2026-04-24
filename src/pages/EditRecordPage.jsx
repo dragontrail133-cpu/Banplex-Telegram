@@ -29,6 +29,7 @@ import {
   calculateAttendanceTotalPay,
   deriveAttendanceBaseWage,
   deriveAttendanceOvertimeFee,
+  getAllowedAttendanceStatusValues,
   getAttendanceDayWeight,
 } from '../lib/attendance-payroll'
 import { fetchAttendanceHistoryFromApi } from '../lib/records-api'
@@ -48,18 +49,6 @@ function normalizeText(value, fallback = '') {
   const normalizedValue = String(value ?? '').trim()
 
   return normalizedValue.length > 0 ? normalizedValue : fallback
-}
-
-function getAllowedAttendanceStatusValues(usedDayWeight = 0, currentRowWeight = 0) {
-  const remainingDayWeight = Math.max(Number(usedDayWeight) - Number(currentRowWeight), 0)
-
-  return ['full_day', 'half_day', 'overtime', 'absent'].filter((status) => {
-    if (status === 'absent' || status === 'overtime') {
-      return true
-    }
-
-    return remainingDayWeight + getAttendanceDayWeight(status) <= 1
-  })
 }
 
 function getWorkerRate(workerId, projectId, workerWageRates = []) {
@@ -586,10 +575,11 @@ function EditRecordPage({ technicalView = false }) {
 
   const attendanceEditableStatusOptions = useMemo(() => {
     const currentRowWeight = getAttendanceDayWeight(attendanceCurrentStatus)
-    const allowedStatusValues = getAllowedAttendanceStatusValues(
-      attendanceDayUsage,
-      currentRowWeight
-    )
+    const allowedStatusValues = getAllowedAttendanceStatusValues({
+      usedDayWeight: attendanceDayUsage,
+      currentAttendanceStatus: attendanceCurrentStatus,
+      currentRowWeight,
+    })
 
     return attendanceStatusOptions.map((option) => ({
       ...option,

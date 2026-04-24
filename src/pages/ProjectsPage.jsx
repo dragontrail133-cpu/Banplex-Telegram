@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
 import ProtectedRoute from '../components/ProtectedRoute'
 import ProjectReport from '../components/ProjectReport'
-import { ProjectPdfSettingsSection } from './ProjectPdfSettingsPage'
 import { AppButton, PageHeader, PageShell } from '../components/ui/AppPrimitives'
 import { Settings2 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -15,11 +14,10 @@ function ProjectsPage() {
       return
     }
 
-    document.getElementById('pdf-settings')?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
+    navigate('/reports/pdf-settings', {
+      replace: true,
     })
-  }, [location.hash])
+  }, [location.hash, navigate])
 
   return (
     <PageShell>
@@ -29,19 +27,18 @@ function ProjectsPage() {
         action={
           <AppButton
             aria-label="Pengaturan PDF"
-            iconOnly
-            variant="secondary"
             leadingIcon={<Settings2 className="h-4 w-4" />}
-            onClick={() => navigate('/reports#pdf-settings')}
+            size="sm"
+            variant="secondary"
+            onClick={() => navigate('/reports/pdf-settings')}
             type="button"
-          />
+          >
+            Pengaturan PDF
+          </AppButton>
         }
       />
       <ProtectedRoute allowedRoles={['Owner', 'Admin']}>
-        <div className="space-y-4">
-          <ProjectReport />
-          <ProjectPdfSettingsSection />
-        </div>
+        <ProjectReport />
       </ProtectedRoute>
     </PageShell>
   )

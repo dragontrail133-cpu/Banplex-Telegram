@@ -2820,3 +2820,54 @@ Saat ada brief baru yang masih terkait stream ini, update dokumen dengan format:
   - Scope target: `src/App.jsx`, `src/pages/ProjectsPage.jsx`, `src/pages/ProjectPdfSettingsPage.jsx`, `src/pages/Dashboard.jsx`, `src/pages/MorePage.jsx`, `tests/e2e/report.spec.js`, `tests/live/report-pdf-delivery.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
   - Dependensi: `UCW-355`.
   - Addendum audit: canonical route dipilih ke `/reports`; alias lama tetap hidup, PDF generator dan source data report tidak berubah, dan naming UI `Unit Kerja` tetap ditahan untuk task lanjutan.
+- [x] UCW-357 - Reset lampiran pasca save pada create flow expense dan faktur material
+  - Create expense dan faktur material menahan reset surface sampai sync attachment settle, lalu draft file, preview, daftar lampiran tersimpan, dan session form kembali blank hanya setelah upload/attach sukses.
+  - Scope target: `src/components/ExpenseAttachmentSection.jsx`, `src/components/ExpenseForm.jsx`, `src/components/MaterialInvoiceForm.jsx`, `tests/e2e/helpers/app.js`, `tests/e2e/attachment-reset.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-20`, `UCW-68`, `UCW-69`, `UCW-81`, `UCW-86`.
+  - Addendum audit: create flow expense dan faktur material sekarang menunggu child attachment settle sebelum reset; edit flow tetap tidak berubah, upload gagal mempertahankan draft untuk retry, dan smoke browser memverifikasi image/PDF attachment kembali blank setelah sync selesai.
+- [ ] UCW-358 - Kunci guard absensi lintas proyek per worker-day
+  - Guard absensi harian harus menutup kombinasi lintas proyek yang melampaui quota worker per tanggal: `full_day` menutup proyek lain, `half_day` hanya menyisakan `half_day` atau `overtime`, dan kombinasi `half+half` menutup semua status baru di proyek berikutnya.
+  - Scope target: `src/lib/attendance-payroll.js`, `src/components/AttendanceForm.jsx`, `src/pages/EditRecordPage.jsx`, `api/records.js`, `tests/unit/attendance-guard.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-07`, `UCW-149`, `UCW-151`.
+  - Addendum audit: billed tetap read-only; record unbilled existing tetap bisa diedit sesuai quota atau dikosongkan untuk memindahkan alokasi ke proyek lain; surface `Catatan Absensi` dan detail pekerja tetap read-only consumer dari `attendance_records`.
+- [ ] UCW-359 - Redesign navigasi laporan mobile dengan picker sheet dan pisahkan `Pengaturan PDF`
+  - Mode laporan di mobile harus dipilih lewat field picker bergaya `MasterPickerField`, bukan tab horizontal yang perlu scroll, dan entrypoint `Pengaturan PDF` harus pindah ke halaman terpisah yang terlihat dari atas fold.
+  - Scope target: `src/components/ProjectReport.jsx`, `src/pages/ProjectsPage.jsx`, `src/pages/ProjectPdfSettingsPage.jsx`, `src/App.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-355`, `UCW-356`.
+  - Addendum audit: bottomsheet mode laporan tidak memakai search field, opsi tampil 2 kolom x 3 baris dengan card balance, safezone atas sheet dibuat lebih lega agar picker cepat discan di mobile, page `Pengaturan PDF` diringkas dengan header compact tanpa duplikasi judul, dan filter party statement memakai picker searchable dengan tinggi sheet dibatasi agar tidak overlap di mobile.
+  - Validasi minimum: `npm run lint`, `npm run build`, manual mobile check untuk picker mode dan entrypoint PDF settings.
+- [x] UCW-360 - Harden worker party statement report against missing `overtime_fee`
+  - Statement pekerja harus memakai attendance row tanpa kolom opsional `overtime_fee` agar unduhan PDF tidak gagal pada schema cache atau runtime DB yang belum sinkron.
+  - Scope target: `api/records.js`, `tests/unit/party-statement.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-334`, `UCW-337`.
+  - Addendum audit: worker statement tetap membaca attendance fields yang dipakai PDF, tetapi query tidak lagi menghardcode kolom `overtime_fee` yang tidak diperlukan rendering dan bisa hilang di runtime schema.
+- [x] UCW-361 - Konsolidasikan kompres attachment gambar di boundary upload
+  - Attachment gambar sekarang dikompres lewat satu boundary prepare sebelum upload storage, sehingga jalur direct dan background upload memakai perilaku yang sama.
+  - Scope target: `src/store/useFileStore.js`, `tests/unit/attachment-upload.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-19`, `UCW-86`.
+  - Addendum audit: helper kompres yang sudah ada kini dipakai di semua entrypoint upload attachment gambar; PDF/non-image tetap tidak dikompres, metadata `file_size` mengikuti hasil file akhir, dan cleanup storage tetap berjalan saat registrasi metadata gagal.
+- [x] UCW-362 - Modal-only mutation feedback untuk create/edit/bayar/hapus/restore
+  - Loading, success, dan error mutation dipindahkan ke modal pop-up agar surface CRUD utama tidak lagi menampilkan feedback inline yang membingungkan saat mutasi sedang berjalan.
+  - Scope target: `src/components/HrdPipeline.jsx`, `src/components/BeneficiaryList.jsx`, `src/components/MasterMaterialForm.jsx`, `src/pages/StockPage.jsx`, `src/components/WorkerForm.jsx`, `src/components/master/GenericMasterForm.jsx`, `src/components/LoanForm.jsx`, `src/pages/PaymentPage.jsx`, `src/pages/TransactionDetailPage.jsx`, `src/components/ExpenseAttachmentSection.jsx`, `src/components/ExpenseForm.jsx`, `src/components/MaterialInvoiceForm.jsx`, `src/components/IncomeForm.jsx`, `src/components/PaymentModal.jsx`, `src/components/AttendanceForm.jsx`, `src/components/PayrollManager.jsx`, `src/pages/PayrollPage.jsx`, `src/pages/PaymentsPage.jsx`, `src/pages/TransactionsPage.jsx`, `src/pages/TransactionsRecycleBinPage.jsx`, `src/pages/DeletedTransactionDetailPage.jsx`, `src/components/TransactionDeleteDialog.jsx`, `src/components/PayrollAttendanceHistory.jsx`, `src/store/usePaymentStore.js`, `src/store/useIncomeStore.js`, `src/store/useTransactionStore.js`, `src/store/useToastStore.js`, `src/components/ui/GlobalToast.jsx`, `src/components/ui/AppPrimitives.jsx`, `src/lib/mutation-toast.js`, `src/hooks/useMutationToast.js`.
+  - Dependensi: `UCW-357`, `UCW-359`, `UCW-360`, `UCW-361`.
+  - Addendum audit: submit success baru muncul setelah reset/refresh/close settle selesai, delete success baru muncul setelah list/detail sudah hilang dari UI, dan inline loading/success banners yang tersisa di surface mutasi utama dihilangkan.
+- [x] UCW-363 - Finalisasi cleanup modal-only untuk validasi form mutasi yang tersisa
+  - Inline validation fallback yang masih tampil di HrdPipeline, BeneficiaryList, WorkerForm, MasterMaterialForm, dan StockPage dihapus; invalid input sekarang hanya memunculkan modal fail.
+  - Scope target: `src/components/HrdPipeline.jsx`, `src/components/BeneficiaryList.jsx`, `src/components/WorkerForm.jsx`, `src/components/MasterMaterialForm.jsx`, `src/pages/StockPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-362`.
+  - Addendum audit: feedback mutation tetap modal-only; state inline yang tersisa dipertahankan hanya untuk load/error data non-mutation.
+- [x] UCW-364 - Selaraskan backfill attendance legacy dengan aturan repo berbasis project
+  - Backfill attendance legacy hanya boleh memuat row yang punya `projectId` eksplisit; row legacy tanpa `projectId` harus dilewati walau punya relasi worker atau salary bill, karena repo ini memodelkan absensi per proyek.
+  - Scope target: `scripts/firestore-backfill/helpers.mjs`, `scripts/firestore-backfill/extract.mjs`, `scripts/firestore-backfill/load.mjs`, `tests/unit/firestore-backfill.test.js`, `scripts/firestore-backfill/README.md`, `docs/firestore-backfill-handoff-2026-04-23.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-07`, `UCW-13`, `UCW-334`.
+  - Addendum audit: extractor kini menyaring row attendance tanpa `projectId` legacy dari artifact canonical dan membersihkan `id-map` terkait; loader juga skip defensif jika artifact lama masih membawa row tanpa project sehingga backfill staging tidak lagi mengisi `project_id` lewat fallback `salary_bill` atau `worker.default_project_id`.
+- [x] UCW-365 - Selaraskan nominal loan legacy dan dedupe source `project-income` di transaksi
+  - Snapshot loan harus mempertahankan `totalRepaymentAmount` legacy sebagai total kewajiban pengembalian, sementara source transaksi workspace/history harus menggabungkan row `project-income` multi fee-bill menjadi satu row canonical agar UI tidak terlihat dobel pasca backfill.
+  - Scope target: `src/lib/loan-business.js`, `src/store/usePaymentStore.js`, `src/store/useIncomeStore.js`, `api/transactions.js`, `tests/unit/firestore-backfill.test.js`, `tests/unit/transactions-project-income-aggregation.test.js`, `docs/firestore-backfill-handoff-2026-04-23.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-24`, `UCW-82`, `UCW-364`.
+  - Addendum audit: helper snapshot loan kini menjaga `repayment_amount` eksplisit dari legacy/backfill sehingga nominal pengembalian di detail/payment tidak turun ke fallback formula; read model `vw_workspace_transactions` dan `vw_history_transactions` juga menggabungkan sibling fee bill `project-income`, termasuk summary bill teragregasi pada detail income.
+- [x] UCW-366 - Finalkan live backfill attendance ke project UI aktif dan kunci jalur audit surface
+  - Project `.env` yang dipakai UI frontend harus menerima rerun backfill attendance final beserta asset sync setelah schema remote `attendance_records` diselaraskan untuk `attendance_status = 'absent'` dan kolom `overtime_fee`; hasil audit juga harus menegaskan bahwa attendance diverifikasi dari surface `Absensi`/`Payroll`, bukan `Jurnal`.
+  - Scope target: `docs/firestore-backfill-handoff-2026-04-23.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-364`, `UCW-365`.
+  - Addendum audit: live load `.env` kini selesai dengan `meta/load-report.json` `blocking_issues = 0` dan `meta/asset-sync-report.json` `failed = 0`; `.env.backfill.local` tetap dicatat sebagai target terpisah yang belum repo-ready sehingga tidak dipakai untuk audit UI saat ini.

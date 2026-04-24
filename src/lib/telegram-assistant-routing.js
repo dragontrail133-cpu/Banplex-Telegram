@@ -15,7 +15,10 @@ const assistantCallbackPrefixes = Object.freeze({
   metric: 'ta:am:',
   entity: 'ta:ae:',
   window: 'ta:aw:',
+  settlement: 'ta:sb:',
 })
+const allowedSettlementSummarySurfaces = new Set(['status', 'history'])
+const allowedSettlementSummaryStatuses = new Set(['paid', 'partial', 'unpaid'])
 const allowedAnalyticsMetricKeys = new Set([
   'bill_summary',
   'cash_outflow',
@@ -137,6 +140,32 @@ function buildAssistantCommandInput(commandName, args = '') {
   return ''
 }
 
+function resolveAssistantMenuCommandFromText(text, labels = {}) {
+  const normalizedText = normalizeText(text, '').toLowerCase()
+
+  if (!normalizedText) {
+    return null
+  }
+
+  const labelToCommandPairs = [
+    ['menu', labels.menu],
+    ['tambah', labels.add],
+    ['buka', labels.open],
+    ['cari', labels.search],
+    ['status', labels.status],
+    ['riwayat', labels.history],
+    ['analytics', labels.analytics],
+  ]
+
+  for (const [commandName, label] of labelToCommandPairs) {
+    if (normalizeText(label, '').toLowerCase() === normalizedText) {
+      return commandName
+    }
+  }
+
+  return null
+}
+
 function resolveAssistantCallbackAction(callbackData) {
   const normalizedCallbackData = normalizeText(callbackData, '')
 
@@ -179,6 +208,27 @@ function resolveAssistantCallbackAction(callbackData) {
     return {
       type: 'message',
       messageText: metricPrompts[metricKey] ?? '',
+      requiresSession: true,
+    }
+  }
+
+  if (normalizedCallbackData.startsWith(assistantCallbackPrefixes.settlement)) {
+    const payload = normalizedCallbackData.slice(assistantCallbackPrefixes.settlement.length)
+    const [surface = '', status = ''] = payload.split(':')
+    const normalizedSurface = normalizeText(surface, '').toLowerCase()
+    const normalizedStatus = normalizeText(status, '').toLowerCase()
+
+    if (
+      !allowedSettlementSummarySurfaces.has(normalizedSurface) ||
+      !allowedSettlementSummaryStatuses.has(normalizedStatus)
+    ) {
+      return null
+    }
+
+    return {
+      type: 'settlement_summary',
+      surface: normalizedSurface,
+      status: normalizedStatus,
       requiresSession: true,
     }
   }
@@ -267,6 +317,7 @@ export {
   buildAssistantCommandRawText,
   extractAssistantCommand,
   resolveAssistantCallbackAction,
+  resolveAssistantMenuCommandFromText,
   getAssistantRouteLabel,
   shouldUseAssistantDmFallback,
 }

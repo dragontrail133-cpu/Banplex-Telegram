@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { resolveLoanNominalAmounts, shouldBackfillAttendanceRecord } from './helpers.mjs'
 
 const DEFAULT_OUTPUT_DIR = 'firestore-legacy-export'
 const DEFAULT_ROOT_COLLECTIONS = ['teams', 'penerimaManfaat', 'users']
@@ -763,8 +764,10 @@ function createCliParser(argv) {
     serviceAccountPath: normalizeText(process.env.GOOGLE_APPLICATION_CREDENTIALS, null),
     serviceAccountJson: normalizeText(process.env.GOOGLE_SERVICE_ACCOUNT_JSON, null),
     projectId: normalizeText(process.env.GOOGLE_CLOUD_PROJECT ?? process.env.FIRESTORE_PROJECT_ID, null),
+    snapshotInputDir: null,
     outputDir: DEFAULT_OUTPUT_DIR,
     rootCollections: [...DEFAULT_ROOT_COLLECTIONS],
+    rootCollectionsExplicit: false,
     globalTeamPath: DEFAULT_GLOBAL_TEAM_PATH,
     includeRaw: true,
     includeCanonical: true,
@@ -825,6 +828,16 @@ function createCliParser(argv) {
       continue
     }
 
+    if (token.startsWith('--snapshot-input=')) {
+      options.snapshotInputDir = token.slice('--snapshot-input='.length)
+      continue
+    }
+
+    if (token === '--snapshot-input') {
+      options.snapshotInputDir = argv[++index] ?? ''
+      continue
+    }
+
     if (token.startsWith('--output=')) {
       options.outputDir = token.slice('--output='.length)
       continue
@@ -837,11 +850,13 @@ function createCliParser(argv) {
 
     if (token.startsWith('--root-collections=')) {
       options.rootCollections = uniqueStrings(token.slice('--root-collections='.length).split(','))
+      options.rootCollectionsExplicit = true
       continue
     }
 
     if (token === '--root-collections') {
       options.rootCollections = uniqueStrings(String(argv[++index] ?? '').split(','))
+      options.rootCollectionsExplicit = true
       continue
     }
 
@@ -870,6 +885,7 @@ function createCliParser(argv) {
         ...options.rootCollections,
         token.slice('--collection='.length),
       ])
+      options.rootCollectionsExplicit = true
       continue
     }
 
@@ -878,6 +894,7 @@ function createCliParser(argv) {
         ...options.rootCollections,
         argv[++index] ?? '',
       ])
+      options.rootCollectionsExplicit = true
       continue
     }
   }
@@ -896,6 +913,7 @@ Options:
   --service-account <path>        Path to Firebase service account JSON
   --service-account-json <json>   Inline service account JSON
   --project-id <id>               Override Firestore project id
+  --snapshot-input <dir>          Local export snapshot root with manifest.json and collection folders
   --output <dir>                  Output directory (default: firestore-legacy-export)
   --root-collections <list>       Root collections to walk (comma separated)
   --global-team-path <path>       Team path used for global legacy collections (default: teams/main)
@@ -929,6 +947,88 @@ async function loadServiceAccount(options) {
   throw new Error(
     'Service account belum ditemukan. Gunakan --service-account atau --service-account-json, atau set GOOGLE_APPLICATION_CREDENTIALS.'
   )
+}
+
+async function fileExists(filePath) {
+  try {
+    const stat = await fs.stat(filePath)
+    return stat.isFile()
+  } catch {
+    return false
+  }
+}
+
+async function directoryExists(filePath) {
+  try {
+    const stat = await fs.stat(filePath)
+    return stat.isDirectory()
+  } catch {
+    return false
+  }
+}
+
+async function readJson(filePath) {
+  return JSON.parse(await fs.readFile(filePath, 'utf8'))
+}
+
+function createSnapshotFirestoreClient(snapshotRoot) {
+  function resolveCollectionDir(collectionPath) {
+    return path.join(snapshotRoot, ...String(collectionPath).split('/').filter(Boolean))
+  }
+
+  function resolveDocumentDir(documentPath) {
+    return path.join(snapshotRoot, ...String(documentPath).split('/').filter(Boolean))
+  }
+
+  return {
+    async listDocuments(collectionPath) {
+      const collectionDir = resolveCollectionDir(collectionPath)
+      if (!(await directoryExists(collectionDir))) {
+        return { documents: [], nextPageToken: null }
+      }
+
+      const entries = await fs.readdir(collectionDir, { withFileTypes: true })
+      const documents = []
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) {
+          continue
+        }
+
+        const documentJsonPath = path.join(collectionDir, entry.name, 'document.json')
+        if (!(await fileExists(documentJsonPath))) {
+          continue
+        }
+
+        const rawDocument = await readJson(documentJsonPath)
+        const documentPath = normalizeText(rawDocument.path ?? `${collectionPath}/${entry.name}`, null)
+
+        documents.push({
+          name: rawDocument.name ?? documentPath ?? '',
+          fields: rawDocument.fields ?? rawDocument.data ?? {},
+          createTime: rawDocument.createTime ?? rawDocument.exportedAt ?? null,
+          updateTime: rawDocument.updateTime ?? rawDocument.exportedAt ?? null,
+        })
+      }
+
+      documents.sort((left, right) => normalizeText(left.name, '').localeCompare(normalizeText(right.name, '')))
+
+      return { documents, nextPageToken: null }
+    },
+
+    async listCollectionIds(documentPath) {
+      const documentDir = resolveDocumentDir(documentPath)
+      if (!(await directoryExists(documentDir))) {
+        return { collectionIds: [], nextPageToken: null }
+      }
+
+      const entries = await fs.readdir(documentDir, { withFileTypes: true })
+      const collectionIds = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+      collectionIds.sort((left, right) => left.localeCompare(right))
+
+      return { collectionIds, nextPageToken: null }
+    },
+  }
 }
 
 function createFirestoreClient(projectId, accessToken, pageSize = FIRESTORE_PAGE_SIZE) {
@@ -2262,16 +2362,32 @@ function transformLoanDoc(context, doc) {
     { allowNameLookup: true }
   )
 
-  const principalAmount =
-    pickNumber(data, 'principal_amount', null) ??
-    pickNumber(data, 'principalAmount', null) ??
-    pickNumber(data, 'amount', null) ??
-    0
-  const repaymentAmount =
-    pickNumber(data, 'repayment_amount', null) ??
-    pickNumber(data, 'repaymentAmount', null) ??
-    pickNumber(data, 'totalRepaymentAmount', null) ??
-    principalAmount
+  const loanNominalAmounts = resolveLoanNominalAmounts({
+    principalAmount:
+      pickNumber(data, 'principal_amount', null) ??
+      pickNumber(data, 'principalAmount', null) ??
+      pickNumber(data, 'amount', null) ??
+      pickNumber(data, 'totalAmount', null) ??
+      null,
+    amount:
+      pickNumber(data, 'amount', null) ??
+      pickNumber(data, 'totalAmount', null) ??
+      null,
+    totalAmount: pickNumber(data, 'totalAmount', null) ?? pickNumber(data, 'total_amount', null) ?? null,
+    repaymentAmount:
+      pickNumber(data, 'repayment_amount', null) ??
+      pickNumber(data, 'repaymentAmount', null) ??
+      pickNumber(data, 'totalRepaymentAmount', null) ??
+      null,
+    totalRepaymentAmount:
+      pickNumber(data, 'totalRepaymentAmount', null) ??
+      pickNumber(data, 'total_repayment_amount', null) ??
+      null,
+    interestType:
+      pickField(data, 'interest_type', null) ??
+      pickField(data, 'interestType', null) ??
+      null,
+  })
   const interestType = normalizeLoanInterestTypeValue(
     pickField(data, 'interest_type', null) ?? pickField(data, 'interestType', null)
   )
@@ -2291,9 +2407,9 @@ function transformLoanDoc(context, doc) {
       pickDate(data, 'disbursed_date', null) ??
       pickDate(data, 'transaction_date', null) ??
       pickDate(data, 'date', null),
-    principal_amount: principalAmount,
-    amount: pickNumber(data, 'amount', null) ?? principalAmount,
-    repayment_amount: repaymentAmount,
+    principal_amount: loanNominalAmounts.principal_amount,
+    amount: loanNominalAmounts.amount,
+    repayment_amount: loanNominalAmounts.repayment_amount,
     interest_type: interestType,
     interest_rate: interestRate,
     tenor_months: pickInteger(data, 'tenor_months', null) ?? pickInteger(data, 'tenorMonths', null),
@@ -3236,6 +3352,26 @@ function finalizeBillAndLoanSummaries(context) {
       attendance.billing_status = attendance.billing_status === 'unbilled' ? 'billed' : attendance.billing_status
     }
   }
+
+  const filteredAttendanceRows = attendanceRows.filter((attendance) =>
+    shouldBackfillAttendanceRecord({ projectId: attendance.project_id })
+  )
+  const skippedAttendanceIds = new Set(
+    attendanceRows
+      .filter((attendance) => !shouldBackfillAttendanceRecord({ projectId: attendance.project_id }))
+      .map((attendance) => attendance.id)
+  )
+
+  if (skippedAttendanceIds.size > 0) {
+    context.canonicalRows.set('attendance_records', filteredAttendanceRows)
+    context.idMap = context.idMap.filter(
+      (entry) => entry.canonical_table !== 'attendance_records' || !skippedAttendanceIds.has(entry.canonical_id)
+    )
+    context.validation.warnings.push({
+      scope: 'attendance_records',
+      message: `${skippedAttendanceIds.size} attendance record legacy tanpa projectId dilewati dari backfill attendance.`,
+    })
+  }
 }
 
 function validateCanonical(context) {
@@ -3565,15 +3701,22 @@ function walkCanonicalAndSidecarDocs(context, doc) {
 }
 
 function createRawDocModel(document) {
-  const documentPath = normalizeDocumentPath(document)
+  const documentPath = normalizeText(
+    normalizeDocumentPath(document),
+    normalizeText(document?.path ?? document?.documentPath ?? null, '')
+  )
+  const fields = document?.fields ?? document?.data ?? {}
+  const createTime = document?.createTime ?? document?.exportedAt ?? null
+  const updateTime = document?.updateTime ?? document?.exportedAt ?? createTime ?? null
+
   return {
     path: documentPath,
     collectionPath: getCollectionPath(documentPath),
     parentPath: getParentDocumentPath(documentPath),
     docId: getDocId(documentPath),
-    createTime: toIsoString(document.createTime ?? null, null),
-    updateTime: toIsoString(document.updateTime ?? null, null),
-    data: normalizeFirestoreFields(document.fields ?? {}),
+    createTime: toIsoString(createTime, null),
+    updateTime: toIsoString(updateTime, null),
+    data: normalizeFirestoreFields(fields),
   }
 }
 
@@ -3628,33 +3771,84 @@ async function main() {
     return
   }
 
-  const serviceAccount = await loadServiceAccount(options)
-  const projectId = normalizeText(
-    options.projectId ?? serviceAccount.project_id ?? serviceAccount.projectId ?? null,
-    null
-  )
-
-  if (!projectId) {
-    throw new Error(
-      'Project ID Firestore tidak ditemukan. Gunakan --project-id atau pastikan service account berisi project_id.'
-    )
+  const outputRoot = await prepareOutputRoot(options.outputDir)
+  const contextOptions = {
+    ...options,
+    outputDir: outputRoot,
   }
 
-  const accessToken = await exchangeJwtForAccessToken(serviceAccount)
-  const client = createFirestoreClient(projectId, accessToken, options.pageSize)
-  const outputRoot = await prepareOutputRoot(options.outputDir)
+  let client = null
+  let projectId = normalizeText(options.projectId ?? null, null)
+  let rootCollections = [...options.rootCollections]
+
+  if (options.snapshotInputDir) {
+    const snapshotInputDir = path.resolve(options.snapshotInputDir)
+    const snapshotManifestPath = path.join(snapshotInputDir, 'manifest.json')
+
+    if (!(await fileExists(snapshotManifestPath))) {
+      throw new Error(`manifest.json tidak ditemukan pada snapshot input: ${snapshotManifestPath}`)
+    }
+
+    const snapshotManifest = await readJson(snapshotManifestPath)
+    projectId = normalizeText(projectId ?? snapshotManifest.projectId ?? snapshotManifest.project_id ?? null, null)
+
+    if (!projectId) {
+      throw new Error(
+        'Project ID snapshot tidak ditemukan. Gunakan --project-id atau pastikan manifest snapshot berisi projectId.'
+      )
+    }
+
+    const snapshotRootCollections = Array.isArray(snapshotManifest.rootCollections)
+      ? snapshotManifest.rootCollections
+      : []
+
+    if (options.rootCollectionsExplicit) {
+      rootCollections = uniqueStrings(rootCollections)
+    } else if (snapshotRootCollections.length > 0) {
+      rootCollections = uniqueStrings(snapshotRootCollections)
+    }
+
+    if (rootCollections.length === 0) {
+      rootCollections = [...DEFAULT_ROOT_COLLECTIONS]
+    }
+
+    client = createSnapshotFirestoreClient(snapshotInputDir)
+  } else {
+    const serviceAccount = await loadServiceAccount(options)
+    projectId = normalizeText(
+      projectId ?? serviceAccount.project_id ?? serviceAccount.projectId ?? null,
+      null
+    )
+
+    if (!projectId) {
+      throw new Error(
+        'Project ID Firestore tidak ditemukan. Gunakan --project-id atau pastikan service account berisi project_id.'
+      )
+    }
+
+    const accessToken = await exchangeJwtForAccessToken(serviceAccount)
+    client = createFirestoreClient(projectId, accessToken, options.pageSize)
+  }
+
   const context = createOutputContext({
-    ...options,
+    ...contextOptions,
     projectId,
-    outputDir: outputRoot,
+    rootCollections,
   })
 
-  for (const rootCollection of options.rootCollections) {
+  for (const rootCollection of rootCollections) {
     await walkCollection(client, rootCollection, context)
   }
 
   buildRawIndexes(context)
   context.options.globalTeamPath = deriveDefaultTeamPath(context)
+
+  for (const docs of context.rawCollections.values()) {
+    for (const doc of docs) {
+      walkCanonicalAndSidecarDocs(context, doc)
+    }
+  }
+
   finalizeBillAndLoanSummaries(context)
   validateCanonical(context)
 

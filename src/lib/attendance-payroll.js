@@ -45,6 +45,80 @@ export function getAttendanceDayWeight(attendanceStatus) {
   return 0
 }
 
+export function getAttendanceQuotaState({
+  usedDayWeight = 0,
+  currentRowWeight = 0,
+} = {}) {
+  const numericUsedDayWeight = Number(usedDayWeight)
+  const numericCurrentRowWeight = Number(currentRowWeight)
+  const safeUsedDayWeight =
+    Number.isFinite(numericUsedDayWeight) && numericUsedDayWeight > 0 ? numericUsedDayWeight : 0
+  const safeCurrentRowWeight =
+    Number.isFinite(numericCurrentRowWeight) && numericCurrentRowWeight > 0
+      ? numericCurrentRowWeight
+      : 0
+  const totalOtherWeight = Math.max(safeUsedDayWeight - safeCurrentRowWeight, 0)
+  const remainingQuota = Math.max(1 - totalOtherWeight, 0)
+
+  return {
+    totalOtherWeight,
+    remainingQuota,
+    isFullyAllocated: totalOtherWeight >= 1,
+    hasHalfQuotaOnly: totalOtherWeight >= 0.5 && totalOtherWeight < 1,
+  }
+}
+
+export function getAllowedAttendanceStatusValues({
+  usedDayWeight = 0,
+  currentAttendanceStatus = '',
+  currentRowWeight = null,
+} = {}) {
+  const normalizedCurrentStatus = normalizeAttendanceStatus(currentAttendanceStatus)
+  const resolvedCurrentRowWeight =
+    currentRowWeight === null || currentRowWeight === undefined
+      ? getAttendanceDayWeight(normalizedCurrentStatus)
+      : currentRowWeight
+  const quotaState = getAttendanceQuotaState({
+    usedDayWeight,
+    currentRowWeight: resolvedCurrentRowWeight,
+  })
+
+  let allowedStatuses = []
+
+  if (quotaState.isFullyAllocated) {
+    allowedStatuses = []
+  } else if (quotaState.hasHalfQuotaOnly) {
+    allowedStatuses = ['half_day', 'overtime']
+  } else {
+    allowedStatuses = ['full_day', 'half_day', 'overtime', 'absent']
+  }
+
+  if (normalizedCurrentStatus) {
+    allowedStatuses = [...allowedStatuses, normalizedCurrentStatus]
+  }
+
+  return [...new Set(allowedStatuses.filter(Boolean))]
+}
+
+export function isAttendanceStatusAllowed({
+  usedDayWeight = 0,
+  nextAttendanceStatus = '',
+  currentAttendanceStatus = '',
+  currentRowWeight = null,
+} = {}) {
+  const normalizedNextStatus = normalizeAttendanceStatus(nextAttendanceStatus)
+
+  if (!normalizedNextStatus) {
+    return true
+  }
+
+  return getAllowedAttendanceStatusValues({
+    usedDayWeight,
+    currentAttendanceStatus,
+    currentRowWeight,
+  }).includes(normalizedNextStatus)
+}
+
 export function deriveAttendanceOvertimeFee({
   attendanceStatus,
   baseWage = 0,

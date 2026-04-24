@@ -4,6 +4,7 @@ import useAuthStore from '../store/useAuthStore'
 import useIncomeStore from '../store/useIncomeStore'
 import useMasterStore from '../store/useMasterStore'
 import { getAppTodayKey } from '../lib/date-time'
+import useMutationToast from '../hooks/useMutationToast'
 import FormLayout from './layouts/FormLayout'
 import MasterPickerField from './ui/MasterPickerField'
 import {
@@ -115,7 +116,6 @@ function buildStaffFeePreview(staffMembers = [], terminAmount = 0) {
 
 function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = 'income-form' }) {
   const [formData, setFormData] = useState(() => createInitialFormData(initialData))
-  const [successMessage, setSuccessMessage] = useState(null)
   const { user } = useTelegram()
   const authUser = useAuthStore((state) => state.user)
   const projects = useMasterStore((state) => state.projects)
@@ -128,6 +128,7 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = '
   const isSubmitting = useIncomeStore((state) => state.isSubmitting)
   const error = useIncomeStore((state) => state.error)
   const clearError = useIncomeStore((state) => state.clearError)
+  const { begin, clear, fail, succeed } = useMutationToast()
   const isEditMode = Boolean(recordId)
   const telegramUserId = getTelegramUserId(user, authUser)
   const userName = getUserDisplayName(user, authUser)
@@ -156,6 +157,7 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = '
   }, [fetchMasters])
 
   useEffect(() => () => clearError(), [clearError])
+  useEffect(() => () => clear(), [clear])
 
   const handleChange = (event) => {
     const { name, value } = event.target
@@ -168,10 +170,6 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = '
     if (error) {
       clearError()
     }
-
-    if (successMessage) {
-      setSuccessMessage(null)
-    }
   }
 
   const handleSubmit = async (event) => {
@@ -182,6 +180,11 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = '
     }
 
     try {
+      begin({
+        title: isEditMode ? 'Memperbarui termin proyek' : 'Menyimpan termin proyek',
+        message: 'Mohon tunggu sampai proses selesai.',
+      })
+
       const payload = {
         telegram_user_id: telegramUserId,
         userName,
@@ -209,17 +212,22 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = '
         setFormData(createInitialFormData())
       }
 
-      setSuccessMessage(
-        isEditMode
-          ? 'Pemasukan proyek berhasil diperbarui.'
-          : 'Termin proyek berhasil disimpan.'
-      )
+      succeed({
+        title: isEditMode ? 'Pemasukan proyek diperbarui' : 'Pemasukan proyek tersimpan',
+        message: isEditMode
+          ? 'Perubahan pemasukan proyek berhasil disimpan.'
+          : 'Termin proyek berhasil dicatat.',
+      })
     } catch (submitError) {
       const message =
         submitError instanceof Error
           ? submitError.message
           : 'Gagal menyimpan termin proyek.'
 
+      fail({
+        title: isEditMode ? 'Pemasukan proyek gagal diperbarui' : 'Pemasukan proyek gagal disimpan',
+        message,
+      })
       console.error(message)
     }
   }
@@ -446,11 +454,6 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = '
                 />
               ) : null}
 
-              {successMessage ? (
-                <AppCard className="border-emerald-200 bg-emerald-50 text-sm leading-6 text-emerald-700">
-                  {successMessage}
-                </AppCard>
-              ) : null}
             </div>
           </FormSection>
         </FormLayout>

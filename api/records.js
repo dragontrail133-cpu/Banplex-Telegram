@@ -3,6 +3,10 @@ import {
   ATTACHMENT_ROLE_MATRIX,
   getAttachmentPermissions,
 } from '../src/lib/attachment-permissions.js'
+import {
+  getAllowedAttendanceStatusValues,
+  getAttendanceDayWeight,
+} from '../src/lib/attendance-payroll.js'
 import { assertCapabilityAccess } from '../src/lib/capabilities.js'
 import { nowMs } from '../src/lib/timing.js'
 
@@ -95,20 +99,6 @@ async function runAttendanceMutationWithFallback(buildMutation) {
   return legacyResult.data
 }
 
-function getAttendanceDayWeight(attendanceStatus) {
-  const normalizedStatus = normalizeText(attendanceStatus, '').toLowerCase()
-
-  if (normalizedStatus === 'full_day') {
-    return 1
-  }
-
-  if (normalizedStatus === 'half_day') {
-    return 0.5
-  }
-
-  return 0
-}
-
 async function loadAttendanceRowsForWorkerDay(adminClient, teamId, attendanceDate, workerIds = []) {
   const normalizedTeamId = normalizeText(teamId)
   const normalizedDate = normalizeText(attendanceDate)
@@ -144,9 +134,22 @@ async function loadAttendanceRowsForWorkerDay(adminClient, teamId, attendanceDat
   }, new Map())
 }
 
-function assertAttendanceDayWeightWithinLimit({ workerRows = [], currentSourceId = null, nextAttendanceStatus = null, workerName = 'Pekerja', attendanceDate = null } = {}) {
+function assertAttendanceStatusAllowedForWorkerDay({
+  workerRows = [],
+  currentSourceId = null,
+  currentAttendanceStatus = null,
+  nextAttendanceStatus = null,
+  workerName = 'Pekerja',
+  attendanceDate = null,
+} = {}) {
   const normalizedCurrentSourceId = normalizeText(currentSourceId, null)
+  const normalizedCurrentAttendanceStatus = normalizeText(currentAttendanceStatus, null)
   const normalizedNextAttendanceStatus = normalizeText(nextAttendanceStatus, null)
+
+  if (!normalizedNextAttendanceStatus) {
+    return
+  }
+
   const totalOtherWeight = workerRows.reduce((totalWeight, row) => {
     if (normalizeText(row?.id, null) === normalizedCurrentSourceId) {
       return totalWeight
@@ -155,12 +158,20 @@ function assertAttendanceDayWeightWithinLimit({ workerRows = [], currentSourceId
     return totalWeight + getAttendanceDayWeight(row?.attendance_status)
   }, 0)
 
-  const nextWeight = getAttendanceDayWeight(normalizedNextAttendanceStatus)
+  const allowedStatuses = getAllowedAttendanceStatusValues({
+    usedDayWeight: totalOtherWeight,
+    currentAttendanceStatus: normalizedCurrentAttendanceStatus,
+  })
 
-  if (totalOtherWeight + nextWeight > 1) {
+  if (!allowedStatuses.includes(normalizedNextAttendanceStatus)) {
+    const normalizedDateLabel = attendanceDate ?? 'tanggal ini'
+    const totalOtherWeightLabel = Number.isInteger(totalOtherWeight)
+      ? String(totalOtherWeight)
+      : String(totalOtherWeight).replace(/\.0$/, '')
+
     throw createHttpError(
       400,
-      `Absensi ${workerName} pada ${attendanceDate ?? 'tanggal ini'} sudah mencapai batas satu hari. Gunakan half_day atau overtime sesuai sisa jatah harian.`
+      `Absensi ${workerName} pada ${normalizedDateLabel} tidak bisa memakai status ${normalizedNextAttendanceStatus}. Kuota hari aktif saat ini ${totalOtherWeightLabel}.`
     )
   }
 }
@@ -3963,9 +3974,10 @@ async function persistAttendanceSheet(adminClient, body, telegramUserId, teamId)
       normalizeText(existingRow?.worker_name_snapshot, null) ??
       'Pekerja'
 
-    assertAttendanceDayWeightWithinLimit({
+    assertAttendanceStatusAllowedForWorkerDay({
       workerRows,
       currentSourceId: row.sourceId,
+      currentAttendanceStatus: existingRow?.attendance_status ?? null,
       nextAttendanceStatus: row.attendance_status,
       workerName,
       attendanceDate: normalizedDate,
@@ -4180,9 +4192,10 @@ async function updateAttendance(adminClient, body, telegramUserId) {
     [attendance.worker_id]
   )
 
-  assertAttendanceDayWeightWithinLimit({
+  assertAttendanceStatusAllowedForWorkerDay({
     workerRows: workerDayRowsByWorkerId.get(attendance.worker_id) ?? [],
     currentSourceId: attendance.id,
+    currentAttendanceStatus: attendance.attendance_status,
     nextAttendanceStatus: normalizedAttendanceStatus,
     workerName:
       normalizeText(attendance.worker_name_snapshot ?? attendance.worker_name, null) ?? 'Pekerja',
@@ -4250,9 +4263,10 @@ async function restoreAttendance(adminClient, body, telegramUserId) {
     [attendance.worker_id]
   )
 
-  assertAttendanceDayWeightWithinLimit({
+  assertAttendanceStatusAllowedForWorkerDay({
     workerRows: workerDayRowsByWorkerId.get(attendance.worker_id) ?? [],
     currentSourceId: attendance.id,
+    currentAttendanceStatus: attendance.attendance_status,
     nextAttendanceStatus: attendance.attendance_status,
     workerName:
       normalizeText(attendance.worker_name_snapshot ?? attendance.worker_name, null) ?? 'Pekerja',
@@ -5242,7 +5256,7 @@ async function loadPartyStatementWorkerRows(readClient, partyId, { dateTo = null
     (async () => {
       let attendanceQuery = readClient
         .from('attendance_records')
-        .select(attendanceDetailSelectColumns)
+        .select(attendanceDetailSelectColumnsWithoutOvertimeFee)
         .eq('worker_id', normalizedPartyId)
         .is('deleted_at', null)
         .order('attendance_date', { ascending: true })
@@ -6777,4 +6791,8 @@ export default async function handler(req, res) {
   }
 }
 
-export { normalizePartyStatementPartyType, summarizePartyStatementRows }
+export {
+  loadPartyStatementWorkerRows,
+  normalizePartyStatementPartyType,
+  summarizePartyStatementRows,
+}

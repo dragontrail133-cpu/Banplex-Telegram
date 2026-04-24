@@ -23,13 +23,263 @@ Dokumen ini adalah log progres khusus untuk stream `Unified CRUD Workspace`.
 - Active stream: `Unified CRUD Workspace`
 - Referensi plan: `docs/unified-crud-workspace-plan-2026-04-18.md`
 - Primary freeze authority: `docs/freeze/00-index.md`
-- Current task: `UCW-356`
-- Current status: `audit_required`
-- Catatan fokus: route canonical `/reports` sudah dipatch; `/projects`, `/projects/pdf-settings`, dan `/proyek` menjadi alias direct ke canonical path, tetapi build dan smoke masih perlu validasi di environment yang mengizinkan spawn.
-- Catatan brief terbaru: user meminta implementasi plan audit/arsitektur tanpa asumsi liar; batch aktif kini mencakup runtime route `/reports`, bukan hanya dokumen audit.
-- Catatan audit freeze terbaru: `Report PDF` tetap output turunan, `pdf_settings` tetap konfigurasi branding, dan `Payment Receipt PDF` tetap terpisah dari laporan bisnis.
-- Status transitions touched: `UCW-353` tetap `validated`; `UCW-354` tetap `planned`; `UCW-355` tetap `validated`; `UCW-356` sekarang `audit_required`.
-- Review order: submit mobile income -> implement route `/reports` -> validasi lint/build/smoke, lalu lanjut ke `UCW-357` bila environment sudah aman.
+- Current task: `UCW-366`
+- Current status: `validated`
+- Catatan fokus: live backfill attendance final sudah masuk ke project `.env` yang dipakai UI aktif, dan jalur audit surface dikunci ke `Absensi`/`Payroll` karena `Jurnal` memang tidak memuat row raw attendance.
+- Catatan brief terbaru: user meminta attendance backfill dilanjutkan sampai bisa diaudit dari UI; klarifikasi berikutnya menetapkan bahwa source-of-truth verifikasi UI tetap project `.env`, bukan `.env.backfill.local`.
+- Catatan audit freeze terbaru: source transaksi canonical tetap satu row per parent `project-income`, domain loan tetap menjaga `pokok` vs `total pengembalian`, dan attendance canonical tetap project-scoped dengan verifikasi UI berbasis tanggal + proyek.
+- Status transitions touched: `UCW-365` tetap `validated`; `UCW-366` baru ditambahkan dan berstatus `validated`.
+- Review order: user audit UI `Absensi` dan `Payroll` pada project `.env` dulu; jika butuh target staging terpisah, audit/alignment schema `.env.backfill.local` dilakukan sebagai task baru.
+
+### [2026-04-25] `UCW-366` - Finalkan live backfill attendance ke project UI aktif dan kunci jalur audit surface
+- Status: `validated`
+- Ringkasan:
+  - live backfill attendance final sudah dijalankan ke project `.env` yang dipakai frontend lokal/UI aktif, setelah schema remote `attendance_records` diselaraskan agar menerima status `absent` dan kolom `overtime_fee`.
+  - jalur audit UI sekarang terkunci jelas: attendance hasil backfill dicek dari `Absensi` dan `Payroll`; `Jurnal` tidak akan menampilkan row raw `attendance-record` karena memang bukan source of truth surface tersebut.
+- File berubah:
+  - `docs/firestore-backfill-handoff-2026-04-23.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - remote project `.env` (`https://wlallnfqujbonoadqscc.supabase.co`) sudah menerima live `backfill:load` final dengan hasil `meta/load-report.json` `total_loaded = 4893`, `total_remapped = 5130`, `blocking_issues = 0`, `warnings = 0`.
+  - live `backfill:sync-assets` ke project yang sama juga selesai dengan `meta/asset-sync-report.json` `uploaded = 30`, `failed = 0`, `issues = 0`.
+  - audit source of truth menunjukkan `Absensi` membaca `attendance_records` per `team_id + attendance_date + project_id`, `Payroll` hanya menampilkan row recapable (`billing_status = unbilled`, `total_pay > 0`, `salary_bill_id is null`), dan `vw_workspace_transactions` memang tidak memuat raw `attendance-record`.
+  - snapshot data pasca backfill pada team UI aktif menunjukkan `attendance_records` aktif `2440` row, tetapi row yang recapable di `Payroll` saat ini hanya `3`, semuanya pada proyek `Dapur Sppg` tanggal `2026-01-31`, `2026-02-01`, dan `2026-02-02` untuk worker `Rahman`.
+  - `.env.backfill.local` tetap tidak dipakai UI frontend; target env tersebut sempat diaudit terpisah dan belum repo-ready, jadi tidak disentuh oleh live backfill ini.
+- Validasi:
+  - `npm run backfill:load -- --input ./firestore-legacy-export/full-export-2026-04-23-retry/normalized-artifact --target-team-id 2213b84a-a513-47fa-afbb-8b99ae3b64be --env-file ./.env --confirm-live --strict`
+  - `npm run backfill:sync-assets -- --input ./firestore-legacy-export/full-export-2026-04-23-retry/normalized-artifact --env-file ./.env --confirm-live --strict`
+  - read-only audit query ke project UI aktif untuk menghitung row attendance aktif/unbilled/recapable dan sampling proyek/tanggal yang benar-benar bisa diuji dari UI
+- Risiko/regresi:
+  - user yang mengecek attendance dari `Jurnal` akan tetap melihat kosong untuk row raw attendance; itu behavior by design, bukan kegagalan backfill.
+  - default `Absensi` membuka tanggal hari ini dan proyek aktif pertama; karena sample recapable yang tersisa ada di `Dapur Sppg` tanggal `2026-01-31` s.d. `2026-02-02`, audit UI harus memilih kombinasi tanggal/proyek yang tepat.
+
+### [2026-04-25] `UCW-365` - Selaraskan nominal loan legacy dan dedupe source `project-income` di transaksi
+- Status: `validated`
+- Ringkasan:
+  - helper snapshot loan sekarang mempertahankan `repayment_amount` eksplisit dari legacy (`totalRepaymentAmount`) sambil tetap menyimpan `base_repayment_amount` terhitung, jadi UI/detail/payment tidak lagi menurunkan nominal pengembalian ke fallback formula.
+  - read model transaksi workspace/history dan fetch detail income kini menggabungkan sibling fee bill `project-income` menjadi satu row canonical dengan summary bill teragregasi, sehingga list/detail tidak lagi terlihat dobel setelah backfill.
+- File berubah:
+  - `src/lib/loan-business.js`
+  - `src/store/usePaymentStore.js`
+  - `src/store/useIncomeStore.js`
+  - `api/transactions.js`
+  - `tests/unit/firestore-backfill.test.js`
+  - `tests/unit/transactions-project-income-aggregation.test.js`
+  - `docs/firestore-backfill-handoff-2026-04-23.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - `buildLoanTermsSnapshot()` kini memakai `repayment_amount`/`totalRepaymentAmount` eksplisit bila tersedia, lalu payment target/remaining amount di store + API mengikuti snapshot yang sama.
+  - `aggregateProjectIncomeViewRows()` menggabungkan multiple fee bill sibling ke satu row `project-income`, menjaga `bill_ids`, `bill_count`, nominal aggregate, status aggregate, dan `search_text` supaya ledger/history tidak dobel.
+  - `loadProjectIncomeById()` juga mengagregasi fee bill detail untuk parent income yang punya lebih dari satu staff fee bill, sehingga surface detail tetap konsisten dengan ledger canonical.
+- Validasi:
+  - `node --check api/transactions.js src/lib/loan-business.js src/store/useIncomeStore.js src/store/usePaymentStore.js tests/unit/firestore-backfill.test.js tests/unit/transactions-project-income-aggregation.test.js`
+  - `npx eslint api/transactions.js src/lib/loan-business.js src/store/useIncomeStore.js src/store/usePaymentStore.js tests/unit/firestore-backfill.test.js tests/unit/transactions-project-income-aggregation.test.js`
+  - `node --test tests/unit/firestore-backfill.test.js tests/unit/transactions-project-income-aggregation.test.js` -> gagal karena sandbox `spawn EPERM`
+  - smoke assertion inline via `node --input-type=module` untuk `buildLoanTermsSnapshot()` dan `aggregateProjectIncomeViewRows()` -> lulus
+  - `npm run build -- --configLoader native`
+  - `npm run lint`
+- Risiko/regresi:
+  - pagination row `project-income` sekarang dihitung setelah agregasi sibling fee bill, jadi count/cursor list bisa berubah dibanding behavior lama yang dobel; ini diharapkan karena source canonical memang satu parent row.
+  - party statement/domain laporan lain yang memang sengaja memakai total kewajiban pengembalian loan tidak diubah di task ini; follow-up terpisah dibutuhkan bila wording atau nominal di report user-facing perlu dibedakan lagi.
+
+### [2026-04-25] `UCW-364` - Selaraskan backfill attendance legacy dengan aturan repo berbasis project
+- Status: `validated`
+- Ringkasan:
+  - extractor dan loader backfill sekarang hanya memuat attendance row yang punya `projectId` legacy eksplisit; row tanpa project dilewati, bukan lagi diisi fallback dari `salary_bill` atau `worker.default_project_id`.
+  - dokumentasi handoff/backfill disinkronkan supaya aturan absent/no-project ini jadi source of truth operator saat regenerasi artifact staging.
+- File berubah:
+  - `scripts/firestore-backfill/helpers.mjs`
+  - `scripts/firestore-backfill/extract.mjs`
+  - `scripts/firestore-backfill/load.mjs`
+  - `tests/unit/firestore-backfill.test.js`
+  - `scripts/firestore-backfill/README.md`
+  - `docs/firestore-backfill-handoff-2026-04-23.md`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - helper attendance sekarang hanya meloloskan row dengan `projectId` non-kosong.
+  - canonical `attendance_records` dan `id-map` extractor dibersihkan dari row legacy tanpa project; snapshot `2510` raw attendance kini menjadi `1224` row canonical yang benar-benar project-scoped.
+  - loader skip defensif attendance tanpa project_id jika artifact lama masih dipakai, sehingga backfill live tidak lagi menyisipkan attendance absent/no-project ke schema repo.
+- Validasi:
+  - `node --check scripts/firestore-backfill/helpers.mjs scripts/firestore-backfill/extract.mjs scripts/firestore-backfill/load.mjs tests/unit/firestore-backfill.test.js`
+  - `npx eslint scripts/firestore-backfill/helpers.mjs scripts/firestore-backfill/extract.mjs scripts/firestore-backfill/load.mjs tests/unit/firestore-backfill.test.js`
+  - `npm run backfill:stage -- --input ./firestore-legacy-export/full-export-2026-04-23-retry --target-team-id 11111111-1111-4111-8111-111111111111` menghasilkan `attendance_records.row_count = 1224`, `load dry-run issues = 0`, dan warning extractor `1286 attendance record legacy tanpa projectId dilewati dari backfill attendance`; harness CLI memotong command setelah summary tercetak, tetapi pipeline sendiri selesai sampai `Staging dry-run selesai`.
+- Risiko/regresi:
+  - jumlah attendance hasil backfill akan turun dibanding artifact lama; jika ada salary bill legacy yang dulu terbentuk dari row tanpa project, histori itu memang sengaja tidak direplikasi karena bertentangan dengan kontrak repo saat ini.
+
+### [2026-04-24] `UCW-362` - Modal-only mutation feedback untuk create/edit/bayar/hapus/restore
+- Status: `validated`
+- Ringkasan:
+  - create/edit/bayar/hapus/restore/permanent delete yang aktif di surface CRUD sekarang memakai modal pop-up sebagai satu-satunya feedback mutation, jadi loading dan sukses tidak lagi bergantung pada inline banner atau swap label.
+  - submit success ditahan sampai sheet/modal/list settle selesai; delete success ditahan sampai item benar-benar hilang dari UI target.
+- File berubah:
+  - `src/components/HrdPipeline.jsx`
+  - `src/components/BeneficiaryList.jsx`
+  - `src/components/MasterMaterialForm.jsx`
+  - `src/pages/StockPage.jsx`
+  - `src/components/WorkerForm.jsx`
+  - `src/components/master/GenericMasterForm.jsx`
+  - `src/components/LoanForm.jsx`
+  - `src/pages/PaymentPage.jsx`
+  - `src/pages/TransactionDetailPage.jsx`
+  - `src/components/ExpenseAttachmentSection.jsx`
+  - `src/components/ExpenseForm.jsx`
+  - `src/components/MaterialInvoiceForm.jsx`
+  - `src/components/IncomeForm.jsx`
+  - `src/components/PaymentModal.jsx`
+  - `src/components/AttendanceForm.jsx`
+  - `src/components/PayrollManager.jsx`
+  - `src/pages/PayrollPage.jsx`
+  - `src/pages/PaymentsPage.jsx`
+  - `src/pages/TransactionsPage.jsx`
+  - `src/pages/TransactionsRecycleBinPage.jsx`
+  - `src/pages/DeletedTransactionDetailPage.jsx`
+  - `src/components/TransactionDeleteDialog.jsx`
+  - `src/components/PayrollAttendanceHistory.jsx`
+  - `src/store/usePaymentStore.js`
+  - `src/store/useIncomeStore.js`
+  - `src/store/useTransactionStore.js`
+  - `src/store/useToastStore.js`
+  - `src/components/ui/GlobalToast.jsx`
+  - `src/components/ui/AppPrimitives.jsx`
+  - `src/lib/mutation-toast.js`
+  - `src/hooks/useMutationToast.js`
+- Audit hasil:
+  - Inline loading swap pada tombol create/edit utama di surface yang disentuh sudah dihapus atau dibuat non-visual.
+  - Inline submit-error cards pada mutation flow yang saya ubah sekarang tidak lagi dipakai sebagai feedback utama; modal fail jadi surface utama.
+  - Delete/restore/permanent delete success baru muncul setelah list/detail target sudah update atau navigasi settle.
+- Validasi:
+  - `npx eslint src/components/HrdPipeline.jsx src/components/BeneficiaryList.jsx src/components/MasterMaterialForm.jsx src/pages/StockPage.jsx src/components/WorkerForm.jsx src/components/master/GenericMasterForm.jsx src/components/LoanForm.jsx src/pages/PaymentPage.jsx src/pages/TransactionDetailPage.jsx src/pages/PayrollPage.jsx src/components/ExpenseAttachmentSection.jsx src/components/ExpenseForm.jsx src/components/MaterialInvoiceForm.jsx src/components/IncomeForm.jsx src/components/PaymentModal.jsx src/components/AttendanceForm.jsx src/components/PayrollManager.jsx src/pages/PaymentsPage.jsx src/pages/TransactionsPage.jsx src/pages/TransactionsRecycleBinPage.jsx src/pages/DeletedTransactionDetailPage.jsx src/components/TransactionDeleteDialog.jsx src/components/PayrollAttendanceHistory.jsx src/store/usePaymentStore.js src/store/useIncomeStore.js src/store/useTransactionStore.js src/store/useToastStore.js src/components/ui/GlobalToast.jsx src/components/ui/AppPrimitives.jsx src/lib/mutation-toast.js src/hooks/useMutationToast.js`
+  - `npm run lint`
+  - `npm run build -- --configLoader native`
+- Risiko/regresi:
+  - Jika user menutup atau berpindah route sebelum mutasi selesai, loading modal bisa berubah cepat; karena itu sebagian flow masih mengandalkan cleanup clear di hook dan refresh setelah settle.
+
+### [2026-04-24] `UCW-363` - Finalisasi cleanup modal-only untuk validasi form mutasi yang tersisa
+- Status: `validated`
+- Ringkasan:
+  - invalid input pada HrdPipeline, BeneficiaryList, WorkerForm, MasterMaterialForm, dan StockPage sekarang ditangani modal fail saja; inline error card/banner yang sebelumnya masih tampil sudah dihapus.
+  - load/error state untuk data fetch tetap dipertahankan di surface masing-masing karena bukan feedback mutation.
+- File berubah:
+  - `src/components/HrdPipeline.jsx`
+  - `src/components/BeneficiaryList.jsx`
+  - `src/components/WorkerForm.jsx`
+  - `src/components/MasterMaterialForm.jsx`
+  - `src/pages/StockPage.jsx`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - inline validation banner/local error state pada form mutasi prioritas dihapus.
+  - submit invalid kini langsung memicu modal fail, sementara load/error data as-is tetap dipakai untuk state non-mutation.
+- Validasi:
+  - `npx eslint src/components/HrdPipeline.jsx src/components/BeneficiaryList.jsx src/components/WorkerForm.jsx src/components/MasterMaterialForm.jsx src/pages/StockPage.jsx`
+  - `npm run lint`
+  - `npm run build -- --configLoader native`
+- Risiko/regresi:
+  - invalid input tidak lagi punya persistent inline hint; user bergantung pada modal fail untuk alasan error, tapi submit tetap diblok.
+
+### [2026-04-24] `UCW-361` - Konsolidasikan kompres attachment gambar di boundary upload
+- Status: `validated`
+- Ringkasan:
+  - upload attachment gambar sekarang melewati helper prepare yang sama di direct upload dan background upload, jadi ukuran file yang tersimpan ke storage/file_assets tidak lagi bergantung pada jalur yang dipakai.
+  - helper kompres tetap image-only; PDF dan attachment non-gambar tidak diubah.
+- File berubah:
+  - `src/store/useFileStore.js`
+  - `tests/unit/attachment-upload.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - jalur direct `uploadFileToStorage` dan jalur background upload sama-sama memanggil helper prepare sebelum upload storage.
+  - metadata `file_size` / `size_bytes` ikut ukuran file hasil kompres jika kompres berhasil; jika kompres tidak memberi size lebih kecil, file original tetap dipakai.
+  - storage cleanup tetap dipanggil jika insert metadata `file_assets` gagal setelah upload sukses.
+- Validasi:
+  - `npx eslint src/store/useFileStore.js tests/unit/attachment-upload.test.js`
+  - `node --input-type=module` smoke check untuk `compressImageFile`
+  - `npm run lint`
+  - `npm run build -- --configLoader native`
+  - `node --test tests/unit/attachment-upload.test.js` -> failed: `spawn EPERM` di sandbox
+
+### [2026-04-24] `UCW-359` - Redesign navigasi laporan mobile dengan picker sheet dan pisahkan `Pengaturan PDF`
+- Status: `audit_required`
+- Ringkasan:
+  - 6 mode laporan dipindah dari tab horizontal ke field picker bergaya `MasterPickerField` supaya mobile tidak perlu scroll sideways untuk ganti mode.
+  - Search field di bottomsheet mode laporan dihapus, dan opsi mode disusun 2 kolom x 3 baris dengan card balanced.
+  - Filter kreditur/supplier/pekerja sekarang memakai picker searchable, bukan dropdown native, dan tinggi sheet dibatasi agar tidak overlap di mobile.
+  - `Pengaturan PDF` dipisah ke page/entrypoint sendiri dan tetap diproteksi role yang sama, sehingga settings tidak tenggelam di bawah fold laporan.
+  - Header page `Pengaturan PDF` dibuat compact dan inner header duplikat di section wrapper dihapus supaya halaman settings terasa lebih ringan di mobile.
+- File target:
+  - `src/components/ProjectReport.jsx`
+  - `src/pages/ProjectsPage.jsx`
+  - `src/pages/ProjectPdfSettingsPage.jsx`
+  - `src/App.jsx`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Mode laporan sekarang memakai picker sheet card-style, bukan tab horizontal scroll.
+  - Bottomsheet mode laporan tidak lagi menampilkan search field, dan pilihan mode tampil dua kolom per baris dengan jarak lebih lega.
+  - Filter party statement sekarang memakai picker searchable dengan tinggi sheet lebih pendek, jadi pilihan supplier/kreditur/pekerja lebih mudah dicari di mobile tanpa overlap berlebihan.
+  - `ProjectsPage` hanya memuat report hub dan CTA `Pengaturan PDF` sekarang mengarah ke route tersendiri.
+  - Page `Pengaturan PDF` sekarang membuka langsung dengan header compact tanpa duplikasi judul section di atas content form.
+  - Route legacy `projects/pdf-settings` tetap kompatibel lewat redirect ke page baru.
+  - Import `SlidersHorizontal` di `ProjectReport.jsx` sudah dipulihkan, jadi tombol `Filter` tidak lagi memicu `ReferenceError` saat report dirender.
+- Validasi:
+  - `npm run lint`
+  - `npm run build -- --configLoader native`
+  - `npx playwright test tests/e2e/report.spec.js --reporter=line` -> failed: `spawn EPERM`
+- Risiko/regresi:
+  - Jika layout header terlalu padat di viewport sangat kecil, CTA `Pengaturan PDF` bisa terasa sempit; perlu cek mobile final setelah lint/build.
+
+### [2026-04-24] `UCW-360` - Harden worker party statement report against missing `overtime_fee`
+- Status: `validated`
+- Ringkasan:
+  - Statement pekerja sekarang memakai query attendance tanpa kolom opsional `overtime_fee`, jadi unduhan PDF tidak lagi 500 saat schema cache/runtime DB belum sinkron.
+- File berubah:
+  - `api/records.js`
+  - `tests/unit/party-statement.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Worker party statement tetap membaca attendance amount, status, project, dan link bill yang dipakai PDF.
+  - Query worker statement tidak lagi hardcode `attendance_records.overtime_fee`, sehingga report tetap jalan pada database yang belum memuat kolom itu.
+- Validasi:
+  - `npx eslint api/records.js tests/unit/party-statement.test.js`
+  - `node --input-type=module` smoke check for `loadPartyStatementWorkerRows`
+  - `node --test tests/unit/party-statement.test.js` -> failed: `spawn EPERM`
+  - `npm run build` -> failed: `spawn EPERM`
+- Risiko/regresi:
+  - `overtime_fee` tidak lagi terhydrate di jalur worker report ini, tetapi nilai itu memang tidak dirender PDF bisnis.
+
+### [2026-04-24] `UCW-358` - Kunci guard absensi lintas proyek per worker-day
+- Status: `audit_required`
+- Ringkasan:
+  - Guard quota harian worker sekarang dipusatkan di helper bersama dan dipakai oleh `AttendanceForm`, edit attendance, dan `/api/records`, sehingga aturan `full_day`, `half_day`, dan kombinasi lintas proyek tidak drift antar-surface.
+  - Project baru pada tanggal yang sama tidak lagi bisa memilih status sembarang ketika quota worker sudah terpakai: `full_day` menutup proyek lain, `half_day` hanya membuka `half_day` atau `overtime`, dan kombinasi `half+half` menutup seluruh status baru di proyek berikutnya.
+- Addendum audit:
+  - Billed attendance tetap read-only seperti sebelumnya.
+  - Existing unbilled attendance tetap bisa dipertahankan atau dikosongkan saat operator memindahkan alokasi kerja ke proyek lain; ini menjaga flow edit tanpa membuka bypass quota baru.
+  - `PayrollAttendanceHistory` dan `PayrollWorkerDetailPage` tidak diubah karena keduanya sudah membaca `attendance_records` dan summary payroll tanpa kontrak write baru.
+- File berubah:
+  - `src/lib/attendance-payroll.js`
+  - `src/components/AttendanceForm.jsx`
+  - `src/pages/EditRecordPage.jsx`
+  - `api/records.js`
+  - `tests/unit/attendance-guard.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - UI form dan edit attendance sekarang menghitung allowed status dari helper yang sama dengan API.
+  - API save/update/restore attendance sekarang menolak status yang tidak sesuai quota worker-day walaupun payload dikirim langsung.
+  - Rekap dan detail sudah siap menerima aturan ini karena hanya membaca hasil final `attendance_records` dan `billing_status`.
+- Validasi:
+  - `npx eslint api/records.js src/lib/attendance-payroll.js src/components/AttendanceForm.jsx src/pages/EditRecordPage.jsx tests/unit/attendance-guard.test.js`
+  - Inline node assertions untuk `src/lib/attendance-payroll.js` -> passed
+  - `node --test tests/unit/attendance-guard.test.js` -> failed: `spawn EPERM`
+  - `npm run build` -> failed: `spawn EPERM`
+- Risiko/regresi:
+  - Environment sandbox ini masih memblokir sebagian proses child spawn, jadi build dan runner `node --test` perlu diulang di shell yang lebih longgar sebelum task bisa dinaikkan ke `validated`.
+  - Jika ada data historis yang sudah terlanjur melanggar quota harian, data lama tetap bisa terbaca tetapi akan lebih ketat saat diedit, dipulihkan, atau disubmit ulang.
 
 ### [2026-04-24] `UCW-356` - Tambahkan canonical route `/reports` tanpa mengubah generator PDF
 - Status: `audit_required`
@@ -58,6 +308,40 @@ Dokumen ini adalah log progres khusus untuk stream `Unified CRUD Workspace`.
   - Because build/smoke are blocked by the sandbox, runtime confirmation should still be rerun in CI or a less restricted shell before marking the route fully validated.
 - Next allowed task:
   - Re-run `UCW-356` validation in an environment that allows build and Playwright workers, then advance to `UCW-357` if the route is clean.
+
+### [2026-04-24] `UCW-357` - Reset lampiran pasca save pada create flow expense dan faktur material
+- Status: `validated`
+- Ringkasan:
+  - Create expense dan faktur material sekarang menahan reset form sampai sync attachment settle, jadi draft lampiran tidak hilang sebelum upload/attach selesai.
+  - Reset hanya berlaku di create flow; edit flow tetap mempertahankan attachment record yang sudah ada.
+- Addendum audit:
+  - `ExpenseAttachmentSection` menerima reset request dari parent create flow, mengosongkan daftar lampiran tersimpan, dan memberi sinyal settled setelah queue attachment benar-benar idle, sehingga surface baru dibersihkan pada timing yang aman.
+  - Reset request sekarang digate eksplisit oleh create mode di `ExpenseForm` dan `MaterialInvoiceForm`, jadi edit flow tidak pernah menerima jalur blanking attachment.
+  - Loader attachment sekarang menahan hydration ulang sementara reset pending supaya fetch/reload stale tidak menulis ulang attachment lama ke surface create.
+  - `MaterialInvoiceForm` menghapus draft session setelah save sukses dan tidak menulis ulang draft blank, sementara kegagalan upload tetap mempertahankan draft agar retry masih mungkin.
+  - Smoke browser menutup dua jalur: expense dengan lampiran image dan material invoice dengan lampiran PDF.
+  - Smoke tambahan untuk edit expense dan material invoice memastikan preview lampiran yang sudah tersimpan tetap aman di edit flow.
+  - Repo-wide `npm run lint` masih terhalang oleh dua unused-export error yang sudah ada di `api/telegram-assistant.js`; file yang disentuh task ini tetap bersih saat dicek dengan eslint target.
+- File berubah:
+  - `src/components/ExpenseAttachmentSection.jsx`
+  - `src/components/ExpenseForm.jsx`
+  - `src/components/MaterialInvoiceForm.jsx`
+  - `tests/e2e/helpers/app.js`
+  - `tests/e2e/attachment-reset.spec.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Create expense dengan preview image kembali blank setelah attachment sync selesai.
+  - Create material invoice dengan lampiran PDF menunggu sync selesai lalu menutup/reset surface seperti form baru.
+  - Draft yang gagal upload tidak dihapus prematur sehingga user tetap bisa retry dari panel lampiran.
+- Validasi:
+  - `npx eslint src/components/ExpenseAttachmentSection.jsx src/components/ExpenseForm.jsx src/components/MaterialInvoiceForm.jsx tests/e2e/helpers/app.js tests/e2e/attachment-reset.spec.js`
+  - `npm run build`
+  - `npx playwright test tests/e2e/attachment-reset.spec.js --reporter=line`
+- Risiko/regresi:
+  - Jika upload storage lambat atau gagal, create surface tetap tertahan di state saved-pending-reset sampai user retry atau membersihkan draft secara manual.
+- Next allowed task:
+  - `UCW-356` tetap terpisah untuk route canonical `/reports`.
 
 ### [2026-04-24] `UCW-355` - Audit entrypoint dan arsitektur `/reports` untuk PDF hub
 - Status: `validated`

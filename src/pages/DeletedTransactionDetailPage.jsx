@@ -11,6 +11,7 @@ import {
 } from '../components/ui/AppPrimitives'
 import BrandLoader from '../components/ui/BrandLoader'
 import { formatAppDateLabel } from '../lib/date-time'
+import useMutationToast from '../hooks/useMutationToast'
 import {
   formatCurrency,
   formatTransactionDateTime,
@@ -58,6 +59,8 @@ function DeletedTransactionDetailPage() {
   const [transaction, setTransaction] = useState(initialTransaction)
   const [isLoadingRecord, setIsLoadingRecord] = useState(false)
   const [recordError, setRecordError] = useState(null)
+  const showInlineMutationFeedback = false
+  const { begin, clear, fail, succeed } = useMutationToast()
   const backRoute = '/transactions/recycle-bin'
 
   const loadDeletedTransaction = useCallback(async (teamId, id) => {
@@ -116,10 +119,17 @@ function DeletedTransactionDetailPage() {
     }
   }, [currentTeamId, initialTransaction, loadDeletedTransaction, transactionId])
 
+  useEffect(() => () => clear(), [clear])
+
   const handleRestore = async () => {
     if (!currentTeamId || !transaction?.id || !transaction?.sourceType) {
       return
     }
+
+    begin({
+      title: 'Memulihkan transaksi',
+      message: 'Mohon tunggu sampai arsip diperbarui.',
+    })
 
     try {
       setRecordError(null)
@@ -134,7 +144,15 @@ function DeletedTransactionDetailPage() {
       await refreshDashboard(currentTeamId, { silent: true })
       markRecycleBinListStateNeedsRefresh(currentTeamId)
       navigate('/transactions/recycle-bin', { replace: true })
+      succeed({
+        title: 'Transaksi dipulihkan',
+        message: 'Transaksi berhasil dipulihkan dari arsip.',
+      })
     } catch (error) {
+      fail({
+        title: 'Transaksi gagal dipulihkan',
+        message: error instanceof Error ? error.message : 'Gagal memulihkan transaksi.',
+      })
       setRecordError(
         error instanceof Error ? error.message : 'Gagal memulihkan transaksi.'
       )
@@ -154,6 +172,11 @@ function DeletedTransactionDetailPage() {
       return
     }
 
+    begin({
+      title: 'Menghapus permanen transaksi',
+      message: 'Mohon tunggu sampai arsip diperbarui.',
+    })
+
     try {
       setRecordError(null)
 
@@ -168,7 +191,15 @@ function DeletedTransactionDetailPage() {
       await refreshDashboard(currentTeamId, { silent: true })
       markRecycleBinListStateNeedsRefresh(currentTeamId)
       navigate('/transactions/recycle-bin', { replace: true })
+      succeed({
+        title: 'Transaksi dihapus permanen',
+        message: 'Transaksi berhasil dihapus permanen.',
+      })
     } catch (error) {
+      fail({
+        title: 'Transaksi gagal dihapus permanen',
+        message: error instanceof Error ? error.message : 'Gagal menghapus permanen transaksi.',
+      })
       setRecordError(
         error instanceof Error ? error.message : 'Gagal menghapus permanen transaksi.'
       )
@@ -262,7 +293,7 @@ function DeletedTransactionDetailPage() {
         }
       />
 
-      {recordError ? (
+      {showInlineMutationFeedback && recordError ? (
         <AppCardDashed>
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--app-destructive-color)]">
             Restore Gagal

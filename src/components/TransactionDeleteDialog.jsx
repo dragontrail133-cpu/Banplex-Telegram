@@ -50,7 +50,7 @@ function TransactionDeleteDialog({
               type="button"
               variant="danger"
             >
-              {isConfirming ? 'Menghapus...' : confirmLabel}
+              {confirmLabel}
             </AppButton>
           </div>
         )

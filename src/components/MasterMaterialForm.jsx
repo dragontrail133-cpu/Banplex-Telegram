@@ -1,11 +1,7 @@
 import { useState } from 'react'
 import useMasterStore from '../store/useMasterStore'
-import {
-  AppButton,
-  AppDialog,
-  AppErrorState,
-  AppInput,
-} from './ui/AppPrimitives'
+import useMutationToast from '../hooks/useMutationToast'
+import { AppButton, AppDialog, AppInput } from './ui/AppPrimitives'
 
 function createInitialFormData() {
   return {
@@ -17,16 +13,15 @@ function createInitialFormData() {
 
 function MasterMaterialForm({ isOpen, onClose }) {
   const [formData, setFormData] = useState(createInitialFormData)
-  const [localError, setLocalError] = useState(null)
   const addMaterial = useMasterStore((state) => state.addMaterial)
   const isSubmitting = useMasterStore((state) => state.isLoading)
   const storeError = useMasterStore((state) => state.error)
   const clearError = useMasterStore((state) => state.clearError)
+  const { begin, fail, succeed } = useMutationToast()
   const formId = 'master-material-form'
 
   const resetFormState = () => {
     setFormData(createInitialFormData())
-    setLocalError(null)
     clearError()
   }
 
@@ -47,10 +42,6 @@ function MasterMaterialForm({ isOpen, onClose }) {
       [name]: value,
     }))
 
-    if (localError) {
-      setLocalError(null)
-    }
-
     if (storeError) {
       clearError()
     }
@@ -64,16 +55,27 @@ function MasterMaterialForm({ isOpen, onClose }) {
     const normalizedCurrentStock = String(formData.currentStock ?? '').trim()
 
     if (!normalizedMaterialName) {
-      setLocalError('Nama material wajib diisi.')
+      fail({
+        title: 'Material gagal disimpan',
+        message: 'Nama material wajib diisi.',
+      })
       return
     }
 
     if (!normalizedUnit) {
-      setLocalError('Satuan material wajib diisi.')
+      fail({
+        title: 'Material gagal disimpan',
+        message: 'Satuan material wajib diisi.',
+      })
       return
     }
 
     try {
+      begin({
+        title: 'Menyimpan material',
+        message: 'Mohon tunggu sampai material baru selesai disimpan.',
+      })
+
       await addMaterial({
         material_name: normalizedMaterialName,
         unit: normalizedUnit,
@@ -82,13 +84,21 @@ function MasterMaterialForm({ isOpen, onClose }) {
       })
 
       handleClose()
+      succeed({
+        title: 'Material tersimpan',
+        message: 'Material baru berhasil disimpan.',
+      })
     } catch (submitError) {
       const message =
         submitError instanceof Error
           ? submitError.message
           : 'Gagal menyimpan material.'
 
-      setLocalError(message)
+      fail({
+        title: 'Material gagal disimpan',
+        message,
+      })
+      clearError()
     }
   }
 
@@ -108,69 +118,56 @@ function MasterMaterialForm({ isOpen, onClose }) {
             form={formId}
             type="submit"
           >
-            {isSubmitting ? 'Menyimpan...' : 'Simpan Material'}
+            Simpan Material
           </AppButton>
         </div>
       }
     >
       <form id={formId} className="space-y-5" onSubmit={handleSubmit}>
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-[var(--app-text-color)]">
-              Nama Material
-            </span>
-            <AppInput
-              name="materialName"
-              onChange={handleChange}
-              placeholder="Contoh: Semen Holcim"
-              required
-              type="text"
-              value={formData.materialName}
-            />
-          </label>
+        <label className="block space-y-2">
+          <span className="text-sm font-semibold text-[var(--app-text-color)]">
+            Nama Material
+          </span>
+          <AppInput
+            name="materialName"
+            onChange={handleChange}
+            placeholder="Contoh: Semen Holcim"
+            required
+            type="text"
+            value={formData.materialName}
+          />
+        </label>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-[var(--app-text-color)]">
-              Satuan
-            </span>
-            <AppInput
-              name="unit"
-              onChange={handleChange}
-              placeholder="Contoh: Sak, Kg, Dus, Batang"
-              required
-              type="text"
-              value={formData.unit}
-            />
-          </label>
+        <label className="block space-y-2">
+          <span className="text-sm font-semibold text-[var(--app-text-color)]">
+            Satuan
+          </span>
+          <AppInput
+            name="unit"
+            onChange={handleChange}
+            placeholder="Contoh: Sak, Kg, Dus, Batang"
+            required
+            type="text"
+            value={formData.unit}
+          />
+        </label>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-[var(--app-text-color)]">
-              Stok Awal
-            </span>
-            <AppInput
-              inputMode="decimal"
-              min="0"
-              name="currentStock"
-              onChange={handleChange}
-              placeholder="0"
-              step="0.01"
-              type="number"
-              value={formData.currentStock}
-            />
-          </label>
+        <label className="block space-y-2">
+          <span className="text-sm font-semibold text-[var(--app-text-color)]">
+            Stok Awal
+          </span>
+          <AppInput
+            inputMode="decimal"
+            min="0"
+            name="currentStock"
+            onChange={handleChange}
+            placeholder="0"
+            step="0.01"
+            type="number"
+            value={formData.currentStock}
+          />
+        </label>
 
-          {localError ? (
-            <AppErrorState
-              title="Material belum tersimpan"
-              description={localError}
-            />
-          ) : null}
-
-          {storeError ? (
-            <AppErrorState
-              title="Master data bermasalah"
-              description={storeError}
-            />
-          ) : null}
       </form>
     </AppDialog>
   )

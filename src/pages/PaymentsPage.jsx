@@ -21,6 +21,7 @@ import {
   PageShell,
 } from '../components/ui/AppPrimitives'
 import { formatAppDateLabel } from '../lib/date-time'
+import useMutationToast from '../hooks/useMutationToast'
 import {
   formatCurrency,
   getBillSummaryAmount,
@@ -46,7 +47,6 @@ import useBillStore from '../store/useBillStore'
 import useDashboardStore from '../store/useDashboardStore'
 import useIncomeStore from '../store/useIncomeStore'
 import usePaymentStore from '../store/usePaymentStore'
-import useToastStore from '../store/useToastStore'
 
 const pembayaranListStateStorageKey = 'banplex:pembayaran-list-state'
 
@@ -406,8 +406,8 @@ function PaymentsPage() {
   const isWorkspaceLoading = useDashboardStore((state) => state.isWorkspaceLoading)
   const fetchBillById = useBillStore((state) => state.fetchBillById)
   const deleteBillPayment = usePaymentStore((state) => state.deleteBillPayment)
-  const showToast = useToastStore((state) => state.showToast)
   const currentRole = useAuthStore((state) => state.role)
+  const { begin, clear, fail, succeed } = useMutationToast()
   const isReadOnly = currentRole === 'Viewer' || currentRole === 'Payroll'
   const [activeGroupTab, setActiveGroupTab] = useState('summary')
   const [billDetailById, setBillDetailById] = useState({})
@@ -685,6 +685,8 @@ function PaymentsPage() {
     }
   }, [persistPembayaranListState])
 
+  useEffect(() => () => clear(), [clear])
+
   const handleOpenBillPayment = (billId) => {
     persistPembayaranListState()
 
@@ -720,6 +722,11 @@ function PaymentsPage() {
         return
       }
 
+      begin({
+        title: 'Mengarsipkan pembayaran',
+        message: 'Mohon tunggu sampai riwayat pembayaran diperbarui.',
+      })
+
       try {
         await deleteBillPayment({
           payment_id: entry.payment.id,
@@ -728,15 +735,18 @@ function PaymentsPage() {
         setBillDetailById({})
         setDeletedBillPaymentsTeamId(null)
         setGroupRevision((value) => value + 1)
+        succeed({
+          title: 'Pembayaran diarsipkan',
+          message: 'Pembayaran tagihan berhasil dihapus.',
+        })
       } catch (error) {
-        showToast({
-          tone: 'error',
+        fail({
           title: 'Pembayaran tagihan gagal diarsipkan',
           message: error instanceof Error ? error.message : 'Gagal mengarsipkan pembayaran.',
         })
       }
     },
-    [currentTeamId, deleteBillPayment, isReadOnly, showToast]
+    [begin, currentTeamId, deleteBillPayment, fail, isReadOnly, succeed]
   )
 
   const handleRestorePayment = useCallback(
@@ -744,6 +754,11 @@ function PaymentsPage() {
       if (isReadOnly || !currentTeamId || !entry?.payment?.id) {
         return
       }
+
+      begin({
+        title: 'Memulihkan pembayaran',
+        message: 'Mohon tunggu sampai riwayat pembayaran diperbarui.',
+      })
 
       try {
         await restoreBillPaymentFromApi(
@@ -755,20 +770,18 @@ function PaymentsPage() {
         setBillDetailById({})
         setDeletedBillPaymentsTeamId(null)
         setGroupRevision((value) => value + 1)
-        showToast({
-          tone: 'success',
+        succeed({
           title: 'Pembayaran tagihan dipulihkan',
           message: 'Riwayat pembayaran berhasil dipulihkan.',
         })
       } catch (error) {
-        showToast({
-          tone: 'error',
+        fail({
           title: 'Pembayaran tagihan gagal dipulihkan',
           message: error instanceof Error ? error.message : 'Gagal memulihkan pembayaran.',
         })
       }
     },
-    [currentTeamId, fetchUnpaidBills, isReadOnly, showToast]
+    [begin, currentTeamId, fail, fetchUnpaidBills, isReadOnly, succeed]
   )
 
   const handlePermanentDeletePayment = useCallback(
@@ -777,26 +790,29 @@ function PaymentsPage() {
         return
       }
 
+      begin({
+        title: 'Menghapus permanen pembayaran',
+        message: 'Mohon tunggu sampai riwayat pembayaran diperbarui.',
+      })
+
       try {
         await permanentDeleteBillPaymentFromApi(entry.payment.id, currentTeamId)
         await fetchUnpaidBills({ teamId: currentTeamId, silent: true })
         setBillDetailById({})
         setDeletedBillPaymentsTeamId(null)
         setGroupRevision((value) => value + 1)
-        showToast({
-          tone: 'success',
+        succeed({
           title: 'Pembayaran tagihan dihapus permanen',
           message: 'Riwayat pembayaran berhasil dihapus permanen.',
         })
       } catch (error) {
-        showToast({
-          tone: 'error',
+        fail({
           title: 'Pembayaran tagihan gagal dihapus permanen',
           message: error instanceof Error ? error.message : 'Gagal menghapus permanen pembayaran.',
         })
       }
     },
-    [currentTeamId, fetchUnpaidBills, isReadOnly, showToast]
+    [begin, currentTeamId, fail, fetchUnpaidBills, isReadOnly, succeed]
   )
 
   const handleOpenLoanPayment = (loanId) => {

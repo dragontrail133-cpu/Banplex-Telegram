@@ -169,6 +169,10 @@ async function deleteStorageObject(bucketName, storagePath) {
   return error ?? null
 }
 
+async function prepareUploadFileForStorage(file, options = {}) {
+  return await compressImageFile(file, options.compression ?? {})
+}
+
 async function insertFileAssetRecord(uploadMeta = {}) {
   if (!supabase) {
     throw new Error('Client Supabase belum dikonfigurasi.')
@@ -240,7 +244,7 @@ async function insertFileAssetRecord(uploadMeta = {}) {
   return normalizeFileAssetRow(data)
 }
 
-async function uploadFileToStorage(file, options = {}) {
+async function uploadPreparedFileToStorage(file, options = {}) {
   if (!supabase) {
     throw new Error('Client Supabase belum dikonfigurasi.')
   }
@@ -299,7 +303,18 @@ async function uploadFileToStorage(file, options = {}) {
   }
 }
 
-async function uploadAndRegisterFile(file, options = {}) {
+async function uploadAndRegisterPreparedFile(file, options = {}) {
+  const uploadedFile = await uploadPreparedFileToStorage(file, options)
+
+  try {
+    return await insertFileAssetRecord(uploadedFile)
+  } catch (error) {
+    await deleteStorageObject(uploadedFile.bucket_name, uploadedFile.storage_path)
+    throw error
+  }
+}
+
+async function uploadFileToStorage(file, options = {}) {
   await waitForAuthStoreReady()
   await waitForSupabaseSession()
 
@@ -309,14 +324,13 @@ async function uploadAndRegisterFile(file, options = {}) {
     'Role Anda tidak diizinkan mengunggah attachment.'
   )
 
-  const uploadedFile = await uploadFileToStorage(file, options)
+  const { file: preparedFile } = await prepareUploadFileForStorage(file, options)
 
-  try {
-    return await insertFileAssetRecord(uploadedFile)
-  } catch (error) {
-    await deleteStorageObject(uploadedFile.bucket_name, uploadedFile.storage_path)
-    throw error
-  }
+  return await uploadAndRegisterPreparedFile(preparedFile, options)
+}
+
+async function uploadAndRegisterFile(file, options = {}) {
+  return await uploadFileToStorage(file, options)
 }
 
 async function loadFileAssetById(fileAssetId, { includeDeleted = true } = {}) {
@@ -584,10 +598,7 @@ async function processUploadTask(taskId, file, options, set) {
       error: null,
     })
 
-    const { file: preparedFile, summary } = await compressImageFile(
-      file,
-      options.compression ?? {}
-    )
+    const { file: preparedFile, summary } = await prepareUploadFileForStorage(file, options)
 
     patchUploadTask(set, taskId, {
       stage: 'uploading',
@@ -597,7 +608,7 @@ async function processUploadTask(taskId, file, options, set) {
       mimeType: normalizeText(preparedFile?.type, normalizeText(file?.type, null)),
     })
 
-    uploadedFile = await uploadFileToStorage(preparedFile, {
+    uploadedFile = await uploadPreparedFileToStorage(preparedFile, {
       ...options,
       original_file_name: normalizeText(options.original_file_name, file?.name),
       file_name: normalizeText(options.file_name, file?.name),
@@ -689,14 +700,7 @@ const useFileStore = create((set, get) => ({
     set({ isUploading: true, error: null })
 
     try {
-      assertAttachmentAction(
-        useAuthStore.getState().role,
-        'upload',
-        'Role Anda tidak diizinkan mengunggah attachment.'
-      )
-
-      const uploadedFile = await uploadFileToStorage(file, options)
-      const fileAsset = await insertFileAssetRecord(uploadedFile)
+      const fileAsset = await uploadFileToStorage(file, options)
 
       set((state) => ({
         uploadedFileAssets: [fileAsset, ...state.uploadedFileAssets],

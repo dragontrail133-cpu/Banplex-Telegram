@@ -30,10 +30,14 @@ import {
   extractAssistantCommand,
   getAssistantRouteLabel,
   resolveAssistantCallbackAction,
+  resolveAssistantMenuCommandFromText,
   shouldUseAssistantDmFallback,
 } from '../src/lib/telegram-assistant-routing.js'
 import {
   answerTelegramCallback,
+  deleteTelegramMessage,
+  editTelegramMessageText,
+  sendTelegramChatAction,
   sendTelegramMessage,
 } from '../src/lib/telegram-assistant-transport.js'
 
@@ -338,6 +342,10 @@ const localeTemplates = {
     workspaceNotFound: 'Workspace tidak ditemukan.',
     menuIntro: 'Pilih aksi assistant yang dibutuhkan.',
     menuHint: 'Command step-by-step: tambah, buka, cari, status, riwayat, dan analytics.',
+    summaryLoading: 'Bot sedang memproses ringkasan...',
+    summaryLoadingFailed: 'Maaf, ringkasan belum selesai diproses. Coba lagi sebentar.',
+    analyticsLoading: 'Bot sedang memproses analytics...',
+    analyticsLoadingFailed: 'Maaf, analytics belum selesai diproses. Coba lagi sebentar.',
     addRoutePrompt: 'Pilih domain input yang mau dibuka.',
     openRoutePrompt: 'Pilih halaman core yang ingin dibuka.',
     searchRoutePrompt: 'Pilih domain yang ingin dicari.',
@@ -433,6 +441,10 @@ const localeTemplates = {
   su: {
     menuIntro: 'Pilih aksi assistant nu diperlukeun.',
     menuHint: 'Command step-by-step: tambah, buka, cari, status, riwayat, jeung analytics.',
+    summaryLoading: 'Bot keur ngolah ringkesan...',
+    summaryLoadingFailed: 'Punten, ringkesan can réngsé diolah. Coba deui sakedapan.',
+    analyticsLoading: 'Bot keur ngolah analytics...',
+    analyticsLoadingFailed: 'Punten, analytics can réngsé diolah. Coba deui sakedapan.',
     addRoutePrompt: 'Pilih domain input nu rek dibuka.',
     openRoutePrompt: 'Pilih halaman core nu rek dibuka.',
     searchRoutePrompt: 'Pilih domain nu rek ditalungtik.',
@@ -663,6 +675,20 @@ function getLocaleText(language) {
   return localeTemplates[getLocaleTemplate(language)] ?? localeTemplates.id
 }
 
+function buildAssistantMenuCommandLabels(language) {
+  const locale = getLocaleText(language)
+
+  return {
+    menu: locale.quickMenu,
+    add: locale.quickAdd,
+    open: locale.quickOpen,
+    search: locale.quickSearch,
+    status: locale.quickStatus,
+    history: locale.quickHistory,
+    analytics: locale.quickAnalytics,
+  }
+}
+
 function getAssistantLanguageFromText(text, session = null) {
   const normalizedText = normalizeText(text, '').toLowerCase()
   const previousLanguage = getLocaleTemplate(session?.pending_payload?.last_language)
@@ -861,6 +887,360 @@ function normalizeTelegramId(value) {
   return normalizeText(value, '')
 }
 
+function normalizeTelegramMessageId(value) {
+  const normalizedValue = Number(value)
+
+  return Number.isInteger(normalizedValue) && normalizedValue > 0 ? normalizedValue : null
+}
+
+function normalizeTelegramMessageIdList(values = []) {
+  const normalizedValues = Array.isArray(values) ? values : [values]
+  const seenMessageIds = new Set()
+  const messageIds = []
+
+  for (const value of normalizedValues) {
+    const messageId = normalizeTelegramMessageId(value)
+
+    if (!messageId || seenMessageIds.has(messageId)) {
+      continue
+    }
+
+    seenMessageIds.add(messageId)
+    messageIds.push(messageId)
+  }
+
+  return messageIds
+}
+
+function getAssistantSummaryMessageState(sessionPayload = {}) {
+  const normalizedPayload =
+    sessionPayload && typeof sessionPayload === 'object' && !Array.isArray(sessionPayload)
+      ? sessionPayload
+      : {}
+
+  return {
+    summaryMessageId: normalizeTelegramMessageId(
+      normalizedPayload.summary_message_id ?? normalizedPayload.last_summary_message_id
+    ),
+    transientMessageIds: normalizeTelegramMessageIdList(
+      normalizedPayload.transient_message_ids ?? normalizedPayload.summary_transient_message_ids ?? []
+    ),
+  }
+}
+
+function buildAssistantSummaryMessageState(sessionPayload = {}, summaryMessageId = null) {
+  const normalizedSummaryMessageId = normalizeTelegramMessageId(summaryMessageId)
+  const currentState = getAssistantSummaryMessageState(sessionPayload)
+
+  if (!normalizedSummaryMessageId) {
+    return stripAssistantSummaryMessageState(sessionPayload)
+  }
+
+  const transientMessageIds = currentState.transientMessageIds.filter(
+    (messageId) => messageId !== normalizedSummaryMessageId
+  )
+
+  if (
+    currentState.summaryMessageId &&
+    currentState.summaryMessageId !== normalizedSummaryMessageId
+  ) {
+    transientMessageIds.push(currentState.summaryMessageId)
+  }
+
+  return {
+    ...sessionPayload,
+    summary_message_id: normalizedSummaryMessageId,
+    transient_message_ids: normalizeTelegramMessageIdList(transientMessageIds),
+  }
+}
+
+function stripAssistantSummaryMessageState(sessionPayload = {}) {
+  const normalizedPayload =
+    sessionPayload && typeof sessionPayload === 'object' && !Array.isArray(sessionPayload)
+      ? sessionPayload
+      : {}
+  const {
+    summary_message_id: _summary_message_id,
+    last_summary_message_id: _last_summary_message_id,
+    transient_message_ids: _transient_message_ids,
+    summary_transient_message_ids: _summary_transient_message_ids,
+    ...rest
+  } = normalizedPayload
+
+  return rest
+}
+
+function getTelegramMessageIdFromResponse(messageResponse) {
+  return normalizeTelegramMessageId(
+    messageResponse?.result?.message_id ?? messageResponse?.message_id ?? null
+  )
+}
+
+async function cleanupAssistantSummaryMessages({
+  botToken,
+  chatId,
+  sessionPayload = {},
+}) {
+  const summaryState = getAssistantSummaryMessageState(sessionPayload)
+  const messageIds = normalizeTelegramMessageIdList([
+    summaryState.summaryMessageId,
+    ...summaryState.transientMessageIds,
+  ])
+
+  for (const messageId of messageIds) {
+    try {
+      await deleteTelegramMessage({
+        botToken,
+        chatId,
+        messageId,
+      })
+    } catch (error) {
+      console.warn('[api/telegram-assistant] summary cleanup skipped', {
+        chatId,
+        messageId,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  return messageIds
+}
+
+async function sendAssistantHybridSummaryReply({
+  adminClient,
+  botToken,
+  chatId,
+  replyToMessageId,
+  telegramUserId,
+  session,
+  sessionPayload,
+  selectedMembership,
+  plan,
+  reply,
+  turnData,
+}) {
+  const language = getLocaleTemplate(reply?.language ?? plan?.language ?? 'id')
+  const locale = getLocaleText(language)
+  const replyParseMode = normalizeText(reply?.parseMode, '').toLowerCase() === 'html'
+    ? 'HTML'
+    : null
+  const replyText = replyParseMode
+    ? reply.text
+    : await rewriteAssistantReply({
+        plan,
+        reply,
+        workspaceName: selectedMembership.team_name,
+        session,
+      })
+  const textToSend = replyText || reply.text
+  const replyMarkup = buildReplyMarkup(getTelegramBotUsername(), reply, plan)
+  const currentSummaryState = getAssistantSummaryMessageState(sessionPayload)
+  const currentSummaryMessageId = currentSummaryState.summaryMessageId
+  await sendTelegramChatAction({
+    botToken,
+    chatId,
+    action: 'typing',
+  })
+  const loadingMessage = await sendTelegramMessage({
+    botToken,
+    chatId,
+    text: locale.summaryLoading,
+    replyToMessageId,
+  })
+  const loadingMessageId = getTelegramMessageIdFromResponse(loadingMessage)
+
+  if (!loadingMessageId) {
+    throw createHttpError(500, 'Gagal menyiapkan pesan loading ringkasan.')
+  }
+
+  const sentMessage = await editTelegramMessageText({
+    botToken,
+    chatId,
+    messageId: loadingMessageId,
+    text: textToSend,
+    replyMarkup,
+    parseMode: replyParseMode,
+  })
+  const nextSummaryMessageId = getTelegramMessageIdFromResponse(sentMessage) ?? loadingMessageId
+  const nextPendingPayload = buildAssistantSummaryMessageState(
+    buildAssistantMemoryPayload(sessionPayload, turnData),
+    nextSummaryMessageId
+  )
+
+  await saveAssistantSession(adminClient, {
+    chatId,
+    telegramUserId,
+    teamId: selectedMembership.team_id,
+    state: 'idle',
+    pendingIntent: null,
+    pendingPayload: nextPendingPayload,
+  })
+
+  const staleSummaryMessageIds = normalizeTelegramMessageIdList([
+    ...currentSummaryState.transientMessageIds,
+    currentSummaryMessageId && currentSummaryMessageId !== nextSummaryMessageId
+      ? currentSummaryMessageId
+      : null,
+  ])
+
+  for (const messageId of staleSummaryMessageIds) {
+    try {
+      await deleteTelegramMessage({
+        botToken,
+        chatId,
+        messageId,
+      })
+    } catch (error) {
+      console.warn('[api/telegram-assistant] summary cleanup skipped', {
+        chatId,
+        messageId,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  return {
+    processed: true,
+    messageId: nextSummaryMessageId,
+  }
+}
+
+async function sendAssistantAnalyticsReply({
+  adminClient,
+  botToken,
+  chatId,
+  replyToMessageId,
+  telegramUserId,
+  session,
+  sessionPayload,
+  selectedMembership,
+  plan,
+  sourceText,
+}) {
+  const language = getLocaleTemplate(plan?.language)
+  const locale = getLocaleText(language)
+  const analyticsPlan = {
+    ...plan,
+    language,
+  }
+
+  await sendTelegramChatAction({
+    botToken,
+    chatId,
+    action: 'typing',
+  })
+
+  const loadingMessage = await sendTelegramMessage({
+    botToken,
+    chatId,
+    text: locale.analyticsLoading,
+    replyToMessageId,
+  })
+  const loadingMessageId = getTelegramMessageIdFromResponse(loadingMessage)
+
+  if (!loadingMessageId) {
+    throw createHttpError(500, 'Gagal menyiapkan pesan loading analytics.')
+  }
+
+  let analyticsReply
+
+  try {
+    analyticsReply = await buildAnalyticsReply(adminClient, selectedMembership.team_id, analyticsPlan)
+  } catch (error) {
+    try {
+      await editTelegramMessageText({
+        botToken,
+        chatId,
+        messageId: loadingMessageId,
+        text: locale.analyticsLoadingFailed,
+      })
+    } catch (editError) {
+      console.warn('[api/telegram-assistant] analytics failure fallback edit skipped', {
+        chatId,
+        messageId: loadingMessageId,
+        message: editError instanceof Error ? editError.message : String(editError),
+      })
+    }
+
+    throw error
+  }
+
+  const replyParseMode = normalizeText(analyticsReply?.parseMode, '').toLowerCase() === 'html'
+    ? 'HTML'
+    : null
+  const replyText = replyParseMode
+    ? analyticsReply.text
+    : await rewriteAssistantReply({
+        plan: analyticsPlan,
+        reply: analyticsReply,
+        workspaceName: selectedMembership.team_name,
+        session,
+      })
+  const textToSend = replyText || analyticsReply.text
+  const replyMarkup = buildReplyMarkup(getTelegramBotUsername(), analyticsReply, analyticsPlan)
+  const currentSummaryState = getAssistantSummaryMessageState(sessionPayload)
+  const currentSummaryMessageId = currentSummaryState.summaryMessageId
+  const sentMessage = await editTelegramMessageText({
+    botToken,
+    chatId,
+    messageId: loadingMessageId,
+    text: textToSend,
+    replyMarkup,
+    parseMode: replyParseMode,
+  })
+  const nextSummaryMessageId = getTelegramMessageIdFromResponse(sentMessage) ?? loadingMessageId
+  const turnData = buildAssistantTurnData({
+    text: sourceText,
+    plan: analyticsPlan,
+    language,
+    workspaceName: selectedMembership.team_name,
+  })
+  const basePendingPayload = analyticsReply.needsClarification
+    ? buildPendingSessionPayload(sourceText, analyticsPlan, sessionPayload, turnData)
+    : buildAssistantMemoryPayload(sessionPayload, turnData)
+  const nextPendingPayload = buildAssistantSummaryMessageState(
+    basePendingPayload,
+    nextSummaryMessageId
+  )
+
+  await saveAssistantSession(adminClient, {
+    chatId,
+    telegramUserId,
+    teamId: selectedMembership.team_id,
+    state: analyticsReply.needsClarification ? 'awaiting_clarification' : 'idle',
+    pendingIntent: analyticsReply.needsClarification ? 'analytics' : null,
+    pendingPayload: nextPendingPayload,
+  })
+
+  const staleSummaryMessageIds = normalizeTelegramMessageIdList([
+    ...currentSummaryState.transientMessageIds,
+    currentSummaryMessageId && currentSummaryMessageId !== nextSummaryMessageId
+      ? currentSummaryMessageId
+      : null,
+  ])
+
+  for (const messageId of staleSummaryMessageIds) {
+    try {
+      await deleteTelegramMessage({
+        botToken,
+        chatId,
+        messageId,
+      })
+    } catch (error) {
+      console.warn('[api/telegram-assistant] analytics cleanup skipped', {
+        chatId,
+        messageId,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  return {
+    processed: true,
+    messageId: nextSummaryMessageId,
+  }
+}
+
 function getTelegramBotUsername() {
   return normalizeText(
     getEnv('TELEGRAM_BOT_USERNAME', getEnv('VITE_TELEGRAM_BOT_USERNAME')),
@@ -907,12 +1287,19 @@ function isTelegramAssistantReply(message, botUsername) {
   return repliedFromUsername === normalizedBotUsername
 }
 
-function shouldProcessTelegramMessage({ message, session, botUsername, messageText }) {
+function shouldProcessTelegramMessage({
+  message,
+  session,
+  botUsername,
+  messageText,
+  menuLabels = null,
+}) {
   const chatType = getTelegramChatType(message)
   const normalizedText = normalizeText(messageText, '')
   const command = extractAssistantCommand(normalizedText, botUsername)
   const intent = determineIntentFromText(normalizedText)
   const hasClarifyHint = hasAssistantTopicHint(normalizedText) || isFollowUpLikeText(normalizedText)
+  const mainMenuCommand = resolveAssistantMenuCommandFromText(normalizedText, menuLabels ?? {})
 
   if (command?.command === 'start' && chatType !== 'private') {
     return false
@@ -940,6 +1327,10 @@ function shouldProcessTelegramMessage({ message, session, botUsername, messageTe
 
   if (chatType === 'group' || chatType === 'supergroup') {
     if (command) {
+      return true
+    }
+
+    if (mainMenuCommand) {
       return true
     }
 
@@ -1438,6 +1829,12 @@ function buildAssistantResponseFactPacket({
 }
 
 function buildAssistantResponsePrompt(factPacket) {
+  const presentation = normalizeText(factPacket?.facts?.presentation, '')
+  const styleHint =
+    presentation === 'hybrid_summary'
+      ? 'Jika fact packet.presentation = hybrid_summary, susun jawaban dengan gaya santai operasional: headline singkat, baris Inti, bullet Sorotan, lalu CTA singkat seperti Menu atau pilih bucket berikutnya. Jangan menambah fakta baru.'
+      : ''
+
   return [
     'Ubah fact packet Telegram assistant ini menjadi jawaban natural language yang singkat, jelas, dan tetap read-only.',
     'Aturan wajib:',
@@ -1446,9 +1843,10 @@ function buildAssistantResponsePrompt(factPacket) {
     '- Jika fact packet meminta klarifikasi, ajukan satu pertanyaan singkat dan spesifik.',
     '- Jika fact packet berisi jawaban final, jawab langsung tanpa menjelaskan proses internal.',
     '- Bahasa jawaban harus mengikuti field language.',
+    styleHint || null,
     '- Kembalikan JSON valid dengan shape {"text":"...","language":"id|su"}.',
     `Fact packet:\n${JSON.stringify(factPacket, null, 2)}`,
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 function isAssistantResponseSafe(candidateText, factPacket) {
@@ -2026,6 +2424,46 @@ function buildAnalyticsPlan(text, context = {}) {
       (metricKey && requiresEntity && !entityProfile.entityType) ||
       (metricKey && requiresWindow && windowKey === 'none'),
   }
+}
+
+function buildAnalyticsMenuPlan(language, session = null) {
+  const fallbackPlan = buildDeterministicPlan('', { session })
+  const fallbackAnalytics = fallbackPlan.analytics ?? {}
+
+  return {
+    ...fallbackPlan,
+    intent: 'analytics',
+    language: getLocaleTemplate(language),
+    clarificationCode: 'analytics_metric',
+    analytics: {
+      ...fallbackAnalytics,
+      metricKey: null,
+      entityType: null,
+      entityQuery: null,
+      windowKey: 'none',
+      dateFrom: null,
+      dateTo: null,
+      entityHints: [],
+      metricCandidates: [],
+      requiresWindow: false,
+      requiresEntity: false,
+      needsClarification: true,
+    },
+  }
+}
+
+function buildAnalyticsCommandPlan(commandArgs, language, session = null) {
+  const normalizedArgs = normalizeText(commandArgs, '')
+  const parsedPlan = normalizedArgs ? buildDeterministicPlan(normalizedArgs, { session }) : null
+
+  if (parsedPlan?.intent === 'analytics' && normalizeText(parsedPlan?.analytics?.metricKey, '')) {
+    return {
+      ...parsedPlan,
+      language: getLocaleTemplate(language),
+    }
+  }
+
+  return buildAnalyticsMenuPlan(language, session)
 }
 
 function determineIntentFromText(text) {
@@ -2672,6 +3110,462 @@ function formatStatusLabel(status, remainingAmount = 0) {
   }
 
   return `Sisa ${formatCurrency(normalizedRemainingAmount)}`
+}
+
+function escapeTelegramHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
+
+function formatSummaryMoney(value) {
+  return escapeTelegramHtml(formatCurrency(value))
+}
+
+function getSettlementItemGrossAmount(row) {
+  const candidates = [
+    row?.bill_amount,
+    row?.amount,
+    row?.repayment_amount,
+    row?.principal_amount,
+  ]
+
+  for (const candidate of candidates) {
+    const normalizedAmount = normalizeAmountValue(candidate)
+
+    if (normalizedAmount > 0) {
+      return normalizedAmount
+    }
+  }
+
+  return 0
+}
+
+function getSettlementItemPaidAmount(row, grossAmount = getSettlementItemGrossAmount(row)) {
+  const normalizedPaidAmount = normalizeAmountValue(row?.bill_paid_amount ?? row?.paid_amount)
+
+  if (normalizedPaidAmount > 0) {
+    return normalizedPaidAmount
+  }
+
+  const normalizedRemainingAmount = normalizeAmountValue(
+    row?.bill_remaining_amount ?? row?.remaining_amount
+  )
+
+  if (grossAmount > 0 && normalizedRemainingAmount > 0) {
+    return Math.max(grossAmount - normalizedRemainingAmount, 0)
+  }
+
+  if (grossAmount > 0) {
+    return grossAmount
+  }
+
+  return 0
+}
+
+function getSettlementItemRemainingAmount(
+  row,
+  grossAmount = getSettlementItemGrossAmount(row),
+  paidAmount = getSettlementItemPaidAmount(row, grossAmount)
+) {
+  const normalizedRemainingAmount = normalizeAmountValue(
+    row?.bill_remaining_amount ?? row?.remaining_amount
+  )
+
+  if (normalizedRemainingAmount > 0) {
+    return normalizedRemainingAmount
+  }
+
+  if (grossAmount > 0) {
+    return Math.max(grossAmount - paidAmount, 0)
+  }
+
+  return 0
+}
+
+function getSettlementItemDueDateKey(row) {
+  return toAppDateKey(row?.bill_due_date ?? row?.due_date ?? null)
+}
+
+function getSettlementItemDueDateLabel(row) {
+  return formatDateLabel(
+    row?.bill_due_date ??
+      row?.due_date ??
+      row?.sort_at ??
+      row?.transaction_date ??
+      row?.expense_date ??
+      row?.created_at
+  )
+}
+
+function getSettlementItemSortMs(row) {
+  const candidates = [
+    row?.bill_due_date,
+    row?.due_date,
+    row?.sort_at,
+    row?.transaction_date,
+    row?.expense_date,
+    row?.created_at,
+    row?.updated_at,
+  ]
+
+  for (const candidate of candidates) {
+    const parsedTime = new Date(String(candidate ?? '')).getTime()
+
+    if (Number.isFinite(parsedTime)) {
+      return parsedTime
+    }
+  }
+
+  return 0
+}
+
+function getSettlementItemStatusMeta(row, fallbackMeta = null) {
+  const grossAmount = getSettlementItemGrossAmount(row)
+  const remainingAmount = getSettlementItemRemainingAmount(row, grossAmount)
+  const paidAmount = getSettlementItemPaidAmount(row, grossAmount)
+  const normalizedStatus = normalizeText(row?.bill_status, '').toLowerCase()
+
+  if (remainingAmount <= 0 || normalizedStatus === 'paid') {
+    return {
+      key: 'paid',
+      label: 'Lunas',
+      emoji: '✅',
+    }
+  }
+
+  if (normalizedStatus === 'partial' || (paidAmount > 0 && remainingAmount > 0)) {
+    return {
+      key: 'partial',
+      label: 'Dicicil',
+      emoji: '🟡',
+    }
+  }
+
+  if (normalizedStatus === 'overdue') {
+    return {
+      key: 'overdue',
+      label: 'Jatuh tempo',
+      emoji: '⚠️',
+    }
+  }
+
+  return (
+    fallbackMeta ?? {
+      key: 'unpaid',
+      label: 'Hutang aktif',
+      emoji: '⚠️',
+    }
+  )
+}
+
+function getSettlementSourceEmoji(row) {
+  const sourceType = normalizeText(row?.source_type, '').toLowerCase()
+
+  if (sourceType === 'project-income') {
+    return '💸'
+  }
+
+  if (sourceType === 'expense') {
+    return '🧾'
+  }
+
+  if (sourceType === 'loan-disbursement') {
+    return '🏦'
+  }
+
+  if (sourceType === 'bill') {
+    return isPayrollRow(row) ? '👷' : '📄'
+  }
+
+  return '📄'
+}
+
+function getSettlementDisplayStatusMeta(row, fallbackMeta = null) {
+  const baseMeta = getSettlementItemStatusMeta(row, fallbackMeta)
+  const emojiByKey = {
+    paid: '✅',
+    partial: '🟡',
+    overdue: '⚠️',
+    unpaid: '⚠️',
+  }
+
+  return {
+    ...baseMeta,
+    emoji: emojiByKey[baseMeta.key] ?? baseMeta.emoji,
+  }
+}
+
+function buildSummaryQuoteHeader(title, subtitle) {
+  const normalizedSubtitle = normalizeText(subtitle, '')
+  const lines = [`<b>${escapeTelegramHtml(title)}</b>`]
+
+  if (normalizedSubtitle) {
+    lines.push(escapeTelegramHtml(normalizedSubtitle))
+  }
+
+  return `<blockquote>${lines.join('\n')}</blockquote>`
+}
+
+function buildSummarySectionHeading(title, emoji = '') {
+  const headingText = emoji ? `${emoji} ${title}` : title
+
+  return `<b>${escapeTelegramHtml(headingText)}</b>`
+}
+
+function buildSummarySection(title, lines = [], emoji = '') {
+  const normalizedLines = Array.isArray(lines) ? lines.filter(Boolean) : []
+
+  if (normalizedLines.length === 0) {
+    return ''
+  }
+
+  return [buildSummarySectionHeading(title, emoji), ...normalizedLines].join('\n')
+}
+
+function buildSummaryFooter(text) {
+  const normalizedText = normalizeText(text, '')
+
+  return normalizedText ? `<i>${escapeTelegramHtml(normalizedText)}</i>` : ''
+}
+
+function buildSummaryBullet(label, value) {
+  return `• ${escapeTelegramHtml(label)}: <b>${escapeTelegramHtml(value)}</b>`
+}
+
+function buildSettlementItemSummaryHtml(row, index, statusMeta) {
+  const sourceLabel = `${getSettlementSourceEmoji(row)} ${escapeTelegramHtml(getRowSourceLabel(row))}`
+  const primaryLabel = escapeTelegramHtml(getRowPrimaryLabel(row))
+  const secondaryLabel = normalizeText(getRowSecondaryLabel(row), '')
+  const amountLabel = formatSummaryMoney(getSettlementItemGrossAmount(row))
+  const dateLabel = escapeTelegramHtml(getSettlementItemDueDateLabel(row))
+  const resolvedStatusMeta = statusMeta ?? getSettlementDisplayStatusMeta(row)
+  const lines = [
+    `${index}) <b>${sourceLabel} — ${primaryLabel}</b>`,
+  ]
+
+  if (secondaryLabel) {
+    lines.push(`   ${escapeTelegramHtml(secondaryLabel)}`)
+  }
+
+  lines.push(
+    `   <b>${amountLabel}</b> • ${resolvedStatusMeta.emoji} ${escapeTelegramHtml(
+      resolvedStatusMeta.label
+    )} • ${dateLabel}`
+  )
+
+  return lines.join('\n')
+}
+
+function buildSettlementBucketState(rows = [], bucketStatus = 'paid') {
+  const normalizedRows = Array.isArray(rows) ? rows.filter(Boolean) : []
+  const normalizedBucketStatus = normalizeText(bucketStatus, '').toLowerCase()
+  const todayKey = getAppTodayKey()
+  const weekEndKey = shiftAppDateKey(todayKey, 7)
+  const items = normalizedRows.map((row) => {
+    const grossAmount = getSettlementItemGrossAmount(row)
+    const paidAmount = getSettlementItemPaidAmount(row, grossAmount)
+    const remainingAmount = getSettlementItemRemainingAmount(row, grossAmount, paidAmount)
+    const dueKey = getSettlementItemDueDateKey(row)
+
+    return {
+      row,
+      sourceType: normalizeText(row?.source_type, '').toLowerCase(),
+      grossAmount,
+      paidAmount,
+      remainingAmount,
+      dueKey,
+      sortMs: getSettlementItemSortMs(row),
+    }
+  })
+
+  const billItems = items.filter((item) => item.sourceType === 'bill')
+  const loanItems = items.filter((item) => item.sourceType === 'loan-disbursement')
+  const overdueItems = items.filter(
+    (item) => item.remainingAmount > 0 && item.dueKey && item.dueKey < todayKey
+  )
+  const dueThisWeekItems = items.filter(
+    (item) =>
+      item.remainingAmount > 0 &&
+      item.dueKey &&
+      item.dueKey >= todayKey &&
+      item.dueKey <= weekEndKey
+  )
+  const nearestDueItem =
+    [...items]
+      .filter((item) => item.remainingAmount > 0 && item.dueKey)
+      .sort((left, right) => {
+        const dueComparison = left.dueKey.localeCompare(right.dueKey)
+
+        if (dueComparison !== 0) {
+          return dueComparison
+        }
+
+        const remainingComparison = right.remainingAmount - left.remainingAmount
+
+        if (remainingComparison !== 0) {
+          return remainingComparison
+        }
+
+        return right.sortMs - left.sortMs
+      })[0] ?? null
+
+  const bucketMode =
+    normalizedBucketStatus === 'unpaid' && (overdueItems.length > 0 || dueThisWeekItems.length > 0)
+      ? 'overdue'
+      : normalizedBucketStatus
+
+  const statusMeta =
+    bucketMode === 'paid'
+      ? {
+          key: 'paid',
+          label: 'Lunas',
+          emoji: '✅',
+          subtitle: 'Semua item pada bucket ini sudah selesai dibayar.',
+        }
+      : bucketMode === 'partial'
+        ? {
+            key: 'partial',
+            label: 'Dicicil',
+            emoji: '🟡',
+            subtitle: 'Item berikut masih berjalan dalam skema cicilan.',
+          }
+        : bucketMode === 'overdue'
+          ? {
+              key: 'overdue',
+              label: 'Jatuh tempo',
+              emoji: '⚠️',
+              subtitle: 'Prioritaskan item yang sudah dekat atau lewat jatuh tempo.',
+            }
+          : {
+              key: 'unpaid',
+              label: 'Hutang aktif',
+              emoji: '⚠️',
+              subtitle: 'Masih ada kewajiban yang perlu diselesaikan.',
+            }
+
+  const sortedItems = [...items].sort((left, right) => {
+    if (statusMeta.key === 'paid') {
+      return right.sortMs - left.sortMs
+    }
+
+    if (statusMeta.key === 'partial') {
+      const leftDueKey = left.dueKey ?? '9999-12-31'
+      const rightDueKey = right.dueKey ?? '9999-12-31'
+      const dueComparison = leftDueKey.localeCompare(rightDueKey)
+
+      if (dueComparison !== 0) {
+        return dueComparison
+      }
+
+      const remainingComparison = right.remainingAmount - left.remainingAmount
+
+      if (remainingComparison !== 0) {
+        return remainingComparison
+      }
+
+      return right.sortMs - left.sortMs
+    }
+
+    const leftPriority = left.remainingAmount > 0 && left.dueKey && left.dueKey < todayKey ? 0 : 1
+    const rightPriority = right.remainingAmount > 0 && right.dueKey && right.dueKey < todayKey ? 0 : 1
+
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority
+    }
+
+    const leftDueKey = left.dueKey ?? '9999-12-31'
+    const rightDueKey = right.dueKey ?? '9999-12-31'
+    const dueComparison = leftDueKey.localeCompare(rightDueKey)
+
+    if (dueComparison !== 0) {
+      return dueComparison
+    }
+
+    const remainingComparison = right.remainingAmount - left.remainingAmount
+
+    if (remainingComparison !== 0) {
+      return remainingComparison
+    }
+
+    return right.sortMs - left.sortMs
+  })
+
+  const totalItem = items.length
+  const totalGrossAmount = items.reduce((sum, item) => sum + item.grossAmount, 0)
+  const totalPaidAmount = items.reduce((sum, item) => sum + item.paidAmount, 0)
+  const totalRemainingAmount = items.reduce((sum, item) => sum + item.remainingAmount, 0)
+  const billGrossAmount = billItems.reduce((sum, item) => sum + item.grossAmount, 0)
+  const billPaidAmount = billItems.reduce((sum, item) => sum + item.paidAmount, 0)
+  const billRemainingAmount = billItems.reduce((sum, item) => sum + item.remainingAmount, 0)
+  const loanGrossAmount = loanItems.reduce((sum, item) => sum + item.grossAmount, 0)
+  const loanPaidAmount = loanItems.reduce((sum, item) => sum + item.paidAmount, 0)
+  const loanRemainingAmount = loanItems.reduce((sum, item) => sum + item.remainingAmount, 0)
+
+  return {
+    bucketMode: statusMeta.key,
+    statusMeta,
+    items,
+    sortedItems,
+    totalItem,
+    totalGrossAmount,
+    totalPaidAmount,
+    totalRemainingAmount,
+    billItems,
+    billGrossAmount,
+    billPaidAmount,
+    billRemainingAmount,
+    loanItems,
+    loanGrossAmount,
+    loanPaidAmount,
+    loanRemainingAmount,
+    overdueItems,
+    dueThisWeekItems,
+    nearestDueItem,
+  }
+}
+
+function buildSettlementSummaryHighlights(sortedItems = [], limit = 3) {
+  const normalizedLimit = Number.isFinite(Number(limit)) ? Math.max(Math.trunc(Number(limit)), 0) : 3
+  const highlightItems = Array.isArray(sortedItems) ? sortedItems.slice(0, normalizedLimit) : []
+
+  return {
+    lines: highlightItems.map((item, index) =>
+      buildSettlementItemSummaryHtml(item.row, index + 1)
+    ),
+    extraCount: Math.max(0, (Array.isArray(sortedItems) ? sortedItems.length : 0) - normalizedLimit),
+  }
+}
+
+function buildSettlementSummaryHtmlReply({
+  headerTitle,
+  headerSubtitle,
+  sections = [],
+  footerText = '',
+  extraFooterText = '',
+  emptyStateText = '',
+}) {
+  const normalizedSections = Array.isArray(sections) ? sections.filter(Boolean) : []
+  const parts = [
+    buildSummaryQuoteHeader(headerTitle, headerSubtitle),
+    ...(normalizedSections.length > 0
+      ? normalizedSections
+      : emptyStateText
+        ? [buildSummaryFooter(emptyStateText)]
+        : []),
+  ]
+
+  if (extraFooterText) {
+    parts.push(buildSummaryFooter(extraFooterText))
+  }
+
+  if (footerText) {
+    parts.push(buildSummaryFooter(footerText))
+  }
+
+  return parts.filter(Boolean).join('\n\n')
 }
 
 function getRowSourceLabel(row) {
@@ -3329,15 +4223,14 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
     return {
       text: [
         locale.analyticsIntro(buildAnalyticsWindowLabel(analyticsPlan.windowKey, analyticsPlan.dateFrom, analyticsPlan.dateTo)),
+        `• Inti: ${data?.length ?? 0} transaksi`,
         locale.analyticsCashOutflow(windowLabel, formatCurrency(totalAmount)),
+        `• Pilih metric lain atau ${locale.quickMenu}.`,
       ].join('\n'),
-      buttons: [
-        {
-          text: locale.actionLedger,
-          path: '/transactions',
-        },
-      ],
+      buttonRows: buildAnalyticsFollowUpRows(plan?.language, metricKey),
+      buttons: [],
       needsClarification: false,
+      appendQuickActions: false,
       facts: {
         ...factsBase,
         metricKey,
@@ -3346,6 +4239,8 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
         dateTo: analyticsPlan.dateTo,
         totalAmount,
         rowCount: (data ?? []).length,
+        presentation: 'hybrid_summary',
+        tone: 'santai_operasional',
       },
     }
   }
@@ -3388,15 +4283,14 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
     return {
       text: [
         locale.analyticsIntro(windowLabel),
+        `• Inti: ${totalPresent} pekerja`,
         locale.analyticsAttendance(windowLabel, `${totalPresent} pekerja`, breakdownLabel),
+        `• Pilih metric lain atau ${locale.quickMenu}.`,
       ].join('\n'),
-      buttons: [
-        {
-          text: locale.openRoute(getAssistantRouteLabel(assistantRouteTargets.attendance)),
-          path: assistantRouteTargets.attendance,
-        },
-      ],
+      buttonRows: buildAnalyticsFollowUpRows(plan?.language, metricKey),
+      buttons: [],
       needsClarification: false,
+      appendQuickActions: false,
       facts: {
         ...factsBase,
         metricKey,
@@ -3406,6 +4300,8 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
         totalPresent,
         counts,
         rowCount: (data ?? []).length,
+        presentation: 'hybrid_summary',
+        tone: 'santai_operasional',
       },
     }
   }
@@ -3443,8 +4339,10 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
 
       return {
         text: locale.analyticsRankingEmpty(entityLabel),
+        buttonRows: buildAssistantMenuBackRow(plan?.language),
         buttons: [],
         needsClarification: false,
+        appendQuickActions: false,
         facts: {
           ...factsBase,
           metricKey,
@@ -3452,6 +4350,8 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
           entityLabel,
           rowCount: 0,
           rankedRows: [],
+          presentation: 'hybrid_summary',
+          tone: 'santai_operasional',
         },
       }
     }
@@ -3462,6 +4362,7 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
     )
     const lines = [
       locale.analyticsIntro(entityLabel),
+      `• Inti: ${rankedRows.length} peringkat teratas`,
       locale.analyticsRankingIntro(entityLabel),
       ...rankedRows.map((group, index) =>
         locale.analyticsRankingItem(
@@ -3476,24 +4377,14 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
       lines.push(locale.analyticsMoreRanking(groupedRows.size - rankedRows.length))
     }
 
+    lines.push(`• Pilih metric lain atau ${locale.quickMenu}.`)
+
     return {
       text: lines.join('\n'),
-      buttons: [
-        {
-          text: locale.openRoute(
-            getAssistantRouteLabel(
-              entityResolution.entityType === 'worker'
-                ? assistantRouteTargets.worker
-                : assistantRouteTargets.billLedger
-            )
-          ),
-          path:
-            entityResolution.entityType === 'worker'
-              ? assistantRouteTargets.worker
-              : assistantRouteTargets.billLedger,
-        },
-      ],
+      buttonRows: buildAnalyticsFollowUpRows(plan?.language, metricKey),
+      buttons: [],
       needsClarification: false,
+      appendQuickActions: false,
       facts: {
         ...factsBase,
         metricKey,
@@ -3505,6 +4396,8 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
           entityName: group.entityName,
           totalAmount: group.totalAmount,
         })),
+        presentation: 'hybrid_summary',
+        tone: 'santai_operasional',
       },
     }
   }
@@ -3545,6 +4438,7 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
     getAnalyticsEntityLabel(resolvedEntityType, plan?.language) ??
     null
   const lines = [locale.analyticsIntro(introLabel)]
+  lines.push(`• Inti: ${analyticsRows.length} item`)
 
   if (groupedRows.bills.length > 0) {
     lines.push(
@@ -3561,8 +4455,10 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
   if (groupedRows.bills.length === 0 && groupedRows.loans.length === 0) {
     return {
       text: locale.analyticsNoData(introLabel ?? 'data tagihan'),
+      buttonRows: buildAssistantMenuBackRow(plan?.language),
       buttons: [],
       needsClarification: false,
+      appendQuickActions: false,
       facts: {
         ...factsBase,
         metricKey,
@@ -3573,32 +4469,20 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
           bills: 0,
           loans: 0,
         },
+        presentation: 'hybrid_summary',
+        tone: 'santai_operasional',
       },
     }
   }
 
+  lines.push(`• Pilih metric lain atau ${locale.quickMenu}.`)
+
   return {
     text: lines.join('\n'),
-    buttons: [
-      {
-        text: locale.openRoute(
-          getAssistantRouteLabel(
-            resolvedEntityType === 'worker'
-              ? assistantRouteTargets.worker
-              : resolvedEntityType === 'creditor'
-                ? assistantRouteTargets.ledger
-                : assistantRouteTargets.billLedger
-          )
-        ),
-        path:
-          resolvedEntityType === 'worker'
-            ? assistantRouteTargets.worker
-            : resolvedEntityType === 'creditor'
-              ? assistantRouteTargets.ledger
-              : assistantRouteTargets.billLedger,
-      },
-    ],
+    buttonRows: buildAnalyticsFollowUpRows(plan?.language, metricKey),
+    buttons: [],
     needsClarification: false,
+    appendQuickActions: false,
     facts: {
       ...factsBase,
       metricKey,
@@ -3613,6 +4497,8 @@ async function buildAnalyticsReply(adminClient, teamId, plan) {
         billRemainingAmount: totalBillRemaining,
         loanRemainingAmount: totalLoanRemaining,
       },
+      presentation: 'hybrid_summary',
+      tone: 'santai_operasional',
     },
   }
 }
@@ -3758,37 +4644,42 @@ function groupOutstandingRows(rows) {
 function buildStatusReply(rows, plan) {
   const locale = getLocaleText(plan?.language)
   const queryLabel = normalizeText(plan?.search?.query, '')
+  const normalizedStatus = normalizeText(plan?.search?.status, 'any').toLowerCase()
   const groupedRows = groupOutstandingRows(rows)
-  const totalBillRemaining = groupedRows.bills.reduce(
-    (sum, row) => sum + normalizeAmountValue(row?.bill_remaining_amount),
-    0
+  const state = buildSettlementBucketState(
+    rows,
+    normalizedStatus === 'any' ? 'paid' : normalizedStatus
   )
-  const totalLoanRemaining = groupedRows.loans.reduce(
-    (sum, row) => sum + normalizeAmountValue(row?.bill_remaining_amount),
-    0
-  )
-  const lines = []
-  const buttons = []
+  const summaryRows = buildSettlementBucketSummaryRows(rows)
+  const highlights = buildSettlementSummaryHighlights(state.sortedItems, 3)
   const facts = {
     queryLabel,
+    status: normalizedStatus,
     rowCount: rows.length,
     billCount: groupedRows.bills.length,
     loanCount: groupedRows.loans.length,
-    billRemainingAmount: totalBillRemaining,
-    loanRemainingAmount: totalLoanRemaining,
-    items: rows.slice(0, 3).map((row, index) => buildRowFactItem(row, plan, index)),
+    billRemainingAmount: state.billRemainingAmount,
+    loanRemainingAmount: state.loanRemainingAmount,
+    summaryItems: highlights.lines.map((line) => line.replaceAll('\n', ' ')),
+    presentation: 'html_summary',
+    tone: 'santai_operasional',
   }
 
   if (groupedRows.bills.length === 0 && groupedRows.loans.length === 0) {
     return {
-      text: locale.noResultStatus(queryLabel),
-      buttons: [
-        {
-          text: locale.actionLedger,
-          path: '/transactions',
-        },
-      ],
+      text: buildSettlementSummaryHtmlReply({
+        headerTitle: '📚 SUMMARY SEMUA DATA',
+        headerSubtitle: queryLabel
+          ? `Tidak ada tagihan atau pinjaman outstanding yang cocok untuk "${queryLabel}".`
+          : 'Belum ada tagihan atau pinjaman outstanding yang bisa dirangkum.',
+        emptyStateText: 'Buka Jurnal untuk melihat riwayat lengkap.',
+        footerText: `Pilih bucket lain atau ${locale.quickMenu}.`,
+      }),
+      buttonRows: buildAssistantMenuBackRow(plan?.language),
+      buttons: [],
       needsClarification: false,
+      appendQuickActions: false,
+      parseMode: 'HTML',
       facts: {
         ...facts,
         empty: true,
@@ -3796,38 +4687,53 @@ function buildStatusReply(rows, plan) {
     }
   }
 
-  lines.push(locale.statusIntro(queryLabel))
-
-  if (groupedRows.bills.length > 0) {
-    lines.push(locale.statusBills(groupedRows.bills.length, formatCurrency(totalBillRemaining)))
+  if (normalizedStatus !== 'any') {
+    return buildSettlementBucketDetailReply(plan?.language, rows, 'status', normalizedStatus)
   }
 
-  if (groupedRows.loans.length > 0) {
-    lines.push(locale.statusLoans(groupedRows.loans.length, formatCurrency(totalLoanRemaining)))
+  const ringkasanLines = [
+    buildSummaryBullet('Total item', String(state.totalItem)),
+    buildSummaryBullet('Total nilai', formatSummaryMoney(state.totalGrossAmount)),
+    buildSummaryBullet('Total lunas', formatSummaryMoney(state.totalPaidAmount)),
+    buildSummaryBullet('Sisa hutang', formatSummaryMoney(state.totalRemainingAmount)),
+  ]
+
+  if (state.billItems.length > 0) {
+    ringkasanLines.push(buildSummaryBullet('Tagihan', `${state.billItems.length} item`))
   }
 
-  rows.slice(0, 3).forEach((row) => {
-    buttons.push({
-      text:
-        buildRouteForRow(row, plan).startsWith('/payment') ||
-        buildRouteForRow(row, plan).startsWith('/loan-payment')
-          ? locale.actionPayment
-          : locale.actionDetail,
-      path: buildRouteForRow(row, plan),
-    })
-  })
-
-  if (buttons.length === 0) {
-    buttons.push({
-      text: locale.actionLedger,
-      path: '/transactions',
-    })
+  if (state.loanItems.length > 0) {
+    ringkasanLines.push(buildSummaryBullet('Pinjaman', `${state.loanItems.length} item`))
   }
+
+  const statusLines = summaryRows
+    .filter((bucket) => bucket.totalCount > 0)
+    .map((bucket) => buildSummaryBullet(bucket.label, `${bucket.totalCount} item`))
+
+  const sections = [
+    buildSummarySection('Ringkasan', ringkasanLines, '📌'),
+    buildSummarySection('Status', statusLines, '🧾'),
+    highlights.lines.length > 0 ? buildSummarySection('Sorotan', highlights.lines, '⭐') : '',
+  ].filter(Boolean)
+
+  const extraFooterText =
+    highlights.extraCount > 0 ? `+${highlights.extraCount} item lainnya tidak ditampilkan.` : ''
 
   return {
-    text: lines.join('\n'),
-    buttons,
+    text: buildSettlementSummaryHtmlReply({
+      headerTitle: '📚 SUMMARY SEMUA DATA',
+      headerSubtitle: queryLabel
+        ? `Ringkasan untuk "${queryLabel}".`
+        : 'Ringkasan semua data tagihan dan pinjaman pada workspace ini.',
+      sections,
+      extraFooterText,
+      footerText: `Pilih bucket lain atau ${locale.quickMenu}.`,
+    }),
+    buttonRows: buildAssistantMenuBackRow(plan?.language),
+    buttons: [],
     needsClarification: false,
+    appendQuickActions: false,
+    parseMode: 'HTML',
     facts,
   }
 }
@@ -3944,6 +4850,60 @@ async function sendAssistantDmHandoff({
   })
 
   return { processed: true }
+}
+
+async function sendSettlementBucketSummaryReply({
+  adminClient,
+  botToken,
+  chatId,
+  replyToMessageId,
+  telegramUserId,
+  chatType,
+  session,
+  selectedMembership,
+  sessionPayload,
+  language,
+  surface,
+  bucketStatus,
+}) {
+  const rows = await loadWorkspaceRows(
+    adminClient,
+    selectedMembership.team_id,
+    { search: {} },
+    { limit: 100, outstandingOnly: false }
+  )
+  const reply = buildSettlementBucketDetailReply(language, rows, surface, bucketStatus)
+  const turnData = buildAssistantTurnData({
+    text: `${surface} ${bucketStatus}`,
+    plan: {
+      intent: 'status',
+      search: {
+        status: bucketStatus,
+      },
+    },
+    language,
+    workspaceName: selectedMembership.team_name,
+  })
+  return sendAssistantHybridSummaryReply({
+    adminClient,
+    botToken,
+    chatId,
+    replyToMessageId,
+    telegramUserId,
+    chatType,
+    session,
+    sessionPayload,
+    selectedMembership,
+    plan: {
+      intent: 'status',
+      language,
+      search: {
+        status: bucketStatus,
+      },
+    },
+    reply,
+    turnData,
+  })
 }
 
 async function processAssistantStartCommand({
@@ -4147,6 +5107,51 @@ function buildAssistantMenuBackRow(language = 'id') {
   ]
 }
 
+function buildAssistantMainMenuKeyboardRows(language = 'id') {
+  const locale = getLocaleText(language)
+
+  return [
+    [
+      {
+        text: locale.quickAdd,
+      },
+      {
+        text: locale.quickOpen,
+      },
+      {
+        text: locale.quickSearch,
+      },
+    ],
+    [
+      {
+        text: locale.quickStatus,
+      },
+      {
+        text: locale.quickHistory,
+      },
+      {
+        text: locale.quickAnalytics,
+      },
+    ],
+    [
+      {
+        text: locale.quickMenu,
+      },
+    ],
+  ]
+}
+
+function buildAssistantMainMenuReplyMarkup(language = 'id') {
+  const locale = getLocaleText(language)
+
+  return {
+    keyboard: buildAssistantMainMenuKeyboardRows(language),
+    resize_keyboard: true,
+    is_persistent: true,
+    input_field_placeholder: locale.menuIntro,
+  }
+}
+
 function buildAssistantTopLevelActionRows(language = 'id') {
   const locale = getLocaleText(language)
 
@@ -4301,14 +5306,86 @@ function buildSettlementBucketSummaryRows(rows = []) {
   })
 }
 
+function buildSettlementBucketButtonRows(language = 'id', rows = [], surface = 'status') {
+  const summaries = buildSettlementBucketSummaryRows(rows)
+
+  return [
+    ...summaries.map((bucket) => [
+      {
+        text: `${bucket.label}${bucket.totalCount > 0 ? ` (${bucket.totalCount})` : ''}`,
+        callbackData: buildAssistantCallbackData(
+          assistantCallbackPrefixes.settlement,
+          `${surface}:${bucket.status}`
+        ),
+      },
+    ]),
+    ...buildAssistantMenuBackRow(language),
+  ]
+}
+
 function buildSettlementBucketReply(language = 'id', rows = [], surface = 'status') {
   const locale = getLocaleText(language)
   const summaries = buildSettlementBucketSummaryRows(rows)
+  if (Array.isArray(rows)) {
+    const state = buildSettlementBucketState(rows, 'paid')
+    const title = surface === 'history' ? '🕘 SUMMARY RIWAYAT' : '📚 SUMMARY SEMUA DATA'
+    const subtitle =
+      surface === 'history'
+        ? 'Pilih bucket untuk melihat ringkasan riwayat yang lebih rinci.'
+        : 'Pilih bucket untuk melihat ringkasan status yang lebih rinci.'
+    const ringkasanLines = [
+      buildSummaryBullet('Total item', String(state.totalItem)),
+      buildSummaryBullet('Total nilai', formatSummaryMoney(state.totalGrossAmount)),
+      buildSummaryBullet('Total lunas', formatSummaryMoney(state.totalPaidAmount)),
+      buildSummaryBullet('Sisa hutang', formatSummaryMoney(state.totalRemainingAmount)),
+    ]
+    const statusLines = summaries
+      .filter((bucket) => bucket.totalCount > 0)
+      .map((bucket) => buildSummaryBullet(bucket.label, `${bucket.totalCount} item`))
+    const highlights = buildSettlementSummaryHighlights(state.sortedItems, 3)
+    const sections = [
+      buildSummarySection('Ringkasan', ringkasanLines, '📌'),
+      buildSummarySection('Status', statusLines, '🧾'),
+      highlights.lines.length > 0 ? buildSummarySection('Sorotan', highlights.lines, '⭐') : '',
+    ].filter(Boolean)
+    const extraFooterText =
+      highlights.extraCount > 0 ? `+${highlights.extraCount} item lainnya tidak ditampilkan.` : ''
+
+    return {
+      text: buildSettlementSummaryHtmlReply({
+        headerTitle: title,
+        headerSubtitle: subtitle,
+        sections,
+        extraFooterText,
+        footerText: `Pilih bucket lain atau ${locale.quickMenu}.`,
+      }),
+      buttonRows: buildSettlementBucketButtonRows(language, rows, surface),
+      buttons: [],
+      needsClarification: false,
+      appendQuickActions: false,
+      parseMode: 'HTML',
+      facts: {
+        surface,
+        rowCount: rows.length,
+        buckets: summaries.map((bucket) => ({
+          status: bucket.status,
+          label: bucket.label,
+          totalCount: bucket.totalCount,
+          financeCount: bucket.financeCount,
+          payrollCount: bucket.payrollCount,
+        })),
+        presentation: 'html_summary',
+        tone: 'santai_operasional',
+      },
+    }
+  }
   const prompt = surface === 'history' ? locale.historyRoutePrompt : locale.statusRoutePrompt
+  const totalCount = summaries.reduce((sum, bucket) => sum + bucket.totalCount, 0)
 
   return {
     text: [
       prompt,
+      `â€¢ Inti: ${totalCount} item`,
       ...summaries.map((bucket) => {
         const detailParts = [
           `Finance ${bucket.financeCount}`,
@@ -4317,16 +5394,9 @@ function buildSettlementBucketReply(language = 'id', rows = [], surface = 'statu
 
         return `• ${bucket.label}: ${bucket.totalCount} item${detailParts.length > 0 ? ` (${detailParts.join(', ')})` : ''}`
       }),
+      `â€¢ Pilih bucket lain atau ${locale.quickMenu}.`,
     ].join('\n'),
-    buttonRows: [
-      ...summaries.map((bucket) => [
-        {
-          text: `${bucket.label}${bucket.totalCount > 0 ? ` (${bucket.totalCount})` : ''}`,
-          path: bucket.path,
-        },
-      ]),
-      ...buildAssistantMenuBackRow(language),
-    ],
+    buttonRows: buildSettlementBucketButtonRows(language, rows, surface),
     buttons: [],
     needsClarification: false,
     appendQuickActions: false,
@@ -4339,8 +5409,246 @@ function buildSettlementBucketReply(language = 'id', rows = [], surface = 'statu
         totalCount: bucket.totalCount,
         financeCount: bucket.financeCount,
         payrollCount: bucket.payrollCount,
-        path: bucket.path,
       })),
+      presentation: 'hybrid_summary',
+      tone: 'santai_operasional',
+    },
+  }
+}
+
+function buildSettlementBucketDetailReply(
+  language = 'id',
+  rows = [],
+  surface = 'status',
+  bucketStatus = 'paid'
+) {
+  const normalizedBucketStatus = normalizeText(bucketStatus, '').toLowerCase()
+  const bucketConfig =
+    assistantStatusBucketRoutes.find((bucket) => bucket.status === normalizedBucketStatus) ??
+    assistantStatusBucketRoutes[0]
+  const bucketRows = rows.filter(
+    (row) => normalizeText(row?.bill_status, '').toLowerCase() === bucketConfig.status
+  )
+  if (Array.isArray(bucketRows)) {
+    const state = buildSettlementBucketState(bucketRows, bucketConfig.status)
+    const bucketMode = state.bucketMode
+    const titleEmojiByMode = {
+      paid: '✅',
+      partial: '🟡',
+      overdue: '⚠️',
+      unpaid: '⚠️',
+    }
+    const title = `${titleEmojiByMode[bucketMode] ?? '📚'} SUMMARY ${state.statusMeta.label.toUpperCase()}`
+    const subtitle = state.statusMeta.subtitle
+    const highlights = buildSettlementSummaryHighlights(state.sortedItems, 3)
+    const highlightTitle =
+      bucketMode === 'paid'
+        ? 'Sorotan'
+        : bucketMode === 'partial'
+          ? 'Cicilan Berjalan'
+          : bucketMode === 'overdue'
+            ? 'Prioritas Pembayaran'
+            : 'Jatuh Tempo Terdekat'
+    const ringkasanLines =
+      bucketMode === 'paid'
+        ? [
+            buildSummaryBullet('Total item', String(state.totalItem)),
+            buildSummaryBullet('Total nilai lunas', formatSummaryMoney(state.totalPaidAmount)),
+            buildSummaryBullet('Tagihan lunas', `${state.billItems.length} item`),
+            buildSummaryBullet('Pinjaman lunas', `${state.loanItems.length} item`),
+          ]
+        : bucketMode === 'partial'
+          ? [
+              buildSummaryBullet('Total item', String(state.totalItem)),
+              buildSummaryBullet('Total nilai', formatSummaryMoney(state.totalGrossAmount)),
+              buildSummaryBullet('Sudah dibayar', formatSummaryMoney(state.totalPaidAmount)),
+              buildSummaryBullet('Sisa cicilan', formatSummaryMoney(state.totalRemainingAmount)),
+            ]
+          : [
+              buildSummaryBullet('Total item', String(state.totalItem)),
+              buildSummaryBullet('Total tagihan', formatSummaryMoney(state.totalGrossAmount)),
+              buildSummaryBullet('Sudah dibayar', formatSummaryMoney(state.totalPaidAmount)),
+              buildSummaryBullet('Sisa hutang', formatSummaryMoney(state.totalRemainingAmount)),
+            ]
+
+    if (bucketMode === 'partial') {
+      if (state.billItems.length > 0) {
+        ringkasanLines.push(
+          buildSummaryBullet('Tagihan dicicil', `${state.billItems.length} item`)
+        )
+      }
+
+      if (state.loanItems.length > 0) {
+        ringkasanLines.push(
+          buildSummaryBullet('Pinjaman dicicil', `${state.loanItems.length} item`)
+        )
+      }
+    } else if (bucketMode === 'paid') {
+      ringkasanLines.push(
+        buildSummaryBullet('Sisa tagihan', formatSummaryMoney(state.billRemainingAmount))
+      )
+      ringkasanLines.push(
+        buildSummaryBullet('Sisa pinjaman', formatSummaryMoney(state.loanRemainingAmount))
+      )
+    } else {
+      if (state.overdueItems.length > 0) {
+        ringkasanLines.push(
+          buildSummaryBullet('Lewat tempo', `${state.overdueItems.length} item`)
+        )
+      }
+
+      if (state.dueThisWeekItems.length > 0) {
+        ringkasanLines.push(
+          buildSummaryBullet('Jatuh tempo minggu ini', `${state.dueThisWeekItems.length} item`)
+        )
+      }
+
+      if (state.nearestDueItem) {
+        ringkasanLines.push(
+          buildSummaryBullet(
+            'Jatuh tempo terdekat',
+            `${getRowPrimaryLabel(state.nearestDueItem.row)} • ${getSettlementItemDueDateLabel(state.nearestDueItem.row)} • ${formatSummaryMoney(state.nearestDueItem.remainingAmount)}`
+          )
+        )
+      }
+
+      ringkasanLines.push(
+        buildSummaryBullet('Prioritas pembayaran', 'Lunasi item yang lewat tempo lebih dulu.')
+      )
+    }
+
+    const statusLines =
+      bucketMode === 'paid'
+        ? [
+            buildSummaryBullet('Sisa tagihan', formatSummaryMoney(state.billRemainingAmount)),
+            buildSummaryBullet('Sisa pinjaman', formatSummaryMoney(state.loanRemainingAmount)),
+          ]
+        : bucketMode === 'partial'
+          ? [
+              buildSummaryBullet('Tagihan cicil', `${state.billItems.length} item`),
+              buildSummaryBullet('Pinjaman cicil', `${state.loanItems.length} item`),
+            ]
+          : [
+              state.overdueItems.length > 0
+                ? buildSummaryBullet('Lewat tempo', `${state.overdueItems.length} item`)
+                : null,
+              state.dueThisWeekItems.length > 0
+                ? buildSummaryBullet(
+                    'Jatuh tempo minggu ini',
+                    `${state.dueThisWeekItems.length} item`
+                  )
+                : null,
+              state.nearestDueItem
+                ? buildSummaryBullet(
+                    'Jatuh tempo terdekat',
+                    `${getRowPrimaryLabel(state.nearestDueItem.row)} • ${getSettlementItemDueDateLabel(state.nearestDueItem.row)} • ${formatSummaryMoney(state.nearestDueItem.remainingAmount)}`
+                  )
+                : null,
+              buildSummaryBullet('Prioritas pembayaran', 'Lunasi item yang lewat tempo lebih dulu.'),
+            ].filter(Boolean)
+
+    const sections = [
+      buildSummarySection('Ringkasan', ringkasanLines, '📌'),
+      buildSummarySection('Status', statusLines, '🧾'),
+      highlights.lines.length > 0 ? buildSummarySection(highlightTitle, highlights.lines, '⭐') : '',
+    ].filter(Boolean)
+
+    const extraFooterText =
+      highlights.extraCount > 0 ? `+${highlights.extraCount} item lainnya tidak ditampilkan.` : ''
+
+    return {
+      text: buildSettlementSummaryHtmlReply({
+        headerTitle: title,
+        headerSubtitle: subtitle,
+        sections,
+        extraFooterText,
+        emptyStateText: 'Belum ada data pada bucket ini.',
+        footerText: `Pilih bucket lain atau ${getLocaleText(language).quickMenu}.`,
+      }),
+      buttonRows: buildSettlementBucketButtonRows(language, rows, surface),
+      buttons: [],
+      needsClarification: false,
+      appendQuickActions: false,
+      parseMode: 'HTML',
+      facts: {
+        surface,
+        bucketStatus: bucketConfig.status,
+        bucketLabel: bucketConfig.label,
+        rowCount: bucketRows.length,
+        financeCount: state.billItems.length,
+        payrollCount: state.loanItems.length,
+        totals: {
+          billRemainingAmount: state.billRemainingAmount,
+          loanRemainingAmount: state.loanRemainingAmount,
+        },
+        summaryItems: highlights.lines,
+        presentation: 'html_summary',
+        tone: 'santai_operasional',
+      },
+    }
+  }
+  const groupedRows = groupOutstandingRows(bucketRows)
+  const totalBillRemaining = groupedRows.bills.reduce(
+    (sum, row) => sum + normalizeAmountValue(row?.bill_remaining_amount),
+    0
+  )
+  const totalLoanRemaining = groupedRows.loans.reduce(
+    (sum, row) => sum + normalizeAmountValue(row?.bill_remaining_amount),
+    0
+  )
+  const introLabel = surface === 'history' ? 'Riwayat' : 'Status'
+  const summaryItems = bucketRows.slice(0, 3).map((row, index) => {
+    const summaryText = buildRowSummary(row).replaceAll('\n', ' ')
+
+    return `${index + 1}. ${summaryText}`
+  })
+  const lines = [
+    `${introLabel} ${bucketConfig.label}:`,
+    `• Inti: ${bucketRows.length} item`,
+    `• Total item: ${bucketRows.length}`,
+  ]
+
+  if (groupedRows.bills.length > 0) {
+    lines.push(
+      `• Tagihan aktif: ${groupedRows.bills.length} item, sisa ${formatCurrency(totalBillRemaining)}`
+    )
+  }
+
+  if (groupedRows.loans.length > 0) {
+    lines.push(
+      `• Pinjaman aktif: ${groupedRows.loans.length} item, sisa ${formatCurrency(totalLoanRemaining)}`
+    )
+  }
+
+  if (summaryItems.length > 0) {
+    lines.push('• Sorotan:')
+    lines.push(...summaryItems.map((item) => `  ${item}`))
+  } else {
+    lines.push('• Tidak ada data pada bucket ini.')
+  }
+
+  lines.push(`• Pilih bucket lain atau ${getLocaleText(language).quickMenu}.`)
+
+  return {
+    text: lines.join('\n'),
+    buttonRows: buildSettlementBucketButtonRows(language, rows, surface),
+    buttons: [],
+    needsClarification: false,
+    appendQuickActions: false,
+    facts: {
+      surface,
+      bucketStatus: bucketConfig.status,
+      bucketLabel: bucketConfig.label,
+      rowCount: bucketRows.length,
+      financeCount: groupedRows.bills.length,
+      payrollCount: groupedRows.loans.length,
+      totals: {
+        billRemainingAmount: totalBillRemaining,
+        loanRemainingAmount: totalLoanRemaining,
+      },
+      summaryItems,
+      presentation: 'hybrid_summary',
+      tone: 'santai_operasional',
     },
   }
 }
@@ -4476,8 +5784,39 @@ function buildAssistantClarificationRows(clarificationCode, language = 'id', fac
   return []
 }
 
-function buildCommandMenuReply(language = 'id') {
+function buildAnalyticsFollowUpRows(language = 'id', metricKey = '') {
+  const normalizedMetricKey = normalizeText(metricKey, '').toLowerCase()
+
+  if (normalizedMetricKey === 'cash_outflow' || normalizedMetricKey === 'attendance_present') {
+    return [
+      ...buildAssistantClarificationRows('analytics_window', language),
+      ...buildAssistantClarificationRows('analytics_metric', language),
+      ...buildAssistantMenuBackRow(language),
+    ]
+  }
+
+  return [
+    ...buildAssistantClarificationRows('analytics_metric', language),
+    ...buildAssistantClarificationRows('analytics_entity', language),
+    ...buildAssistantMenuBackRow(language),
+  ]
+}
+
+function buildCommandMenuReply(language = 'id', chatType = 'private') {
   const locale = getLocaleText(language)
+
+  if (normalizeText(chatType, '').toLowerCase() === 'private') {
+    return {
+      text: [locale.menuIntro, locale.menuHint].join('\n'),
+      replyMarkup: buildAssistantMainMenuReplyMarkup(language),
+      buttons: [],
+      needsClarification: false,
+      appendQuickActions: false,
+      facts: {
+        surface: 'command_menu',
+      },
+    }
+  }
 
   return {
     text: [locale.menuIntro, locale.menuHint].join('\n'),
@@ -4583,6 +5922,10 @@ function buildInlineKeyboardButton(botUsername, button) {
 }
 
 function buildReplyMarkup(botUsername, reply, plan = null) {
+  if (reply?.replyMarkup) {
+    return reply.replyMarkup
+  }
+
   const replyRows = Array.isArray(reply?.buttonRows) && reply.buttonRows.length > 0
     ? reply.buttonRows
     : Array.isArray(reply?.buttons)
@@ -4669,6 +6012,14 @@ async function processAssistantCommand({
   const directSearchRoutePath = resolveAssistantSearchRoutePath(commandArgs)
 
   if (command?.command === 'menu') {
+    const cleanedSessionPayload = stripAssistantSummaryMessageState(sessionPayload)
+
+    await cleanupAssistantSummaryMessages({
+      botToken,
+      chatId,
+      sessionPayload,
+    })
+
     if (chatId && telegramUserId) {
       await saveAssistantSession(adminClient, {
         chatId,
@@ -4676,11 +6027,11 @@ async function processAssistantCommand({
         teamId: selectedMembership?.team_id ?? session?.team_id ?? null,
         state: 'idle',
         pendingIntent: null,
-        pendingPayload: sessionPayload,
+        pendingPayload: cleanedSessionPayload,
       })
     }
 
-    const menuReply = buildCommandMenuReply(responseLanguage)
+    const menuReply = buildCommandMenuReply(responseLanguage, chatType)
 
     await sendTelegramMessage({
       botToken,
@@ -4693,6 +6044,24 @@ async function processAssistantCommand({
     })
 
     return { processed: true }
+  }
+
+  if (command?.command === 'analytics') {
+    const analyticsPlan = buildAnalyticsCommandPlan(commandArgs, responseLanguage, session)
+    const analyticsSourceText = commandInput || rawText
+
+    return sendAssistantAnalyticsReply({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId,
+      telegramUserId,
+      session,
+      sessionPayload,
+      selectedMembership,
+      plan: analyticsPlan,
+      sourceText: analyticsSourceText,
+    })
   }
 
   if (command?.command === 'tambah') {
@@ -4786,17 +6155,34 @@ async function processAssistantCommand({
     )
     const statusReply = buildStatusSummaryReply(responseLanguage, statusRows)
 
-    await sendTelegramMessage({
-      botToken,
-      chatId,
-      text: statusReply.text,
-      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), statusReply, {
-        language: responseLanguage,
-      }),
-      replyToMessageId,
+    const turnData = buildAssistantTurnData({
+      text: rawText,
+      plan: {
+        intent: 'status',
+        search: {},
+      },
+      language: responseLanguage,
+      workspaceName,
     })
 
-    return { processed: true }
+    return sendAssistantHybridSummaryReply({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId,
+      telegramUserId,
+      chatType,
+      session,
+      sessionPayload,
+      selectedMembership,
+      plan: {
+        intent: 'status',
+        language: responseLanguage,
+        search: {},
+      },
+      reply: statusReply,
+      turnData,
+    })
   }
 
   if (command?.command === 'riwayat' && !commandArgs) {
@@ -4808,17 +6194,56 @@ async function processAssistantCommand({
     )
     const historyReply = buildRiwayatSummaryReply(responseLanguage, historyRows)
 
-    await sendTelegramMessage({
-      botToken,
-      chatId,
-      text: historyReply.text,
-      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), historyReply, {
-        language: responseLanguage,
-      }),
-      replyToMessageId,
+    const turnData = buildAssistantTurnData({
+      text: rawText,
+      plan: {
+        intent: 'status',
+        search: {},
+      },
+      language: responseLanguage,
+      workspaceName,
     })
 
-    return { processed: true }
+    return sendAssistantHybridSummaryReply({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId,
+      telegramUserId,
+      chatType,
+      session,
+      sessionPayload,
+      selectedMembership,
+      plan: {
+        intent: 'status',
+        language: responseLanguage,
+        search: {},
+      },
+      reply: historyReply,
+      turnData,
+    })
+  }
+
+  const settlementBucketStatus = extractStatusFilter(commandArgs)
+
+  if (
+    (command?.command === 'status' || command?.command === 'riwayat') &&
+    settlementBucketStatus !== 'any'
+  ) {
+    return sendSettlementBucketSummaryReply({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId,
+      telegramUserId,
+      chatType,
+      session,
+      selectedMembership,
+      sessionPayload,
+      language: responseLanguage,
+      surface: command?.command === 'riwayat' ? 'history' : 'status',
+      bucketStatus: settlementBucketStatus,
+    })
   }
 
   if (command?.command === 'start') {
@@ -5079,6 +6504,30 @@ async function processTelegramMessage({
       chatType,
       rawText: effectiveText,
       command: explicitCommand,
+      session,
+      memberships,
+      forcedMembership,
+    })
+  }
+
+  const mainMenuCommand = resolveAssistantMenuCommandFromText(
+    effectiveText,
+    buildAssistantMenuCommandLabels(responseLanguage)
+  )
+
+  if (mainMenuCommand) {
+    return processAssistantCommand({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId,
+      telegramUserId,
+      chatType,
+      rawText: effectiveText,
+      command: {
+        command: mainMenuCommand,
+        args: '',
+      },
       session,
       memberships,
       forcedMembership,
@@ -5382,71 +6831,18 @@ async function processTelegramMessage({
   }
 
   if (normalizedPlan.intent === 'analytics') {
-    const analyticsReply = await buildAnalyticsReply(
+    return sendAssistantAnalyticsReply({
       adminClient,
-      selectedMembership.team_id,
-      normalizedPlan
-    )
-    const shouldFallbackToDm = shouldUseAssistantDmFallback({
-      chatType,
-      sessionState: session?.state,
-      needsClarification: analyticsReply.needsClarification,
-    })
-    if (shouldFallbackToDm) {
-      return sendAssistantDmHandoff({
-        adminClient,
-        botToken,
-        chatId,
-        replyToMessageId,
-        telegramUserId,
-        sessionPayload,
-        turnData,
-        language: normalizedPlan.language ?? responseLanguage,
-        teamId: selectedMembership.team_id,
-      })
-    }
-
-    const writtenText = await rewriteAssistantReply({
-      plan: normalizedPlan,
-      reply: analyticsReply,
-      workspaceName: selectedMembership.team_name,
-      session,
-    })
-
-    if (analyticsReply.needsClarification) {
-      await saveAssistantSession(adminClient, {
-        chatId,
-        telegramUserId,
-        teamId: selectedMembership.team_id,
-        state: 'awaiting_clarification',
-        pendingIntent: normalizedPlan.intent,
-        pendingPayload: buildPendingSessionPayload(
-          effectiveText,
-          normalizedPlan,
-          sessionPayload,
-          turnData
-        ),
-      })
-    } else {
-      await saveAssistantSession(adminClient, {
-        chatId,
-        telegramUserId,
-        teamId: selectedMembership.team_id,
-        state: 'idle',
-        pendingIntent: null,
-        pendingPayload: buildAssistantMemoryPayload(sessionPayload, turnData),
-      })
-    }
-
-    await sendTelegramMessage({
       botToken,
       chatId,
-      text: writtenText || analyticsReply.text,
-      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), analyticsReply, normalizedPlan),
       replyToMessageId,
+      telegramUserId,
+      session,
+      sessionPayload,
+      selectedMembership,
+      plan: normalizedPlan,
+      sourceText: effectiveText,
     })
-
-    return { processed: true }
   }
 
   const outstandingOnly =
@@ -5478,6 +6874,23 @@ async function processTelegramMessage({
       turnData,
       language: normalizedPlan.language ?? responseLanguage,
       teamId: selectedMembership.team_id,
+    })
+  }
+
+  if (normalizedPlan.intent === 'status') {
+    return sendAssistantHybridSummaryReply({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId,
+      telegramUserId,
+      chatType,
+      session,
+      sessionPayload,
+      selectedMembership,
+      plan: normalizedPlan,
+      reply,
+      turnData,
     })
   }
 
@@ -5570,6 +6983,45 @@ async function handleCallbackQuery({
     })
 
     return { processed: true }
+  }
+
+  if (callbackAction.type === 'settlement_summary') {
+    const selectedMembership =
+      activeMemberships.find((membership) => membership.team_id === session?.team_id) ??
+      activeMemberships.find((membership) => membership.is_default) ??
+      activeMemberships[0] ??
+      null
+
+    if (!selectedMembership) {
+      await answerTelegramCallback({
+        botToken,
+        callbackQueryId: callbackQuery.id,
+        text: getLocaleText(callbackLanguage).noActiveMembership,
+        showAlert: true,
+      })
+
+      return { processed: true }
+    }
+
+    await answerTelegramCallback({
+      botToken,
+      callbackQueryId: callbackQuery.id,
+    })
+
+    return sendSettlementBucketSummaryReply({
+      adminClient,
+      botToken,
+      chatId,
+      replyToMessageId: callbackQuery?.message?.message_id ?? null,
+      telegramUserId,
+      chatType,
+      session,
+      selectedMembership,
+      sessionPayload: session?.pending_payload ?? {},
+      language: callbackLanguage,
+      surface: callbackAction.surface,
+      bucketStatus: callbackAction.status,
+    })
   }
 
   if (callbackAction.type === 'workspace') {
@@ -5689,6 +7141,8 @@ async function processTelegramUpdate(adminClient, botToken, update) {
   }
 
   const session = await loadAssistantSession(adminClient, chatId)
+  const updateLanguage = getLocaleTemplate(getAssistantLanguageFromText(messageText, session))
+  const updateLocale = getLocaleText(updateLanguage)
 
   if (
     !shouldProcessTelegramMessage({
@@ -5696,6 +7150,7 @@ async function processTelegramUpdate(adminClient, botToken, update) {
       session,
       botUsername,
       messageText,
+      menuLabels: buildAssistantMenuCommandLabels(updateLanguage),
     })
   ) {
     return { processed: false }
@@ -5703,8 +7158,6 @@ async function processTelegramUpdate(adminClient, botToken, update) {
 
   const memberships = await loadActiveMemberships(adminClient, telegramUserId)
   const activeMemberships = memberships.filter((membership) => membership.team_is_active)
-  const updateLanguage = getLocaleTemplate(getAssistantLanguageFromText(messageText, session))
-  const updateLocale = getLocaleText(updateLanguage)
 
   if (activeMemberships.length === 0) {
     await clearAssistantSession(adminClient, chatId)
@@ -5812,14 +7265,26 @@ export {
   buildAssistantCommandInput,
   buildAssistantCommandRawText,
   buildAssistantMemoryPayload,
+  buildAssistantSummaryMessageState,
   buildAssistantResponseFactPacket,
   buildAssistantResponsePrompt,
+  buildAssistantMainMenuReplyMarkup,
   buildPendingSessionPayload,
   extractAssistantCommand,
   isAssistantResponseSafe,
+  getAssistantSummaryMessageState,
+  getTelegramMessageIdFromResponse,
   normalizeAssistantPendingPayload,
+  stripAssistantSummaryMessageState,
+  buildAnalyticsFollowUpRows,
   postAssistantModelPrompt,
   postAssistantWriterPrompt,
+  processAssistantCommand,
+  sendAssistantHybridSummaryReply,
   resolveAssistantCallbackAction,
   rewriteAssistantReply,
+  shouldProcessTelegramMessage,
+  buildStatusReply,
+  buildSettlementBucketReply,
+  buildSettlementBucketDetailReply,
 }

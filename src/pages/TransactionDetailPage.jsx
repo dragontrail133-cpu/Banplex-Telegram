@@ -46,6 +46,7 @@ import useAttendanceStore from '../store/useAttendanceStore'
 import useFileStore from '../store/useFileStore'
 import usePaymentStore from '../store/usePaymentStore'
 import useTransactionStore from '../store/useTransactionStore'
+import useMutationToast from '../hooks/useMutationToast'
 
 function isMaterialExpense(transaction) {
   const expenseType = String(transaction?.expense_type ?? '').trim().toLowerCase()
@@ -189,6 +190,7 @@ function TransactionDetailPage({ technicalView = false }) {
   const softDeleteAttendanceRecord = useAttendanceStore(
     (state) => state.softDeleteAttendanceRecord
   )
+  const { begin, fail, succeed } = useMutationToast()
   const initialTransaction = location.state?.transaction ?? null
   const isOwner = currentRole === 'Owner'
   const [transaction, setTransaction] = useState(initialTransaction)
@@ -483,6 +485,11 @@ function TransactionDetailPage({ technicalView = false }) {
     }
 
     try {
+      begin({
+        title: 'Menghapus transaksi',
+        message: 'Mohon tunggu sampai transaksi berpindah ke recycle bin.',
+      })
+
       setIsDeleting(true)
       setRecordError(null)
 
@@ -509,9 +516,18 @@ function TransactionDetailPage({ technicalView = false }) {
         ])
       }
 
+      succeed({
+        title: 'Transaksi dihapus',
+        message: 'Transaksi berhasil dipindahkan ke recycle bin.',
+      })
       navigate('/transactions/recycle-bin', { replace: true })
     } catch (error) {
-      setRecordError(error instanceof Error ? error.message : 'Gagal menghapus transaksi.')
+      const message = error instanceof Error ? error.message : 'Gagal menghapus transaksi.'
+
+      fail({
+        title: 'Transaksi gagal dihapus',
+        message,
+      })
     } finally {
       setIsDeleting(false)
       setIsDeleteDialogOpen(false)
@@ -769,6 +785,11 @@ function TransactionDetailPage({ technicalView = false }) {
     }
 
     try {
+      begin({
+        title: 'Menghapus pembayaran tagihan',
+        message: 'Mohon tunggu sampai pembayaran hilang dari daftar.',
+      })
+
       setRecordError(null)
       await deleteBillPayment({
         paymentId: payment.id,
@@ -776,8 +797,18 @@ function TransactionDetailPage({ technicalView = false }) {
         expectedUpdatedAt: payment.updatedAt ?? payment.updated_at ?? null,
       })
       setDetailRefreshKey((currentValue) => currentValue + 1)
+      succeed({
+        title: 'Pembayaran tagihan dihapus',
+        message: 'Pembayaran berhasil dihapus.',
+      })
     } catch (error) {
-      setRecordError(error instanceof Error ? error.message : 'Gagal menghapus pembayaran tagihan.')
+      const message =
+        error instanceof Error ? error.message : 'Gagal menghapus pembayaran tagihan.'
+
+      fail({
+        title: 'Pembayaran tagihan gagal dihapus',
+        message,
+      })
     }
   }
 
@@ -787,6 +818,11 @@ function TransactionDetailPage({ technicalView = false }) {
     }
 
     try {
+      begin({
+        title: 'Menghapus pembayaran pinjaman',
+        message: 'Mohon tunggu sampai pembayaran hilang dari daftar.',
+      })
+
       setRecordError(null)
       await deleteLoanPayment({
         paymentId: payment.id,
@@ -794,8 +830,18 @@ function TransactionDetailPage({ technicalView = false }) {
         expectedUpdatedAt: payment.updatedAt ?? payment.updated_at ?? null,
       })
       setDetailRefreshKey((currentValue) => currentValue + 1)
+      succeed({
+        title: 'Pembayaran pinjaman dihapus',
+        message: 'Pembayaran berhasil dihapus.',
+      })
     } catch (error) {
-      setRecordError(error instanceof Error ? error.message : 'Gagal menghapus pembayaran pinjaman.')
+      const message =
+        error instanceof Error ? error.message : 'Gagal menghapus pembayaran pinjaman.'
+
+      fail({
+        title: 'Pembayaran pinjaman gagal dihapus',
+        message,
+      })
     }
   }
 
@@ -824,6 +870,11 @@ function TransactionDetailPage({ technicalView = false }) {
     }
 
     try {
+      begin({
+        title: 'Menyimpan metadata lampiran',
+        message: 'Mohon tunggu sampai nama file tersimpan.',
+      })
+
       setAttachmentError(null)
       await updateFileAssetMetadata(fileAsset.id, {
         file_name: editingAttachmentName.trim(),
@@ -832,8 +883,17 @@ function TransactionDetailPage({ technicalView = false }) {
       setEditingAttachmentId(null)
       setEditingAttachmentName('')
       setDetailRefreshKey((currentValue) => currentValue + 1)
+      succeed({
+        title: 'Metadata lampiran tersimpan',
+        message: 'Nama file lampiran berhasil diperbarui.',
+      })
     } catch (error) {
-      setAttachmentError(error instanceof Error ? error.message : 'Gagal memperbarui lampiran.')
+      const message = error instanceof Error ? error.message : 'Gagal memperbarui lampiran.'
+
+      fail({
+        title: 'Metadata lampiran gagal diperbarui',
+        message,
+      })
     }
   }
 
@@ -843,11 +903,25 @@ function TransactionDetailPage({ technicalView = false }) {
     }
 
     try {
+      begin({
+        title: 'Menghapus lampiran',
+        message: 'Mohon tunggu sampai lampiran hilang dari daftar.',
+      })
+
       setAttachmentError(null)
       await softDeleteExpenseAttachment(attachment.id, currentTeamId ?? transaction?.team_id)
       setDetailRefreshKey((currentValue) => currentValue + 1)
+      succeed({
+        title: 'Lampiran dihapus',
+        message: 'Lampiran berhasil dihapus.',
+      })
     } catch (error) {
-      setAttachmentError(error instanceof Error ? error.message : 'Gagal menghapus lampiran.')
+      const message = error instanceof Error ? error.message : 'Gagal menghapus lampiran.'
+
+      fail({
+        title: 'Lampiran gagal dihapus',
+        message,
+      })
     }
   }
 

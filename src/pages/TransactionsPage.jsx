@@ -45,6 +45,7 @@ import {
   hasTransactionPaymentHistory,
 } from '../lib/transaction-delete'
 import { logPerf, nowMs, roundMs } from '../lib/timing'
+import useMutationToast from '../hooks/useMutationToast'
 import { fetchWorkspaceTransactionPageFromApi } from '../lib/transactions-api'
 import BillsPage from './BillsPage'
 import { HistoryWorkspace } from './HistoryPage'
@@ -190,6 +191,8 @@ function TransactionsPage() {
   const [pendingDeleteTransaction, setPendingDeleteTransaction] = useState(null)
   const [pendingDeleteHistoryRoute, setPendingDeleteHistoryRoute] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const showInlineMutationFeedback = false
+  const { begin, clear, fail, succeed } = useMutationToast()
   const ledgerTab = useMemo(() => {
     const tab = new URLSearchParams(location.search).get('tab')
 
@@ -242,6 +245,7 @@ function TransactionsPage() {
       </div>
     )
   }, [filter, isSearchExpanded, ledgerTab, navigate, searchTerm])
+  useEffect(() => () => clear(), [clear])
   const warmWorkspaceSeed = useMemo(() => {
     const hasRestoredLedger = Boolean(restoredLedgerState?.hasLoaded)
     const shouldUseWarmSeed =
@@ -641,6 +645,11 @@ function TransactionsPage() {
     }
 
     try {
+      begin({
+        title: 'Menghapus transaksi',
+        message: 'Mohon tunggu sampai daftar jurnal diperbarui.',
+      })
+
       setIsDeleting(true)
       setActionError(null)
 
@@ -680,10 +689,19 @@ function TransactionsPage() {
           console.error('Gagal menyinkronkan transaksi workspace:', error)
         })
       }
+
+      succeed({
+        title: 'Transaksi dihapus',
+        message: 'Transaksi berhasil dipindahkan ke arsip.',
+      })
     } catch (deleteError) {
       const message =
         deleteError instanceof Error ? deleteError.message : 'Gagal menghapus mutasi.'
 
+      fail({
+        title: 'Transaksi gagal dihapus',
+        message,
+      })
       setActionError(message)
     } finally {
       setIsDeleting(false)
@@ -763,7 +781,7 @@ function TransactionsPage() {
             </AppCardDashed>
           ) : null}
 
-          {actionError ? (
+          {showInlineMutationFeedback && actionError ? (
             <AppCardDashed>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--app-destructive-color)]">
                 Aksi Transaksi Gagal

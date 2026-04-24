@@ -12,6 +12,7 @@ import {
   PageShell,
   AppTechnicalGrid,
 } from '../components/ui/AppPrimitives'
+import useMutationToast from '../hooks/useMutationToast'
 import { getAppTodayKey } from '../lib/date-time'
 import useAuthStore from '../store/useAuthStore'
 import useBillStore from '../store/useBillStore'
@@ -158,6 +159,7 @@ function PaymentPage({ paymentType = 'bill', technicalView = false }) {
   const isSubmitting = usePaymentStore((state) => state.isSubmitting)
   const error = usePaymentStore((state) => state.error)
   const clearError = usePaymentStore((state) => state.clearError)
+  const { begin, fail, succeed } = useMutationToast()
   const [record, setRecord] = useState(() => initialRecord)
   const [detailError, setDetailError] = useState(null)
   const [isLoadingRecord, setIsLoadingRecord] = useState(() => Boolean(id))
@@ -205,7 +207,7 @@ function PaymentPage({ paymentType = 'bill', technicalView = false }) {
   const formId = 'payment-form'
   const userName = getUserDisplayName(null, authUser)
   const remainingAmount = getRemainingAmount(displayRecord)
-  const combinedError = error ?? detailError
+  const combinedError = detailError
   const technicalRoute = isLoanPayment
     ? `/loan-payment/${id}/technical`
     : `/payment/${id}/technical`
@@ -296,7 +298,7 @@ function PaymentPage({ paymentType = 'bill', technicalView = false }) {
       [name]: value,
     }))
 
-    if (combinedError) {
+    if (detailError || error) {
       clearError()
       setDetailError(null)
     }
@@ -310,6 +312,11 @@ function PaymentPage({ paymentType = 'bill', technicalView = false }) {
     }
 
     try {
+      begin({
+        title: isLoanPayment ? 'Menyimpan pembayaran pinjaman' : 'Menyimpan pembayaran tagihan',
+        message: 'Mohon tunggu sampai pembayaran selesai diproses.',
+      })
+
       if (isLoanPayment) {
         await submitLoanPayment({
           loan_id: record.id,
@@ -340,15 +347,27 @@ function PaymentPage({ paymentType = 'bill', technicalView = false }) {
       }
 
       if (returnToOnSuccess) {
+        succeed({
+          title: 'Pembayaran tersimpan',
+          message: 'Pembayaran berhasil dicatat.',
+        })
         navigate(backRoute, { replace: true })
         return
       }
 
       await reloadRecord()
+      succeed({
+        title: 'Pembayaran tersimpan',
+        message: 'Pembayaran berhasil dicatat.',
+      })
     } catch (submitError) {
-      setDetailError(
+      const message =
         submitError instanceof Error ? submitError.message : 'Gagal menyimpan pembayaran.'
-      )
+
+      fail({
+        title: 'Pembayaran gagal disimpan',
+        message,
+      })
     }
   }
 

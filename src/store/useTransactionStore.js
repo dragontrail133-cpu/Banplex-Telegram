@@ -18,7 +18,6 @@ import {
   updateExpenseFromApi,
   updateMaterialInvoiceFromApi,
 } from '../lib/records-api'
-import useToastStore from './useToastStore'
 
 async function notifyTelegram(payload) {
   const response = await fetch('/api/notify', {
@@ -37,10 +36,6 @@ async function notifyTelegram(payload) {
   }
 
   return result
-}
-
-function showToast(toast) {
-  useToastStore.getState().showToast(toast)
 }
 
 function normalizeText(value, fallback = null) {
@@ -346,30 +341,15 @@ const useTransactionStore = create((set) => ({
         )
       ).catch((notifyError) => {
         console.error('Gagal memanggil endpoint notifikasi Telegram:', notifyError)
-        showToast({
-          tone: 'warning',
-          title: 'Notifikasi transaksi',
-          message: 'Pengeluaran tersimpan, tetapi notifikasi Telegram gagal dikirim.',
-        })
       })
 
       set({ error: null })
-      showToast({
-        tone: 'success',
-        title: 'Pengeluaran tersimpan',
-        message: 'Pengeluaran berhasil dicatat.',
-      })
 
       return apiExpense
     } catch (error) {
       const normalizedError = toError(error)
 
       set({ error: normalizedError.message })
-      showToast({
-        tone: 'error',
-        title: 'Pengeluaran gagal disimpan',
-        message: normalizedError.message,
-      })
 
       throw normalizedError
     } finally {
@@ -476,22 +456,12 @@ const useTransactionStore = create((set) => ({
       }
 
       set({ error: null })
-      showToast({
-        tone: 'success',
-        title: 'Pengeluaran diperbarui',
-        message: 'Perubahan pengeluaran berhasil disimpan.',
-      })
 
       return apiExpense
     } catch (error) {
       const normalizedError = toError(error)
 
       set({ error: normalizedError.message })
-      showToast({
-        tone: 'error',
-        title: 'Pengeluaran gagal diperbarui',
-        message: normalizedError.message,
-      })
 
       throw normalizedError
     } finally {
@@ -536,11 +506,6 @@ const useTransactionStore = create((set) => ({
       }
 
       set({ error: null })
-      showToast({
-        tone: 'success',
-        title: 'Faktur material diperbarui',
-        message: 'Perubahan faktur material berhasil disimpan.',
-      })
 
       return {
         ...result.expense,
@@ -550,11 +515,6 @@ const useTransactionStore = create((set) => ({
       const normalizedError = toError(error)
 
       set({ error: normalizedError.message })
-      showToast({
-        tone: 'error',
-        title: 'Faktur material gagal diperbarui',
-        message: normalizedError.message,
-      })
 
       throw normalizedError
     } finally {
@@ -640,19 +600,9 @@ const useTransactionStore = create((set) => ({
         )
       ).catch((notifyError) => {
         console.error('Gagal memanggil endpoint notifikasi Telegram:', notifyError)
-        showToast({
-          tone: 'warning',
-          title: 'Notifikasi faktur material',
-          message: 'Faktur material tersimpan, tetapi notifikasi Telegram gagal dikirim.',
-        })
       })
 
       set({ error: null })
-      showToast({
-        tone: 'success',
-        title: 'Faktur material tersimpan',
-        message: 'Faktur material berhasil dicatat.',
-      })
 
       return {
         ...result.expense,
@@ -662,11 +612,6 @@ const useTransactionStore = create((set) => ({
       const normalizedError = toError(error)
 
       set({ error: normalizedError.message })
-      showToast({
-        tone: 'error',
-        title: 'Faktur material gagal disimpan',
-        message: normalizedError.message,
-      })
 
       throw normalizedError
     } finally {

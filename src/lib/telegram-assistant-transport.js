@@ -85,17 +85,37 @@ function isIgnorableTelegramCallbackError(errorMessage) {
   )
 }
 
+function isIgnorableTelegramMessageEditError(errorMessage) {
+  const normalizedMessage = normalizeText(errorMessage, '').toLowerCase()
+
+  return normalizedMessage.includes('message is not modified')
+}
+
+function isIgnorableTelegramMessageDeleteError(errorMessage) {
+  const normalizedMessage = normalizeText(errorMessage, '').toLowerCase()
+
+  return (
+    normalizedMessage.includes('message to delete not found') ||
+    normalizedMessage.includes("message can't be deleted")
+  )
+}
+
 async function sendTelegramMessage({
   botToken,
   chatId,
   text,
   replyMarkup = null,
   replyToMessageId = null,
+  parseMode = null,
 }) {
   const payload = {
     chat_id: chatId,
     text,
     disable_web_page_preview: true,
+  }
+
+  if (parseMode) {
+    payload.parse_mode = parseMode
   }
 
   if (replyMarkup) {
@@ -132,6 +152,97 @@ async function sendTelegramMessage({
 
     throw error
   }
+
+  return response.data
+}
+
+async function editTelegramMessageText({
+  botToken,
+  chatId,
+  messageId,
+  text,
+  replyMarkup = null,
+  parseMode = null,
+}) {
+  const payload = {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    disable_web_page_preview: true,
+  }
+
+  if (parseMode) {
+    payload.parse_mode = parseMode
+  }
+
+  if (replyMarkup) {
+    payload.reply_markup = replyMarkup
+  }
+
+  const response = await postTelegram(
+    buildTelegramApiUrl(botToken, 'editMessageText'),
+    JSON.stringify(payload)
+  )
+
+  try {
+    assertTelegramSuccess(response, 'Gagal mengedit pesan Telegram.')
+  } catch (error) {
+    const errorMessage = normalizeText(error?.message, '')
+
+    if (isIgnorableTelegramMessageEditError(errorMessage)) {
+      return {
+        ok: true,
+        result: {
+          message_id: messageId,
+        },
+        unchanged: true,
+      }
+    }
+
+    throw error
+  }
+
+  return response.data
+}
+
+async function deleteTelegramMessage({ botToken, chatId, messageId }) {
+  const payload = {
+    chat_id: chatId,
+    message_id: messageId,
+  }
+
+  const response = await postTelegram(
+    buildTelegramApiUrl(botToken, 'deleteMessage'),
+    JSON.stringify(payload)
+  )
+
+  try {
+    assertTelegramSuccess(response, 'Gagal menghapus pesan Telegram.')
+  } catch (error) {
+    const errorMessage = normalizeText(error?.message, '')
+
+    if (isIgnorableTelegramMessageDeleteError(errorMessage)) {
+      return null
+    }
+
+    throw error
+  }
+
+  return response.data
+}
+
+async function sendTelegramChatAction({ botToken, chatId, action = 'typing' }) {
+  const payload = {
+    chat_id: chatId,
+    action,
+  }
+
+  const response = await postTelegram(
+    buildTelegramApiUrl(botToken, 'sendChatAction'),
+    JSON.stringify(payload)
+  )
+
+  assertTelegramSuccess(response, 'Gagal mengirim chat action Telegram.')
 
   return response.data
 }
@@ -180,7 +291,12 @@ export {
   answerTelegramCallback,
   assertTelegramSuccess,
   buildTelegramApiUrl,
+  deleteTelegramMessage,
+  editTelegramMessageText,
   isIgnorableTelegramCallbackError,
+  isIgnorableTelegramMessageDeleteError,
+  isIgnorableTelegramMessageEditError,
   postTelegram,
   sendTelegramMessage,
+  sendTelegramChatAction,
 }

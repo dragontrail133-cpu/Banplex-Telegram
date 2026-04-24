@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react'
 import useAuthStore from '../store/useAuthStore'
 import usePaymentStore from '../store/usePaymentStore'
 import { getAppTodayKey } from '../lib/date-time'
+import useMutationToast from '../hooks/useMutationToast'
 import {
   AppButton,
   AppCard,
   AppCardStrong,
   AppDialog,
-  AppErrorState,
   AppNominalInput,
   AppInput,
   AppTextarea,
@@ -41,6 +41,7 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
   const isSubmitting = usePaymentStore((state) => state.isSubmitting)
   const error = usePaymentStore((state) => state.error)
   const clearError = usePaymentStore((state) => state.clearError)
+  const { begin, clear, fail, succeed } = useMutationToast()
   const formId = 'payment-modal-form'
 
   useEffect(() => {
@@ -48,6 +49,7 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
   }, [bill])
 
   useEffect(() => () => clearError(), [clearError])
+  useEffect(() => () => clear(), [clear])
 
   if (!bill) {
     return null
@@ -69,6 +71,11 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
   const handleSubmit = async (event) => {
     event.preventDefault()
 
+    begin({
+      title: 'Menyimpan pembayaran',
+      message: 'Mohon tunggu sampai pembayaran selesai diproses.',
+    })
+
     try {
       await submitBillPayment({
         bill_id: bill.id,
@@ -88,7 +95,19 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
       })
 
       onClose()
+
+      succeed({
+        title: 'Pembayaran tagihan tersimpan',
+        message: 'Pembayaran tagihan berhasil dicatat.',
+      })
     } catch (submitError) {
+      fail({
+        title: 'Pembayaran tagihan gagal',
+        message:
+          submitError instanceof Error
+            ? submitError.message
+            : 'Gagal menyimpan pembayaran.',
+      })
       console.error('Gagal menyimpan pembayaran:', submitError)
     }
   }
@@ -107,7 +126,7 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
             type="submit"
             variant="primary"
           >
-            {isSubmitting ? 'Menyimpan...' : 'Simpan Pembayaran'}
+            Simpan Pembayaran
           </AppButton>
         </div>
       }
@@ -189,13 +208,6 @@ function PaymentModal({ bill, onClose, userName = 'Pengguna Telegram' }) {
               value={formData.notes}
             />
           </label>
-
-          {error ? (
-            <AppErrorState
-              title="Pembayaran belum tersimpan"
-              description={error}
-            />
-          ) : null}
         </form>
       </div>
     </AppDialog>

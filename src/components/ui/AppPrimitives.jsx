@@ -494,7 +494,7 @@ function FormActionBar({
         form={formId}
         type="submit"
       >
-        {isSubmitting ? 'Menyimpan...' : actionLabel}
+        {actionLabel}
       </AppButton>
     </div>
   )
@@ -623,6 +623,8 @@ function OverlayPanel({
   footer = null,
   placement = 'bottom',
   maxWidth = 'md',
+  maxHeightClassName = 'max-h-[calc(100dvh-1rem)]',
+  contentClassName = null,
   className = '',
 }) {
   const isKeyboardVisible = useMobileKeyboardVisible()
@@ -700,7 +702,8 @@ function OverlayPanel({
                 : undefined
             }
             className={joinClasses(
-              'app-card-strong relative flex w-full max-h-[calc(100dvh-1rem)] flex-col overflow-hidden',
+              'app-card-strong relative flex w-full flex-col overflow-hidden',
+              maxHeightClassName,
               widthClassName,
               isBottomPlacement ? 'sm:rounded-[28px]' : 'rounded-[28px]',
               className
@@ -733,7 +736,8 @@ function OverlayPanel({
 
             <div
               className={joinClasses(
-                'min-h-0 flex-1 overflow-y-auto px-4 py-4',
+                'min-h-0 flex-1 overflow-y-auto',
+                contentClassName ?? 'px-4 py-4',
                 hasFooter ? 'pb-[calc(max(5.25rem,env(safe-area-inset-bottom))+0.5rem)]' : ''
               )}
             >

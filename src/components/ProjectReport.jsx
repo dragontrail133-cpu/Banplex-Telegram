@@ -7,10 +7,11 @@ import {
   FileText,
   RefreshCcw,
   Receipt,
-  SlidersHorizontal,
   Send,
+  SlidersHorizontal,
   WalletCards,
 } from 'lucide-react'
+import MasterPickerField from './ui/MasterPickerField'
 import useAuthStore from '../store/useAuthStore'
 import useReportStore from '../store/useReportStore'
 import useMasterStore from '../store/useMasterStore'
@@ -35,7 +36,6 @@ import {
   AppListRow,
   AppSelect,
   AppSheet,
-  AppToggleGroup,
   PageShell,
   SectionHeader,
 } from './ui/AppPrimitives'
@@ -285,6 +285,21 @@ function ProjectReport() {
       : selectedPartyType === 'worker'
         ? workers
         : fundingCreditors
+  const selectedPartyPickerOptions = useMemo(
+    () =>
+      selectedPartyOptions.map((party) => {
+        const label = getPartyStatementPartyLabel(selectedPartyType, party)
+
+        return {
+          value: String(party.id ?? '').trim(),
+          label,
+          searchText: [label, party?.name, party?.supplier_name, party?.worker_name, party?.creditor_name]
+            .filter(Boolean)
+            .join(' '),
+        }
+      }),
+    [selectedPartyOptions, selectedPartyType]
+  )
   const selectedPartySummary = useMemo(
     () =>
       selectedPartyOptions.find(
@@ -308,10 +323,6 @@ function ProjectReport() {
     !isReportLoading &&
     hasSelectedProject &&
     hasSelectedParty
-  const reportTabOptions = useMemo(
-    () => REPORT_KIND_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
-    []
-  )
   const filterSheetDescription =
     reportKind === 'project_pl'
       ? 'Atur periode dan Unit Kerja yang ingin ditampilkan.'
@@ -344,13 +355,17 @@ function ProjectReport() {
   return (
     <PageShell className="space-y-4">
       <AppCardStrong className="space-y-4 p-4 sm:p-5">
-        <AppToggleGroup
-          buttonSize="sm"
-          className="space-y-2"
-          compact
-          options={reportTabOptions}
-          onChange={setReportKind}
+        <MasterPickerField
+          label="Mode laporan"
+          placeholder="Pilih mode laporan"
+          searchable={false}
+          sheetDescription="Pilih ringkasan, statement, atau arus kas yang ingin dibuka."
+          sheetContentClassName="px-4 pt-6 pb-5"
+          title="Mode laporan"
           value={reportKind}
+          options={REPORT_KIND_OPTIONS}
+          optionColumns={2}
+          onChange={setReportKind}
         />
 
         <div className="space-y-3 rounded-[24px] border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] p-3">
@@ -478,33 +493,57 @@ function ProjectReport() {
           ) : reportKind === 'supplier_statement' ||
             reportKind === 'worker_statement' ||
             reportKind === 'creditor_statement' ? (
-            <label className="space-y-2">
-              <span className="app-meta">
-                {selectedPartyType === 'supplier'
+            <MasterPickerField
+              disabled={isReportLoading || selectedPartyPickerOptions.length === 0}
+              emptyMessage={
+                selectedPartyType === 'supplier'
+                  ? 'Supplier belum tersedia.'
+                  : selectedPartyType === 'worker'
+                    ? 'Pekerja belum tersedia.'
+                    : 'Kreditur belum tersedia.'
+              }
+              label={
+                selectedPartyType === 'supplier'
                   ? 'Pilih Supplier'
                   : selectedPartyType === 'worker'
                     ? 'Pilih Pekerja'
-                    : 'Pilih Kreditur'}
-              </span>
-              <AppSelect
-                disabled={isReportLoading || selectedPartyOptions.length === 0}
-                onChange={(event) => setSelectedPartyId(event.target.value)}
-                value={selectedPartyId}
-              >
-                <option value="">
-                  {selectedPartyType === 'supplier'
-                    ? 'Pilih Supplier'
-                    : selectedPartyType === 'worker'
-                      ? 'Pilih Pekerja'
-                      : 'Pilih Kreditur'}
-                </option>
-                {selectedPartyOptions.map((party) => (
-                  <option key={party.id} value={party.id}>
-                    {getPartyStatementPartyLabel(selectedPartyType, party)}
-                  </option>
-                ))}
-              </AppSelect>
-            </label>
+                    : 'Pilih Kreditur'
+              }
+              options={selectedPartyPickerOptions}
+              onChange={setSelectedPartyId}
+              placeholder={
+                selectedPartyType === 'supplier'
+                  ? 'Pilih Supplier'
+                  : selectedPartyType === 'worker'
+                    ? 'Pilih Pekerja'
+                    : 'Pilih Kreditur'
+              }
+              searchPlaceholder={
+                selectedPartyType === 'supplier'
+                  ? 'Cari supplier...'
+                  : selectedPartyType === 'worker'
+                    ? 'Cari pekerja...'
+                    : 'Cari kreditur...'
+              }
+              searchable
+              sheetContentClassName="px-4 pt-6 pb-5"
+              sheetDescription={
+                selectedPartyType === 'supplier'
+                  ? 'Cari dan pilih supplier yang ingin difilter.'
+                  : selectedPartyType === 'worker'
+                    ? 'Cari dan pilih pekerja yang ingin difilter.'
+                    : 'Cari dan pilih kreditur yang ingin difilter.'
+              }
+              sheetMaxHeightClassName="max-h-[calc(100dvh-8rem)]"
+              title={
+                selectedPartyType === 'supplier'
+                  ? 'Pilih Supplier'
+                  : selectedPartyType === 'worker'
+                    ? 'Pilih Pekerja'
+                    : 'Pilih Kreditur'
+              }
+              value={selectedPartyId}
+            />
           ) : null}
         </div>
       </AppSheet>

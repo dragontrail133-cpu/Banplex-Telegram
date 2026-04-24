@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import useTelegram from '../hooks/useTelegram'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
 import useTransactionStore from '../store/useTransactionStore'
 import { getAppTodayKey } from '../lib/date-time'
+import useMutationToast from '../hooks/useMutationToast'
 import ExpenseAttachmentSection from './ExpenseAttachmentSection'
 import FormLayout from './layouts/FormLayout'
 import { supplierTypeGroups } from './master/masterTabs'
@@ -189,6 +190,8 @@ function MaterialInvoiceForm({
   const [savedExpenseId, setSavedExpenseId] = useState(
     recordId ?? initialData?.id ?? null
   )
+  const [attachmentResetRequestId, setAttachmentResetRequestId] = useState(null)
+  const skipNextDraftWriteRef = useRef(false)
   const { user } = useTelegram()
   const authUser = useAuthStore((state) => state.user)
   const projects = useMasterStore((state) => state.projects)
@@ -207,9 +210,11 @@ function MaterialInvoiceForm({
   const isSubmitting = useTransactionStore((state) => state.isSubmitting)
   const error = useTransactionStore((state) => state.error)
   const clearError = useTransactionStore((state) => state.clearError)
+  const { begin, clear, fail, succeed } = useMutationToast()
   const totalAmount = items.reduce((sum, item) => sum + getLineTotal(item), 0)
   const isDeliveryOrder = header.documentType === 'surat_jalan'
   const isEditMode = Boolean(recordId ?? initialData?.id)
+  const isCreateMode = !isEditMode
   const hasBillPaymentHistory = Number(initialData?.bill?.paidAmount ?? initialData?.bill?.paid_amount ?? 0) > 0
   const isLocked = Boolean(initialData?.deleted_at) || hasBillPaymentHistory
   const activeExpenseId = savedExpenseId ?? recordId ?? initialData?.id ?? null
@@ -275,6 +280,39 @@ function MaterialInvoiceForm({
     materials.length > 0 &&
     availableMaterialSuppliers.length > 0
 
+  const handleAttachmentResetSettled = useCallback(
+    async (requestId) => {
+      if (!isCreateMode || !requestId || requestId !== attachmentResetRequestId) {
+        return
+      }
+
+      setAttachmentResetRequestId(null)
+      clearMaterialInvoiceDraft(draftKey)
+      skipNextDraftWriteRef.current = true
+      setHeader(createInitialHeader(initialData))
+      setItems(createInitialItems(initialData))
+      setSavedExpenseId(null)
+
+      try {
+        if (typeof onSuccess === 'function') {
+          await onSuccess()
+        }
+      } catch (refreshError) {
+        console.error('Gagal memproses hasil simpan form:', refreshError)
+      }
+
+      if (typeof onClose === 'function') {
+        await onClose()
+      }
+
+      succeed({
+        title: 'Faktur material tersimpan',
+        message: 'Faktur material berhasil dicatat.',
+      })
+    },
+    [attachmentResetRequestId, draftKey, initialData, isCreateMode, onClose, onSuccess, succeed]
+  )
+
   useEffect(() => {
     fetchMasters().catch((fetchError) => {
       console.error('Gagal memuat master data faktur material:', fetchError)
@@ -283,6 +321,11 @@ function MaterialInvoiceForm({
 
   useEffect(() => {
     if (isEditMode) {
+      return
+    }
+
+    if (skipNextDraftWriteRef.current) {
+      skipNextDraftWriteRef.current = false
       return
     }
 
@@ -295,6 +338,7 @@ function MaterialInvoiceForm({
   }, [draftKey, header, items, isEditMode])
 
   useEffect(() => () => clearError(), [clearError])
+  useEffect(() => () => clear(), [clear])
 
   const setHeaderField = (field, value) => {
     setHeader((current) => ({
@@ -353,7 +397,7 @@ function MaterialInvoiceForm({
   const handleSubmit = async (event) => {
     event.preventDefault()
 
-    if (isSubmitting || !isMasterDataReady || isLocked) {
+    if (isSubmitting || !isMasterDataReady || isLocked || (isCreateMode && attachmentResetRequestId)) {
       return
     }
 
@@ -410,6 +454,11 @@ function MaterialInvoiceForm({
         ),
       }
 
+      begin({
+        title: isEditMode ? 'Memperbarui faktur material' : 'Menyimpan faktur material',
+        message: 'Mohon tunggu sampai proses selesai.',
+      })
+
       const nextExpenseId = isEditMode
         ? await updateMaterialInvoice(recordId ?? initialData?.id, {
           headerData: headerPayload,
@@ -419,8 +468,9 @@ function MaterialInvoiceForm({
 
       setSavedExpenseId(nextExpenseId?.id ?? recordId ?? initialData?.id ?? null)
 
-      if (!isEditMode) {
-        clearMaterialInvoiceDraft(draftKey)
+      if (!isEditMode && nextExpenseId?.id) {
+        setAttachmentResetRequestId(nextExpenseId.id)
+        return
       }
 
       setHeader(createInitialHeader(initialData))
@@ -432,12 +482,23 @@ function MaterialInvoiceForm({
       if (typeof onClose === 'function') {
         await onClose()
       }
+
+      succeed({
+        title: isEditMode ? 'Faktur material diperbarui' : 'Faktur material tersimpan',
+        message: isEditMode
+          ? 'Perubahan faktur material berhasil disimpan.'
+          : 'Faktur material berhasil dicatat.',
+      })
     } catch (submitError) {
       const message =
         submitError instanceof Error
           ? submitError.message
           : 'Gagal menyimpan faktur material.'
 
+      fail({
+        title: isEditMode ? 'Faktur material gagal diperbarui' : 'Faktur material gagal disimpan',
+        message,
+      })
       console.error(message)
     }
   }
@@ -467,7 +528,9 @@ function MaterialInvoiceForm({
               description: 'Ringkasan, lampiran aktif, dan aksi simpan final.',
             },
           ]}
-          submitDisabled={!isMasterDataReady || isLocked}
+          submitDisabled={
+            !isMasterDataReady || isLocked || (isCreateMode && Boolean(attachmentResetRequestId))
+          }
         >
           {hasBillPaymentHistory ? (
             <AppErrorState
@@ -751,8 +814,10 @@ function MaterialInvoiceForm({
             ) : null}
 
             <ExpenseAttachmentSection
+              attachmentResetRequestId={isCreateMode ? attachmentResetRequestId : null}
               deferUploadUntilParentSaved
               expenseId={activeExpenseId}
+              onAttachmentResetSettled={isCreateMode ? handleAttachmentResetSettled : null}
               title="Lampiran Bukti"
             />
           </FormSection>

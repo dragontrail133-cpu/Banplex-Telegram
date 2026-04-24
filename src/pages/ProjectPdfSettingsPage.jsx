@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Trash2, Upload } from 'lucide-react'
-import { Navigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import FormLayout from '../components/layouts/FormLayout'
 import BrandLoader from '../components/ui/BrandLoader'
 import useAuthStore from '../store/useAuthStore'
@@ -15,6 +15,8 @@ import {
   AppInput,
   AppTextarea,
   FormSection,
+  PageHeader,
+  PageShell,
 } from '../components/ui/AppPrimitives'
 import { createPdfSettingsDraft, normalizePdfColor, serializePdfSettingsDraft } from '../lib/business-report'
 
@@ -303,48 +305,60 @@ export function ProjectPdfSettingsSection() {
         <AppErrorState title="Pengaturan PDF gagal diproses" description={pdfSettingsError} />
       ) : null}
 
-      <FormSection eyebrow="Pelaporan" title="Pengaturan PDF" description="Atur identitas laporan, warna utama, dan logo yang dipakai saat PDF diunduh.">
-        {isPdfSettingsLoading && !pdfSettings ? (
-          <div className="grid min-h-[16rem] place-items-center px-4 text-center">
-            <div className="flex flex-col items-center gap-5">
-              <BrandLoader context="form" size="hero" />
-              <div className="space-y-2">
-                <h2 className="text-xl font-bold tracking-[-0.03em] text-[var(--app-text-color)]">
-                  Memuat pengaturan PDF
-                </h2>
-                <p className="max-w-[20rem] text-sm leading-6 text-[var(--app-hint-color)]">
-                  Menyiapkan branding laporan.
-                </p>
-              </div>
+      {isPdfSettingsLoading && !pdfSettings ? (
+        <div className="grid min-h-[16rem] place-items-center px-4 text-center">
+          <div className="flex flex-col items-center gap-5">
+            <BrandLoader context="form" size="hero" />
+            <div className="space-y-2">
+              <h2 className="text-xl font-bold tracking-[-0.03em] text-[var(--app-text-color)]">
+                Memuat pengaturan PDF
+              </h2>
+              <p className="max-w-[20rem] text-sm leading-6 text-[var(--app-hint-color)]">
+                Menyiapkan branding laporan.
+              </p>
             </div>
           </div>
-        ) : (
-          <FormLayout
-            embedded
-            actionLabel="Simpan Pengaturan"
+        </div>
+      ) : (
+        <FormLayout
+          embedded
+          actionLabel="Simpan Pengaturan"
+          formId={formId}
+          isSubmitting={isBusy}
+          submitDisabled={!currentTeamId}
+        >
+          <ProjectPdfSettingsForm
+            key={settingsRevisionKey}
+            currentTeamId={currentTeamId}
+            currentUser={currentUser}
             formId={formId}
-            isSubmitting={isBusy}
-            submitDisabled={!currentTeamId}
-          >
-            <ProjectPdfSettingsForm
-              key={settingsRevisionKey}
-              currentTeamId={currentTeamId}
-              currentUser={currentUser}
-              formId={formId}
-              initialPdfSettings={pdfSettings}
-              isBusy={isBusy}
-              onSave={savePdfSettings}
-              onUploadLogo={uploadAndRegisterFile}
-            />
-          </FormLayout>
-        )}
-      </FormSection>
+            initialPdfSettings={pdfSettings}
+            isBusy={isBusy}
+            onSave={savePdfSettings}
+            onUploadLogo={uploadAndRegisterFile}
+          />
+        </FormLayout>
+      )}
     </section>
   )
 }
 
 function ProjectPdfSettingsPage() {
-  return <Navigate replace to="/reports#pdf-settings" />
+  const navigate = useNavigate()
+
+  return (
+    <PageShell className="space-y-4">
+      <PageHeader
+        eyebrow="Pelaporan"
+        title="Pengaturan PDF"
+        description="Atur identitas laporan, warna utama, dan logo yang dipakai saat PDF diunduh."
+        compact
+        backAction={() => navigate('/reports')}
+        backLabel="Laporan"
+      />
+      <ProjectPdfSettingsSection />
+    </PageShell>
+  )
 }
 
 export default ProjectPdfSettingsPage

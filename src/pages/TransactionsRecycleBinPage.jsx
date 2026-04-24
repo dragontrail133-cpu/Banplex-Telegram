@@ -33,6 +33,7 @@ import {
   shouldHideTransactionAmount,
 } from '../lib/transaction-presentation'
 import { logPerf, nowMs, roundMs } from '../lib/timing'
+import useMutationToast from '../hooks/useMutationToast'
 import {
   readRecycleBinListState,
   saveRecycleBinListState,
@@ -148,6 +149,8 @@ function TransactionsRecycleBinPage() {
   const [lastUpdatedAt, setLastUpdatedAt] = useState(
     restoredRecycleBinState?.lastUpdatedAt ?? null
   )
+  const showInlineMutationFeedback = false
+  const { begin, clear, fail, succeed } = useMutationToast()
   const [filter, setFilter] = useState(restoredRecycleBinState?.filter ?? 'all')
   const [searchTerm, setSearchTerm] = useState(restoredRecycleBinState?.searchTerm ?? '')
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm)
@@ -324,6 +327,8 @@ function TransactionsRecycleBinPage() {
     searchTerm,
   ])
 
+  useEffect(() => () => clear(), [clear])
+
   useEffect(() => {
     if (!restoredRecycleBinState || typeof window === 'undefined') {
       return
@@ -388,6 +393,11 @@ function TransactionsRecycleBinPage() {
         return
       }
 
+      begin({
+        title: 'Memulihkan data',
+        message: 'Mohon tunggu sampai arsip diperbarui.',
+      })
+
       try {
         setActionError(null)
 
@@ -437,7 +447,18 @@ function TransactionsRecycleBinPage() {
           }),
           refreshDashboard(currentTeamId, { silent: true }),
         ])
+        succeed({
+          title: 'Data dipulihkan',
+          message: 'Data berhasil dipulihkan dari arsip.',
+        })
       } catch (restoreError) {
+        fail({
+          title: 'Data gagal dipulihkan',
+          message:
+            restoreError instanceof Error
+              ? restoreError.message
+              : 'Gagal memulihkan data.',
+        })
         setActionError(
           restoreError instanceof Error
             ? restoreError.message
@@ -446,13 +467,16 @@ function TransactionsRecycleBinPage() {
       }
     },
     [
+      begin,
       currentTeamId,
       debouncedSearchTerm,
+      fail,
       filter,
       loadDeletedRecords,
       pageCursor,
       pageLimit,
       refreshDashboard,
+      succeed,
     ]
   )
 
@@ -469,6 +493,11 @@ function TransactionsRecycleBinPage() {
       if (!shouldDelete) {
         return
       }
+
+      begin({
+        title: 'Menghapus permanen data',
+        message: 'Mohon tunggu sampai arsip diperbarui.',
+      })
 
       try {
         setActionError(null)
@@ -496,7 +525,18 @@ function TransactionsRecycleBinPage() {
           }),
           refreshDashboard(currentTeamId, { silent: true }),
         ])
+        succeed({
+          title: 'Data dihapus permanen',
+          message: 'Data berhasil dihapus permanen.',
+        })
       } catch (permanentDeleteError) {
+        fail({
+          title: 'Data gagal dihapus permanen',
+          message:
+            permanentDeleteError instanceof Error
+              ? permanentDeleteError.message
+              : 'Gagal menghapus permanen data.',
+        })
         setActionError(
           permanentDeleteError instanceof Error
             ? permanentDeleteError.message
@@ -505,13 +545,16 @@ function TransactionsRecycleBinPage() {
       }
     },
     [
+      begin,
       currentTeamId,
       debouncedSearchTerm,
+      fail,
       filter,
       loadDeletedRecords,
       pageCursor,
       pageLimit,
       refreshDashboard,
+      succeed,
     ]
   )
 
@@ -635,7 +678,7 @@ function TransactionsRecycleBinPage() {
         </AppCardDashed>
       ) : null}
 
-      {actionError ? (
+      {showInlineMutationFeedback && actionError ? (
         <AppCardDashed>
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--app-destructive-color)]">
             Restore Gagal

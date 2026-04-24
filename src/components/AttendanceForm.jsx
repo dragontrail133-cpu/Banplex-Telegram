@@ -13,6 +13,7 @@ import useAttendanceStore from '../store/useAttendanceStore'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
 import { getAppTodayKey } from '../lib/date-time'
+import useMutationToast from '../hooks/useMutationToast'
 import { fetchAttendanceHistoryFromApi } from '../lib/records-api'
 import MasterPickerField from './ui/MasterPickerField'
 import {
@@ -24,6 +25,7 @@ import {
 import {
   calculateAttendanceTotalPay,
   deriveAttendanceOvertimeFee,
+  getAllowedAttendanceStatusValues,
   getAttendanceDayWeight,
 } from '../lib/attendance-payroll'
 
@@ -213,18 +215,6 @@ function resolveAttendanceRowOvertimeFee({
   }
 
   return existingOvertimeFee ?? ''
-}
-
-function getAllowedAttendanceStatusValues(usedDayWeight = 0, currentRowWeight = 0) {
-  const remainingDayWeight = Math.max(Number(usedDayWeight) - Number(currentRowWeight), 0)
-
-  return ['full_day', 'half_day', 'overtime', 'absent'].filter((status) => {
-    if (status === 'absent' || status === 'overtime') {
-      return true
-    }
-
-    return remainingDayWeight + getAttendanceDayWeight(status) <= 1
-  })
 }
 
 function getWorkerRate(workerId, projectId, workerWageRates = []) {
@@ -587,6 +577,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
   const clearError = useAttendanceStore((state) => state.clearError)
   const fetchAttendanceSheet = useAttendanceStore((state) => state.fetchAttendanceSheet)
   const saveAttendanceSheet = useAttendanceStore((state) => state.saveAttendanceSheet)
+  const { begin, clear, fail, succeed } = useMutationToast()
   const [dateAttendances, setDateAttendances] = useState([])
   const [selectedDate, setSelectedDate] = useState(() => getTodayDateString())
   const [selectedProjectId, setSelectedProjectId] = useState('')
@@ -599,6 +590,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
   const [activeWorkerSheetWorkerId, setActiveWorkerSheetWorkerId] = useState(null)
   const [isKpiSheetOpen, setIsKpiSheetOpen] = useState(false)
   const [isSettingsSheetOpen, setIsSettingsSheetOpen] = useState(false)
+  const showInlineMutationFeedback = false
   const deferredSearchTerm = useDeferredValue(searchTerm)
   const telegramUserId = user?.id ?? authUser?.telegram_user_id ?? null
   const telegramUserName = getTelegramDisplayName(user, authUser)
@@ -636,6 +628,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
   }, [fetchMasters])
 
   useEffect(() => () => clearError(), [clearError])
+  useEffect(() => () => clear(), [clear])
 
   const selectedProject = useMemo(() => {
     return (
@@ -783,7 +776,11 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
       const existingOvertimeFee = existingRecord?.overtime_fee ?? null
       const dayUsage = dayUsageByWorkerId.get(worker.id) ?? 0
       const currentRecordWeight = getAttendanceDayWeight(existingRecord?.attendance_status)
-      const allowedStatusValues = getAllowedAttendanceStatusValues(dayUsage, currentRecordWeight)
+      const allowedStatusValues = getAllowedAttendanceStatusValues({
+        usedDayWeight: dayUsage,
+        currentAttendanceStatus: existingRecord?.attendance_status ?? '',
+        currentRowWeight: currentRecordWeight,
+      })
       const overtimeFee = resolveAttendanceRowOvertimeFee({
         attendanceStatus,
         baseWage,
@@ -1102,6 +1099,10 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
         values: nextValues,
       })
       setSuccessMessage('Status absensi hari sebelumnya berhasil disalin ke sheet ini.')
+      succeed({
+        title: 'Absensi tersalin',
+        message: 'Status absensi hari sebelumnya berhasil disalin.',
+      })
     } catch (copyError) {
       console.error('Gagal menyalin absensi hari sebelumnya:', copyError)
     }
@@ -1119,6 +1120,11 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
     }
 
     try {
+      begin({
+        title: 'Menyimpan absensi',
+        message: 'Mohon tunggu sampai sheet selesai disimpan.',
+      })
+
       setSuccessMessage(null)
 
       const nextSavedRows = await saveAttendanceSheet({
@@ -1185,7 +1191,19 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
       if (typeof onSuccess === 'function') {
         await onSuccess(nextSavedRows)
       }
+
+      succeed({
+        title: 'Absensi tersimpan',
+        message: 'Sheet absensi berhasil disimpan.',
+      })
     } catch (submitError) {
+      fail({
+        title: 'Absensi gagal disimpan',
+        message:
+          submitError instanceof Error
+            ? submitError.message
+            : 'Gagal menyimpan sheet absensi.',
+      })
       console.error(
         submitError instanceof Error
           ? submitError.message
@@ -1318,7 +1336,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
           sheetDate={selectedDate}
         />
 
-        {error ? (
+        {showInlineMutationFeedback && error ? (
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
             {error}
           </div>
@@ -1330,7 +1348,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
           </div>
         ) : null}
 
-        {successMessage ? (
+        {showInlineMutationFeedback && successMessage ? (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-700">
             {successMessage}
           </div>
@@ -1366,7 +1384,7 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
             disabled={isSheetSaving || !effectiveSelectedProjectId}
             type="submit"
           >
-            {isSheetSaving ? 'Menyimpan Absensi...' : 'Simpan Absensi'}
+            Simpan Absensi
           </button>
         )}
       </fieldset>

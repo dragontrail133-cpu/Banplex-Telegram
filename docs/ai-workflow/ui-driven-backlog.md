@@ -131,3 +131,168 @@ Prasyarat:
 Output diharapkan:
 - Rencana migrasi bertahap, file target, dan risiko.
 
+---
+
+## UI-007
+Nama: Struktur ulang keyboard Telegram assistant tanpa rename label
+Tujuan: merapikan UX Telegram assistant agar menu utama tampil sebagai reply keyboard persisten, sementara aksi lanjutan tetap inline, tanpa mengubah label/command/callback existing.
+Boleh disentuh:
+- `api/telegram-assistant.js`
+- `src/lib/telegram-assistant-routing.js`
+- `tests/unit/telegram-assistant-routing.test.js`
+- `docs/progress/PROGRESS_LOG.md`
+Dilarang disentuh:
+- `src/store/*`, `supabase/migrations/*`, `api/records.js`, `api/transactions.js`
+Validasi:
+- `npm run lint`
+- `npm run build`
+- `node --test tests/unit/telegram-assistant-routing.test.js`
+Risiko regresi:
+- Medium (perubahan routing text-to-command dan markup Telegram)
+Prasyarat:
+- Audit repo Telegram assistant sudah selesai
+Output diharapkan:
+- `/start` dan `Menu` menampilkan reply keyboard utama dengan label existing; aksi contextual tetap inline; command lama tetap kompatibel.
+
+---
+
+## UI-008
+Nama: Summary drilldown untuk Status/Riwayat/Analytics tanpa buka workspace
+Tujuan: ubah flow `Status`, `Riwayat`, dan `Analytics` supaya bucket/detail tampil sebagai summary chat AI hybrid, dengan drilldown inline, tanpa membuka workspace untuk summary flow.
+Boleh disentuh:
+- `api/telegram-assistant.js`
+- `src/lib/telegram-assistant-routing.js`
+- `tests/unit/telegram-assistant-routing.test.js`
+- `docs/progress/PROGRESS_LOG.md`
+Dilarang disentuh:
+- `src/store/*`, `supabase/migrations/*`, `api/records.js`, `api/transactions.js`
+Validasi:
+- `npm run lint`
+- `npm run build`
+- `node --test tests/unit/telegram-assistant-routing.test.js`
+Risiko regresi:
+- Medium (callback routing baru dan formatting summary)
+Prasyarat:
+- UI-007 selesai dan reply keyboard utama sudah aktif
+Output diharapkan:
+- Bucket `Lunas / Dicicil / Belum lunas` membalas summary chat, analytics tetap inline, dan summary flow tidak membuka workspace.
+
+---
+
+## UI-009
+Nama: Summary visual lebih menarik dan cleanup sesi Telegram
+Tujuan: buat summary `Status`, `Riwayat`, dan `Analytics` lebih menarik secara visual, lalu bersihkan thread summary aktif saat sesi ditutup lewat `Menu`/back agar grup tidak noisy.
+Boleh disentuh:
+- `api/telegram-assistant.js`
+- `src/lib/telegram-assistant-transport.js`
+- `tests/unit/telegram-assistant-routing.test.js`
+- `docs/progress/PROGRESS_LOG.md`
+Dilarang disentuh:
+- `src/store/*`, `supabase/migrations/*`, `api/records.js`, `api/transactions.js`
+Validasi:
+- `npm run lint`
+- `npm run build`
+- `node --test tests/unit/telegram-assistant-routing.test.js`
+Risiko regresi:
+- Medium (edit/delete message behavior di group)
+Prasyarat:
+- UI-008 selesai dan summary callback sudah aktif
+Output diharapkan:
+- Summary chat tampil lebih hidup dengan headline/Inti/Sorotan/CTA, dan thread summary di group dibersihkan otomatis saat summary baru terkirim serta saat sesi ditutup.
+
+---
+
+## UI-010
+Nama: Perbaiki tracking message_id agar cleanup summary benar-benar jalan
+Tujuan: pastikan summary Telegram menyimpan `message_id` dari respons `sendMessage` yang benar, lalu auto-delete pesan summary lama bekerja konsisten di group dan private.
+Boleh disentuh:
+- `api/telegram-assistant.js`
+- `tests/unit/telegram-assistant-routing.test.js`
+- `docs/progress/PROGRESS_LOG.md`
+Dilarang disentuh:
+- `src/store/*`, `supabase/migrations/*`, `api/records.js`, `api/transactions.js`
+Validasi:
+- `npm run lint`
+- `npm run build`
+- `node --test tests/unit/telegram-assistant-routing.test.js`
+Risiko regresi:
+- Medium (perubahan cleanup dan tracking state Telegram)
+Prasyarat:
+- UI-009 selesai
+Output diharapkan:
+- Summary lama tidak menumpuk lagi; `Menu` membersihkan sesi aktif; group dan private tetap menyisakan satu summary aktif yang terbaru.
+
+---
+
+## UI-011
+Nama: Formatter summary HTML untuk catatan/tagihan
+Tujuan: ubah output summary settlement/status menjadi bubble chat HTML yang lebih rapi, dengan quote header, section visual, emoji, escape HTML, dan parse_mode HTML.
+Boleh disentuh:
+- `api/telegram-assistant.js`
+- `src/lib/telegram-assistant-transport.js`
+- `tests/unit/telegram-assistant-routing.test.js`
+- `docs/progress/PROGRESS_LOG.md`
+Dilarang disentuh:
+- `src/store/*`, `supabase/migrations/*`, `api/records.js`, `api/transactions.js`
+Validasi:
+- `npm run lint`
+- `npm run build`
+- `node --test tests/unit/telegram-assistant-routing.test.js`
+Risiko regresi:
+- Medium (format Telegram HTML dan ringkasan settlement)
+Prasyarat:
+- UI-010 selesai
+Output diharapkan:
+- Summary settlement tampil dengan `<blockquote>`, section Ringkasan/Status/Sorotan yang rapi, data dinamis aman di-escape, dan parse_mode HTML aktif saat mengirim summary.
+Status:
+- Selesai
+
+---
+
+## UI-012
+Nama: Analytics loading fallback dan auto-delete bot-only
+Tujuan: pastikan command `analytics` selalu membalas di chat dengan indikator loading sebelum hasil final, lalu jaga auto-delete tetap terbatas pada pesan bot lama agar group/private tetap rapi tanpa menghapus pesan user.
+Boleh disentuh:
+- `api/telegram-assistant.js`
+- `src/lib/telegram-assistant-transport.js`
+- `tests/unit/telegram-assistant-routing.test.js`
+- `docs/progress/PROGRESS_LOG.md`
+Dilarang disentuh:
+- `src/store/*`, `supabase/migrations/*`, `api/records.js`, `api/transactions.js`
+Validasi:
+- `npx eslint api/telegram-assistant.js src/lib/telegram-assistant-transport.js tests/unit/telegram-assistant-routing.test.js`
+- `npm run build`
+- `node --test tests/unit/telegram-assistant-routing.test.js`
+Risiko regresi:
+- Medium (routing analytics, loading/edit flow Telegram, dan cleanup bot message)
+Prasyarat:
+- UI-011 selesai
+Output diharapkan:
+- Command `analytics` selalu menghasilkan balasan, muncul indikator loading sebelum hasil final, dan pesan bot lama tetap dibersihkan tanpa menyentuh pesan user.
+Status:
+- Selesai
+
+---
+
+## UI-013
+Nama: Reply keyboard group routing dan loading heavy reply
+Tujuan: izinkan label reply keyboard existing diproses di group juga, lalu tampilkan indikator loading untuk reply berat seperti `Status`, `Riwayat`, dan `Analytics` sebelum hasil final muncul.
+Boleh disentuh:
+- `api/telegram-assistant.js`
+- `src/lib/telegram-assistant-transport.js`
+- `tests/unit/telegram-assistant-routing.test.js`
+- `docs/progress/PROGRESS_LOG.md`
+Dilarang disentuh:
+- `src/store/*`, `supabase/migrations/*`, `api/records.js`, `api/transactions.js`
+Validasi:
+- `npx eslint api/telegram-assistant.js src/lib/telegram-assistant-transport.js tests/unit/telegram-assistant-routing.test.js`
+- `npm run build`
+- `node --test tests/unit/telegram-assistant-routing.test.js`
+Risiko regresi:
+- Medium (routing reply keyboard di group dan loading/edit flow Telegram)
+Prasyarat:
+- UI-012 selesai
+Output diharapkan:
+- Reply keyboard existing seperti `Analytics` tidak lagi diam di group, dan reply berat memakai typing/loading sebelum hasil akhir dikirim.
+Status:
+- Selesai

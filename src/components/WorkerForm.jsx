@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BriefcaseBusiness, CircleDollarSign, Plus, Trash2, UserRound } from 'lucide-react'
+import useMutationToast from '../hooks/useMutationToast'
 import {
   AppBadge,
   AppButton,
   AppCard,
-  AppErrorState,
   AppInput,
   AppNominalInput,
   AppSelect,
@@ -71,11 +71,12 @@ function WorkerForm({
   const [formState, setFormState] = useState(() =>
     buildInitialState(initialWorker, initialWageRates)
   )
-  const [localError, setLocalError] = useState(null)
   const projects = useMasterStore((state) => state.projects)
   const professions = useMasterStore((state) => state.professions)
   const fetchProjects = useMasterStore((state) => state.fetchProjects)
   const fetchProfessions = useMasterStore((state) => state.fetchProfessions)
+  const { begin, fail, succeed } = useMutationToast()
+  const isEditMode = Boolean(initialWorker?.id)
 
   useEffect(() => {
     void Promise.all([
@@ -104,10 +105,6 @@ function WorkerForm({
       ...current,
       [name]: value,
     }))
-
-    if (localError) {
-      setLocalError(null)
-    }
   }
 
   const handleWageRateChange = (rateId, field, value) => {
@@ -124,10 +121,6 @@ function WorkerForm({
         }
       }),
     }))
-
-    if (localError) {
-      setLocalError(null)
-    }
   }
 
   const handleAddWageRate = () => {
@@ -153,7 +146,10 @@ function WorkerForm({
     const workerName = normalizeText(formState.name)
 
     if (!workerName) {
-      setLocalError('Nama pekerja wajib diisi.')
+      fail({
+        title: isEditMode ? 'Pekerja gagal diperbarui' : 'Pekerja gagal disimpan',
+        message: 'Nama pekerja wajib diisi.',
+      })
       return
     }
 
@@ -168,22 +164,36 @@ function WorkerForm({
 
     for (const [index, rate] of normalizedWageRates.entries()) {
       if (!rate.project_id) {
-        setLocalError(`Proyek pada baris upah ${index + 1} wajib dipilih.`)
+        fail({
+          title: isEditMode ? 'Pekerja gagal diperbarui' : 'Pekerja gagal disimpan',
+          message: `Proyek pada baris upah ${index + 1} wajib dipilih.`,
+        })
         return
       }
 
       if (!rate.role_name) {
-        setLocalError(`Role pada baris upah ${index + 1} wajib diisi.`)
+        fail({
+          title: isEditMode ? 'Pekerja gagal diperbarui' : 'Pekerja gagal disimpan',
+          message: `Role pada baris upah ${index + 1} wajib diisi.`,
+        })
         return
       }
 
       if (!Number.isFinite(rate.wage_amount) || rate.wage_amount <= 0) {
-        setLocalError(`Nominal upah pada baris ${index + 1} harus lebih dari 0.`)
+        fail({
+          title: isEditMode ? 'Pekerja gagal diperbarui' : 'Pekerja gagal disimpan',
+          message: `Nominal upah pada baris ${index + 1} harus lebih dari 0.`,
+        })
         return
       }
     }
 
     try {
+      begin({
+        title: isEditMode ? 'Memperbarui pekerja' : 'Menyimpan pekerja',
+        message: 'Mohon tunggu sampai data pekerja selesai diproses.',
+      })
+
       await onSubmit?.({
         worker_name: workerName,
         telegram_user_id: normalizeText(formState.telegramUserId, null),
@@ -194,10 +204,20 @@ function WorkerForm({
         notes: normalizeText(formState.notes, null),
         wage_rates: normalizedWageRates,
       })
+
+      succeed({
+        title: isEditMode ? 'Pekerja diperbarui' : 'Pekerja tersimpan',
+        message: isEditMode
+          ? 'Perubahan data pekerja berhasil disimpan.'
+          : 'Data pekerja berhasil disimpan.',
+      })
     } catch (error) {
-      setLocalError(
-        error instanceof Error ? error.message : 'Gagal menyimpan data pekerja.'
-      )
+      const message = error instanceof Error ? error.message : 'Gagal menyimpan data pekerja.'
+
+      fail({
+        title: isEditMode ? 'Pekerja gagal diperbarui' : 'Pekerja gagal disimpan',
+        message,
+      })
     }
   }
 
@@ -457,13 +477,6 @@ function WorkerForm({
         </div>
       </AppCard>
 
-      {localError ? (
-        <AppErrorState
-          title="Form pekerja belum valid"
-          description={localError}
-        />
-      ) : null}
-
       {hideActions ? null : (
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <AppButton onClick={onCancel} type="button" variant="secondary">
@@ -471,7 +484,7 @@ function WorkerForm({
           </AppButton>
 
           <AppButton disabled={isSubmitting} type="submit">
-            {isSubmitting ? 'Menyimpan...' : 'Simpan Pekerja'}
+            Simpan Pekerja
           </AppButton>
         </div>
       )}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PencilLine, RotateCcw, Trash2, Upload } from 'lucide-react'
+import useMutationToast from '../hooks/useMutationToast'
 import useAuthStore from '../store/useAuthStore'
 import useFileStore from '../store/useFileStore'
 import useTransactionStore from '../store/useTransactionStore'
@@ -33,33 +34,33 @@ function resolveAttachmentFile(attachment) {
 }
 
 function formatUploadStage(stage) {
-  if (stage === 'compressing') {
-    return 'Mengompresi file'
-  }
+  const normalizedStage = String(stage ?? '').trim().toLowerCase()
 
-  if (stage === 'uploading') {
-    return 'Mengunggah ke storage'
-  }
-
-  if (stage === 'registering') {
-    return 'Menyimpan metadata'
-  }
-
-  if (stage === 'completed') {
-    return 'Selesai'
-  }
-
-  if (stage === 'failed') {
+  if (normalizedStage === 'failed') {
     return 'Gagal'
   }
 
-  return 'Masuk antrean'
+  if (normalizedStage === 'completed') {
+    return 'Selesai'
+  }
+
+  if (normalizedStage === 'uploading') {
+    return 'Mengunggah'
+  }
+
+  if (normalizedStage === 'processing') {
+    return 'Memproses'
+  }
+
+  return 'Menunggu'
 }
 
 function ExpenseAttachmentSection({
   expenseId = null,
   title = 'Lampiran',
   deferUploadUntilParentSaved = false,
+  attachmentResetRequestId = null,
+  onAttachmentResetSettled = null,
   readOnly = false,
 }) {
   const isAuthLoading = useAuthStore((state) => state.isLoading)
@@ -67,6 +68,7 @@ function ExpenseAttachmentSection({
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
   const uploadQueue = useFileStore((state) => state.uploadQueue)
   const startBackgroundUpload = useFileStore((state) => state.startBackgroundUpload)
+  const dismissUploadTask = useFileStore((state) => state.dismissUploadTask)
   const updateFileAssetMetadata = useFileStore((state) => state.updateFileAssetMetadata)
   const purgeFileAsset = useFileStore((state) => state.purgeFileAsset)
   const canPerformAttachmentAction = useFileStore(
@@ -99,6 +101,9 @@ function ExpenseAttachmentSection({
   const [editingFileName, setEditingFileName] = useState('')
   const fileInputRef = useRef(null)
   const selectedBeforeParentSaveRef = useRef(false)
+  const lastAttachmentResetHandledRef = useRef(null)
+  const { begin, clear, fail, succeed } = useMutationToast()
+  const showInlineMutationFeedback = false
 
   const canUpload = !readOnly && canPerformAttachmentAction('upload')
   const canEditMetadata = !readOnly && canPerformAttachmentAction('editMetadata')
@@ -132,6 +137,8 @@ function ExpenseAttachmentSection({
   )
   const isBusy = isLoading || isUploadQueueActive
 
+  useEffect(() => () => clear(), [clear])
+
   useEffect(() => {
     if (!selectedFile || !String(selectedFile.type ?? '').startsWith('image/')) {
       setSelectedFilePreviewUrl(null)
@@ -150,6 +157,14 @@ function ExpenseAttachmentSection({
     let isActive = true
 
     if (!isAuthReady) {
+      setAttachments([])
+      setError(null)
+      return () => {
+        isActive = false
+      }
+    }
+
+    if (attachmentResetRequestId) {
       setAttachments([])
       setError(null)
       return () => {
@@ -197,10 +212,10 @@ function ExpenseAttachmentSection({
     return () => {
       isActive = false
     }
-  }, [expenseId, fetchExpenseAttachments, isAuthReady])
+  }, [attachmentResetRequestId, expenseId, fetchExpenseAttachments, isAuthReady])
 
   const reloadAttachments = useCallback(async () => {
-    if (!expenseId || !isAuthReady) {
+    if (!expenseId || !isAuthReady || attachmentResetRequestId) {
       return
     }
 
@@ -209,18 +224,20 @@ function ExpenseAttachmentSection({
     })
 
     setAttachments(nextAttachments)
-  }, [expenseId, fetchExpenseAttachments, isAuthReady])
+  }, [attachmentResetRequestId, expenseId, fetchExpenseAttachments, isAuthReady])
 
-  const clearSelectedFile = () => {
+  const clearSelectedFile = useCallback(() => {
     setSelectedFile(null)
     setUploadLabel('')
     setIsDraftOverlayVisible(false)
+    setEditingAttachmentId(null)
+    setEditingFileName('')
     selectedBeforeParentSaveRef.current = false
 
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
-  }
+  }, [])
 
   const openFilePicker = () => {
     fileInputRef.current?.click()
@@ -244,6 +261,10 @@ function ExpenseAttachmentSection({
 
     setIsLoading(true)
     setError(null)
+    begin({
+      title: 'Mengunggah lampiran',
+      message: 'Mohon tunggu sampai lampiran selesai diproses.',
+    })
 
     try {
       const { resultPromise } = startBackgroundUpload(selectedFile, {
@@ -272,8 +293,18 @@ function ExpenseAttachmentSection({
 
       clearSelectedFile()
       await reloadAttachments()
+      succeed({
+        title: 'Lampiran tersimpan',
+        message: 'Lampiran berhasil diunggah.',
+      })
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : 'Gagal mengunggah lampiran.')
+      const message =
+        uploadError instanceof Error ? uploadError.message : 'Gagal mengunggah lampiran.'
+      setError(message)
+      fail({
+        title: 'Lampiran gagal diunggah',
+        message,
+      })
     } finally {
       setIsLoading(false)
     }
@@ -285,10 +316,14 @@ function ExpenseAttachmentSection({
     isAuthReady,
     reloadAttachments,
     selectedFile,
+    clearSelectedFile,
     purgeFileAsset,
     startBackgroundUpload,
     uploadScopeKey,
-  ])
+    begin,
+    fail,
+    succeed,
+    ])
 
   const handleUpload = async () => {
     await uploadSelectedFile(expenseId)
@@ -320,6 +355,39 @@ function ExpenseAttachmentSection({
     uploadSelectedFile,
   ])
 
+  useEffect(() => {
+    if (!attachmentResetRequestId) {
+      lastAttachmentResetHandledRef.current = null
+      return
+    }
+
+    if (lastAttachmentResetHandledRef.current === attachmentResetRequestId) {
+      return
+    }
+
+    if (isBusy || selectedFile) {
+      return
+    }
+
+    scopedUploadTasks.forEach((task) => {
+      dismissUploadTask(task.id)
+    })
+
+    lastAttachmentResetHandledRef.current = attachmentResetRequestId
+    setAttachments([])
+    clearSelectedFile()
+    setError(null)
+    onAttachmentResetSettled?.(attachmentResetRequestId)
+  }, [
+    attachmentResetRequestId,
+    clearSelectedFile,
+    dismissUploadTask,
+    isBusy,
+    onAttachmentResetSettled,
+    scopedUploadTasks,
+    selectedFile,
+  ])
+
   const handleEditMetadata = async (attachment) => {
     const fileAsset = resolveAttachmentFile(attachment)
 
@@ -329,6 +397,10 @@ function ExpenseAttachmentSection({
 
     setIsLoading(true)
     setError(null)
+    begin({
+      title: 'Menyimpan metadata lampiran',
+      message: 'Mohon tunggu sampai perubahan tersimpan.',
+    })
 
     try {
       await updateFileAssetMetadata(fileAsset.id, {
@@ -339,8 +411,18 @@ function ExpenseAttachmentSection({
       setEditingAttachmentId(null)
       setEditingFileName('')
       await reloadAttachments()
+      succeed({
+        title: 'Metadata lampiran tersimpan',
+        message: 'Nama file lampiran berhasil diperbarui.',
+      })
     } catch (editError) {
-      setError(editError instanceof Error ? editError.message : 'Gagal memperbarui metadata.')
+      const message =
+        editError instanceof Error ? editError.message : 'Gagal memperbarui metadata.'
+      setError(message)
+      fail({
+        title: 'Metadata lampiran gagal diperbarui',
+        message,
+      })
     } finally {
       setIsLoading(false)
     }
@@ -353,12 +435,26 @@ function ExpenseAttachmentSection({
 
     setIsLoading(true)
     setError(null)
+    begin({
+      title: 'Menghapus lampiran',
+      message: 'Mohon tunggu sampai lampiran dipindahkan ke arsip.',
+    })
 
     try {
       await softDeleteExpenseAttachment(attachment.id, currentTeamId)
       await reloadAttachments()
+      succeed({
+        title: 'Lampiran diarsipkan',
+        message: 'Lampiran berhasil dihapus.',
+      })
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : 'Gagal menghapus lampiran.')
+      const message =
+        deleteError instanceof Error ? deleteError.message : 'Gagal menghapus lampiran.'
+      setError(message)
+      fail({
+        title: 'Lampiran gagal dihapus',
+        message,
+      })
     } finally {
       setIsLoading(false)
     }
@@ -371,14 +467,26 @@ function ExpenseAttachmentSection({
 
     setIsLoading(true)
     setError(null)
+    begin({
+      title: 'Memulihkan lampiran',
+      message: 'Mohon tunggu sampai lampiran kembali aktif.',
+    })
 
     try {
       await restoreExpenseAttachment(attachment.id, currentTeamId)
       await reloadAttachments()
+      succeed({
+        title: 'Lampiran dipulihkan',
+        message: 'Lampiran berhasil dipulihkan.',
+      })
     } catch (restoreError) {
-      setError(
+      const message =
         restoreError instanceof Error ? restoreError.message : 'Gagal memulihkan lampiran.'
-      )
+      setError(message)
+      fail({
+        title: 'Lampiran gagal dipulihkan',
+        message,
+      })
     } finally {
       setIsLoading(false)
     }
@@ -391,16 +499,28 @@ function ExpenseAttachmentSection({
 
     setIsLoading(true)
     setError(null)
+    begin({
+      title: 'Menghapus permanen lampiran',
+      message: 'Mohon tunggu sampai lampiran dihapus permanen.',
+    })
 
     try {
       await permanentDeleteExpenseAttachment(attachment.id, currentTeamId)
       await reloadAttachments()
+      succeed({
+        title: 'Lampiran dihapus permanen',
+        message: 'Lampiran berhasil dihapus permanen.',
+      })
     } catch (permanentDeleteError) {
-      setError(
+      const message =
         permanentDeleteError instanceof Error
           ? permanentDeleteError.message
           : 'Gagal menghapus lampiran secara permanen.'
-      )
+      setError(message)
+      fail({
+        title: 'Lampiran gagal dihapus permanen',
+        message,
+      })
     } finally {
       setIsLoading(false)
     }
@@ -738,7 +858,7 @@ function ExpenseAttachmentSection({
               </div>
             </div>
           )}
-          {scopedUploadTasks.length > 0 ? (
+          {showInlineMutationFeedback && scopedUploadTasks.length > 0 ? (
             <div className="space-y-2">
               {scopedUploadTasks.map((task) => {
                 const savedBytes = task.compressionSummary?.savedBytes ?? 0
@@ -789,13 +909,13 @@ function ExpenseAttachmentSection({
         </div>
       ) : null}
 
-      {error ? (
+      {showInlineMutationFeedback && error ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
           {error}
         </div>
       ) : null}
 
-      {isBusy ? (
+      {showInlineMutationFeedback && isBusy ? (
         <p className="text-xs text-[var(--app-hint-color)]">
           Memproses lampiran...
         </p>

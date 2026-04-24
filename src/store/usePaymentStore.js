@@ -12,7 +12,6 @@ import {
 } from '../lib/transactions-api'
 import useIncomeStore from './useIncomeStore'
 import useBillStore from './useBillStore'
-import useToastStore from './useToastStore'
 
 function normalizeText(value, fallback = null) {
   const normalizedValue = String(value ?? '').trim()
@@ -29,9 +28,7 @@ function toError(error) {
   return error instanceof Error ? error : new Error(message)
 }
 
-function showToast(toast) {
-  useToastStore.getState().showToast(toast)
-}
+function showToast() {}
 
 async function notifyTelegram(payload) {
   const response = await fetch('/api/notify', {
@@ -176,8 +173,8 @@ function getBillPaymentRemainingAmount(bill = {}) {
 
 function getLoanPaymentRemainingAmount(loan = {}) {
   const targetAmount = Number(
-    loan.loan_terms_snapshot?.base_repayment_amount ??
-      loan.loan_terms_snapshot?.repayment_amount ??
+    loan.loan_terms_snapshot?.repayment_amount ??
+      loan.loan_terms_snapshot?.base_repayment_amount ??
       loan.repayment_amount ??
       loan.principal_amount ??
       loan.amount ??

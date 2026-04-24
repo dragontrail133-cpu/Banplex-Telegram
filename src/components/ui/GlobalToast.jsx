@@ -155,18 +155,20 @@ function GlobalToast() {
                 </div>
               </div>
 
-              <div className="border-t border-[var(--app-border-color)] px-5 py-4">
-                <AppButton
-                  fullWidth
-                  className="rounded-[18px]"
-                  onClick={() => hideToast(toast.id)}
-                  size="md"
-                  type="button"
-                  variant="secondary"
-                >
-                  Tutup
-                </AppButton>
-              </div>
+              {toast.dismissible === false || isLoading ? null : (
+                <div className="border-t border-[var(--app-border-color)] px-5 py-4">
+                  <AppButton
+                    fullWidth
+                    className="rounded-[18px]"
+                    onClick={() => hideToast(toast.id)}
+                    size="md"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Tutup
+                  </AppButton>
+                </div>
+              )}
             </AppCardStrong>
           </Motion.div>
         </AnimatePresence>

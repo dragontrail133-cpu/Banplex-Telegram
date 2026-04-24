@@ -4,11 +4,11 @@ import {
   AppButton,
   AppCardDashed,
   AppEmptyState,
-  AppErrorState,
   AppSheet,
   AppWrapToggleGroup,
   PageSection,
 } from './ui/AppPrimitives'
+import useMutationToast from '../hooks/useMutationToast'
 import { formatAppDateLabel } from '../lib/date-time'
 import useHrStore, { applicantStatusOptions } from '../store/useHrStore'
 
@@ -51,24 +51,10 @@ function createInitialFormData() {
   }
 }
 
-function renderSheetFeedback(feedbackError) {
-  if (feedbackError) {
-    const title =
-      feedbackError.kind === 'submit'
-        ? 'Gagal menyimpan pelamar'
-        : 'Form pelamar belum lengkap'
-
-    return (
-      <AppErrorState
-        description={feedbackError.message}
-        title={title}
-      />
-    )
-  }
-
+function renderSheetFeedback(helperText) {
   return (
     <AppCardDashed className="px-4 py-3 text-sm leading-6 text-[var(--app-hint-color)]">
-      Isi data pelamar di bawah.
+      {helperText}
     </AppCardDashed>
   )
 }
@@ -76,7 +62,6 @@ function renderSheetFeedback(feedbackError) {
 function HrdPipeline() {
   const [formData, setFormData] = useState(createInitialFormData)
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [localError, setLocalError] = useState(null)
   const formId = 'hrd-applicant-form'
   const applicants = useHrStore((state) => state.applicants)
   const isLoading = useHrStore((state) => state.isLoading)
@@ -87,6 +72,7 @@ function HrdPipeline() {
   const addApplicant = useHrStore((state) => state.addApplicant)
   const updateApplicant = useHrStore((state) => state.updateApplicant)
   const deleteApplicant = useHrStore((state) => state.deleteApplicant)
+  const { begin, fail, succeed } = useMutationToast()
 
   useEffect(() => {
     fetchApplicants({ force: true }).catch((fetchError) => {
@@ -96,7 +82,6 @@ function HrdPipeline() {
 
   const resetModalState = () => {
     setFormData(createInitialFormData())
-    setLocalError(null)
     clearError()
   }
 
@@ -128,10 +113,6 @@ function HrdPipeline() {
       [name]: value,
     }))
 
-    if (localError) {
-      setLocalError(null)
-    }
-
     if (error) {
       clearError()
     }
@@ -162,16 +143,27 @@ function HrdPipeline() {
     ].filter(Boolean)
 
     if (!name) {
-      setLocalError({ kind: 'validation', message: 'Nama pelamar wajib diisi.' })
+      fail({
+        title: 'Form pelamar belum lengkap',
+        message: 'Nama pelamar wajib diisi.',
+      })
       return
     }
 
     if (!position) {
-      setLocalError({ kind: 'validation', message: 'Posisi pelamar wajib diisi.' })
+      fail({
+        title: 'Form pelamar belum lengkap',
+        message: 'Posisi pelamar wajib diisi.',
+      })
       return
     }
 
     try {
+      begin({
+        title: 'Menyimpan pelamar',
+        message: 'Mohon tunggu sampai data pelamar dan dokumen selesai diproses.',
+      })
+
       await addApplicant({
         name,
         position,
@@ -183,13 +175,51 @@ function HrdPipeline() {
       await fetchApplicants({ force: true })
 
       handleCloseModal()
+      succeed({
+        title: 'Pelamar tersimpan',
+        message: 'Data pelamar berhasil disimpan.',
+      })
     } catch (submitError) {
       const message =
         submitError instanceof Error
           ? submitError.message
           : 'Gagal menyimpan pelamar.'
 
-      setLocalError({ kind: 'submit', message })
+      fail({
+        title: 'Pelamar gagal disimpan',
+        message,
+      })
+      clearError()
+    }
+  }
+
+  const handleDeleteApplicant = async (applicant) => {
+    if (!applicant?.id || isSubmitting) {
+      return
+    }
+
+    begin({
+      title: 'Menghapus pelamar',
+      message: 'Mohon tunggu sampai pelamar hilang dari daftar.',
+    })
+
+    try {
+      await deleteApplicant(applicant.id)
+      await fetchApplicants({ force: true })
+      succeed({
+        title: 'Pelamar dihapus',
+        message: 'Data pelamar berhasil dihapus.',
+      })
+    } catch (deleteError) {
+      const message =
+        deleteError instanceof Error ? deleteError.message : 'Gagal menghapus pelamar.'
+
+      fail({
+        title: 'Pelamar gagal dihapus',
+        message,
+      })
+      clearError()
+      console.error('Gagal menghapus pelamar:', deleteError)
     }
   }
 
@@ -287,9 +317,7 @@ function HrdPipeline() {
                           className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                           disabled={isSubmitting}
                           onClick={() => {
-                            void deleteApplicant(applicant.id).catch((deleteError) => {
-                              console.error('Gagal menghapus pelamar:', deleteError)
-                            })
+                            void handleDeleteApplicant(applicant)
                           }}
                           type="button"
                         >
@@ -399,7 +427,7 @@ function HrdPipeline() {
                 form={formId}
                 type="submit"
               >
-                {isSubmitting ? 'Menyimpan...' : 'Simpan Pelamar'}
+                Simpan Pelamar
               </AppButton>
             </div>
           }
@@ -413,7 +441,7 @@ function HrdPipeline() {
             encType="multipart/form-data"
             onSubmit={handleSubmit}
           >
-              {renderSheetFeedback(localError)}
+              {renderSheetFeedback('Isi data pelamar di bawah.')}
 
               <label className="block space-y-2">
                 <span className="text-sm font-semibold text-[var(--app-text-color)]">
