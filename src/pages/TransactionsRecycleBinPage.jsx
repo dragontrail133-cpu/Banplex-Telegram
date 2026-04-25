@@ -40,6 +40,7 @@ import {
 } from '../lib/recycle-bin-state'
 import {
   fetchRecycleBinPageFromApi,
+  permanentDeleteAllEligibleTransactionsFromApi,
   permanentDeleteLoanPaymentFromApi,
   permanentDeleteTransactionFromApi,
   restoreLoanPaymentFromApi,
@@ -146,6 +147,7 @@ function TransactionsRecycleBinPage() {
   const [error, setError] = useState(null)
   const [actionError, setActionError] = useState(null)
   const [activeActionCard, setActiveActionCard] = useState(null)
+  const [isDeletingAll, setIsDeletingAll] = useState(false)
   const [lastUpdatedAt, setLastUpdatedAt] = useState(
     restoredRecycleBinState?.lastUpdatedAt ?? null
   )
@@ -558,6 +560,98 @@ function TransactionsRecycleBinPage() {
     ]
   )
 
+  const hasPermanentDeleteEligibleRecords = useMemo(
+    () =>
+      filter === 'all' &&
+      deletedRecords.some((record) => record?.canPermanentDelete === true),
+    [deletedRecords, filter]
+  )
+
+  const handlePermanentDeleteAll = useCallback(async () => {
+    if (!currentTeamId || !hasPermanentDeleteEligibleRecords || isDeletingAll) {
+      return
+    }
+
+    const shouldDelete = window.confirm(
+      'Hapus permanen semua data eligible di Arsip workspace ini? Item restore-only tidak akan disentuh dan aksi ini tidak bisa dibatalkan.'
+    )
+
+    if (!shouldDelete) {
+      return
+    }
+
+    begin({
+      title: 'Menghapus permanen semua data',
+      message: 'Mohon tunggu sampai arsip diperbarui.',
+    })
+
+    try {
+      setActionError(null)
+      setIsDeletingAll(true)
+
+      const result = await permanentDeleteAllEligibleTransactionsFromApi(currentTeamId)
+
+      setCursorHistory([])
+      setPageCursor(null)
+
+      await Promise.all([
+        loadDeletedRecords(currentTeamId, {
+          filter,
+          search: debouncedSearchTerm,
+          cursor: null,
+          limit: pageLimit,
+        }),
+        refreshDashboard(currentTeamId, { silent: true }),
+      ])
+
+      if (result.failedCount > 0) {
+        const message = `${result.deletedCount} data berhasil dihapus permanen, ${result.failedCount} data gagal.`
+
+        fail({
+          title: 'Sebagian data gagal dihapus',
+          message,
+        })
+        setActionError(message)
+        return
+      }
+
+      succeed({
+        title: 'Data eligible dihapus permanen',
+        message:
+          result.deletedCount > 0
+            ? `${result.deletedCount} data berhasil dihapus permanen.`
+            : 'Tidak ada data eligible untuk dihapus permanen.',
+      })
+    } catch (permanentDeleteError) {
+      fail({
+        title: 'Data gagal dihapus permanen',
+        message:
+          permanentDeleteError instanceof Error
+            ? permanentDeleteError.message
+            : 'Gagal menghapus permanen semua data.',
+      })
+      setActionError(
+        permanentDeleteError instanceof Error
+          ? permanentDeleteError.message
+          : 'Gagal menghapus permanen semua data.'
+      )
+    } finally {
+      setIsDeletingAll(false)
+    }
+  }, [
+    begin,
+    currentTeamId,
+    debouncedSearchTerm,
+    fail,
+    filter,
+    hasPermanentDeleteEligibleRecords,
+    isDeletingAll,
+    loadDeletedRecords,
+    pageLimit,
+    refreshDashboard,
+    succeed,
+  ])
+
   const showSkeleton = Boolean(currentTeamId) && isLoading && deletedRecords.length === 0 && !error
   const emptyStateDescription =
     filter === 'all'
@@ -717,6 +811,17 @@ function TransactionsRecycleBinPage() {
           <div className="flex items-center justify-between gap-2 px-1">
             <p className="text-xs text-[var(--app-hint-color)]">{deletedRecords.length} item</p>
             <div className="flex items-center gap-2">
+              {hasPermanentDeleteEligibleRecords ? (
+                <AppButton
+                  disabled={isLoading || isDeletingAll}
+                  onClick={handlePermanentDeleteAll}
+                  size="sm"
+                  type="button"
+                  variant="danger"
+                >
+                  Hapus Semua
+                </AppButton>
+              ) : null}
               <AppButton
                 disabled={cursorHistory.length === 0 || isLoading}
                 onClick={handlePreviousPage}

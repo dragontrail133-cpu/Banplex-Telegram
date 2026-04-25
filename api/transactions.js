@@ -100,6 +100,24 @@ const workspaceTransactionViewSelectColumns =
 const historyTransactionViewSelectColumns = workspaceTransactionViewSelectColumns
 const recycleBinViewSelectColumns =
   'id, team_id, source_type, type, deleted_at, transaction_date, income_date, expense_date, due_date, payment_date, attendance_date, disbursed_date, created_at, updated_at, amount, total_amount, total_pay, description, notes, project_name_snapshot, supplier_name_snapshot, creditor_name_snapshot, worker_name_snapshot, expense_type, document_type, bill_id, bill_type, bill_status, bill_amount, bill_paid_amount, bill_remaining_amount, bill_due_date, bill_paid_at, bill_description, bill_project_name_snapshot, bill_supplier_name_snapshot, bill_worker_name_snapshot, record_kind, expense_id, project_income_id, project_id, loan_id, worker_id, attendance_status, billing_status, salary_bill_id, principal_amount, repayment_amount, interest_type, interest_rate, tenor_months, late_interest_rate, late_interest_basis, late_penalty_type, late_penalty_amount, loan_terms_snapshot, status, paid_amount, original_name, file_name, search_text'
+const permanentDeleteEligibleRecycleBinSourceTypes = Object.freeze([
+  'bill',
+  'bill-payment',
+  'expense-attachment',
+  'loan-disbursement',
+  'loan-payment',
+  'project-income',
+  'attendance-record',
+])
+const permanentDeleteSourcePriority = Object.freeze({
+  'bill-payment': 10,
+  'loan-payment': 10,
+  'expense-attachment': 10,
+  bill: 20,
+  'project-income': 30,
+  'loan-disbursement': 30,
+  'attendance-record': 30,
+})
 
 function normalizeExpenseRow(row) {
   return {
@@ -221,6 +239,46 @@ function buildRecycleBinSearchText(...values) {
       .filter(Boolean)
       .join(' ')
   ).toLowerCase()
+}
+
+function getRecycleBinRecordSourceType(record) {
+  return normalizeText(record?.sourceType ?? record?.source_type, '')
+}
+
+function isPermanentDeleteEligibleRecycleBinRecord(record) {
+  return permanentDeleteEligibleRecycleBinSourceTypes.includes(
+    getRecycleBinRecordSourceType(record)
+  )
+}
+
+function sortPermanentDeleteCandidates(records = []) {
+  return [...records].sort((left, right) => {
+    const leftPriority =
+      permanentDeleteSourcePriority[getRecycleBinRecordSourceType(left)] ?? 99
+    const rightPriority =
+      permanentDeleteSourcePriority[getRecycleBinRecordSourceType(right)] ?? 99
+
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority
+    }
+
+    const leftDeletedAt = new Date(String(left?.deleted_at ?? '')).getTime()
+    const rightDeletedAt = new Date(String(right?.deleted_at ?? '')).getTime()
+
+    if (Number.isFinite(leftDeletedAt) && Number.isFinite(rightDeletedAt)) {
+      return leftDeletedAt - rightDeletedAt
+    }
+
+    return String(left?.id ?? '').localeCompare(String(right?.id ?? ''))
+  })
+}
+
+function assertDeletedRows(deletedRows, message) {
+  if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+    throw createHttpError(409, message)
+  }
+
+  return deletedRows.length
 }
 
 function mapRecycleBinTransactionRecord(row) {
@@ -597,6 +655,157 @@ async function loadRecycleBinRecords(
     fetchAll,
     debugTiming,
   })
+}
+
+async function loadPermanentDeleteCandidates(
+  adminClient,
+  {
+    teamId = null,
+    deletedBefore = null,
+    batchLimit = 100,
+    attemptedKeys = new Set(),
+  } = {}
+) {
+  const normalizedTeamId = normalizeText(teamId, null)
+  const normalizedDeletedBefore = normalizeText(deletedBefore, null)
+  const normalizedBatchLimit = Number.isFinite(Number(batchLimit))
+    ? Math.min(Math.max(Number(batchLimit), 1), 500)
+    : 100
+
+  let query = adminClient
+    .from('vw_recycle_bin_records')
+    .select(recycleBinViewSelectColumns)
+    .in('source_type', permanentDeleteEligibleRecycleBinSourceTypes)
+    .order('deleted_at', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(normalizedBatchLimit)
+
+  if (normalizedTeamId) {
+    query = query.eq('team_id', normalizedTeamId)
+  }
+
+  if (normalizedDeletedBefore) {
+    query = query.lt('deleted_at', normalizedDeletedBefore)
+  }
+
+  const { data, error } = await query
+
+  if (error) {
+    throw error
+  }
+
+  return (data ?? []).filter((row) => {
+    const rowKey = `${getRecycleBinRecordSourceType(row)}:${row?.id ?? ''}`
+
+    return !attemptedKeys.has(rowKey)
+  })
+}
+
+async function permanentDeleteRecycleBinRecord(adminClient, serviceClient, record) {
+  const sourceType = getRecycleBinRecordSourceType(record)
+  const recordId = normalizeText(record?.id, null)
+
+  if (!recordId || !isPermanentDeleteEligibleRecycleBinRecord(record)) {
+    throw createHttpError(400, 'Tipe arsip tidak valid untuk dihapus permanen.')
+  }
+
+  if (sourceType === 'bill-payment') {
+    return hardDeleteBillPaymentRecord(adminClient, serviceClient, recordId)
+  }
+
+  if (sourceType === 'loan-payment') {
+    return hardDeleteLoanPayment(adminClient, serviceClient, { paymentId: recordId }, null)
+  }
+
+  if (sourceType === 'expense-attachment') {
+    return hardDeleteExpenseAttachmentRecord(adminClient, serviceClient, recordId)
+  }
+
+  if (sourceType === 'project-income') {
+    return hardDeleteProjectIncome(adminClient, serviceClient, recordId)
+  }
+
+  if (sourceType === 'loan-disbursement') {
+    return hardDeleteLoan(adminClient, serviceClient, recordId)
+  }
+
+  if (sourceType === 'bill') {
+    return hardDeleteBill(adminClient, serviceClient, recordId)
+  }
+
+  if (sourceType === 'attendance-record') {
+    return hardDeleteAttendance(adminClient, serviceClient, recordId)
+  }
+
+  throw createHttpError(400, 'Tipe arsip tidak valid untuk dihapus permanen.')
+}
+
+export async function purgeRecycleBinRecords({
+  readClient,
+  writeClient,
+  teamId = null,
+  deletedBefore = null,
+  dryRun = false,
+  batchLimit = 100,
+  maxBatches = 100,
+} = {}) {
+  const normalizedMaxBatches = Number.isFinite(Number(maxBatches))
+    ? Math.min(Math.max(Number(maxBatches), 1), 100)
+    : 100
+  const attemptedKeys = new Set()
+  const errors = []
+  let deletedCount = 0
+  let skippedCount = 0
+  let failedCount = 0
+  let candidateCount = 0
+
+  for (let batchIndex = 0; batchIndex < normalizedMaxBatches; batchIndex += 1) {
+    const candidates = await loadPermanentDeleteCandidates(readClient, {
+      teamId,
+      deletedBefore,
+      batchLimit,
+      attemptedKeys,
+    })
+
+    if (candidates.length === 0) {
+      break
+    }
+
+    candidateCount += candidates.length
+
+    if (dryRun) {
+      skippedCount += candidates.length
+      break
+    }
+
+    for (const record of sortPermanentDeleteCandidates(candidates)) {
+      const sourceType = getRecycleBinRecordSourceType(record)
+      const recordId = normalizeText(record?.id, null)
+      const rowKey = `${sourceType}:${recordId ?? ''}`
+
+      attemptedKeys.add(rowKey)
+
+      try {
+        await permanentDeleteRecycleBinRecord(readClient, writeClient, record)
+        deletedCount += 1
+      } catch (error) {
+        failedCount += 1
+        errors.push({
+          id: recordId,
+          sourceType,
+          message: error instanceof Error ? error.message : 'Gagal menghapus permanen arsip.',
+        })
+      }
+    }
+  }
+
+  return {
+    deletedCount,
+    skippedCount,
+    failedCount,
+    candidateCount,
+    errors,
+  }
 }
 
 function decodeWorkspaceCursor(cursor) {
@@ -2398,7 +2607,9 @@ async function restoreLoanPayment(adminClient, body, telegramUserId) {
 
   assertOptimisticConcurrency(expectedUpdatedAt, existingPayment.updated_at, 'Pembayaran pinjaman')
 
-  await assertTeamAccess(adminClient, telegramUserId, teamId ?? existingPayment.team_id)
+  if (telegramUserId) {
+    await assertTeamAccess(adminClient, telegramUserId, teamId ?? existingPayment.team_id)
+  }
 
   const { data: parentLoan, error: loanError } = await adminClient
     .from('loans')
@@ -2685,6 +2896,106 @@ async function hardDeleteLoanPayment(adminClient, serviceClient, body, telegramU
   return {
     payment: existingPayment,
     loan,
+  }
+}
+
+async function hardDeleteBillPaymentRecord(adminClient, serviceClient, paymentId) {
+  const normalizedPaymentId = normalizeText(paymentId, null)
+
+  if (!normalizedPaymentId) {
+    throw createHttpError(400, 'Bill payment ID wajib diisi.')
+  }
+
+  const { data: payment, error: paymentError } = await adminClient
+    .from('bill_payments')
+    .select('id, bill_id, team_id, deleted_at')
+    .eq('id', normalizedPaymentId)
+    .maybeSingle()
+
+  if (paymentError) {
+    throw paymentError
+  }
+
+  if (!payment?.id) {
+    throw createHttpError(404, 'Pembayaran tagihan tidak ditemukan.')
+  }
+
+  if (!payment.deleted_at) {
+    throw createHttpError(
+      400,
+      'Pembayaran tagihan harus ada di recycle bin sebelum dihapus permanen.'
+    )
+  }
+
+  const { data: deletedRows, error: deleteError } = await serviceClient
+    .from('bill_payments')
+    .delete()
+    .eq('id', normalizedPaymentId)
+    .not('deleted_at', 'is', null)
+    .select('id')
+
+  if (deleteError) {
+    throw deleteError
+  }
+
+  assertDeletedRows(
+    deletedRows,
+    'Pembayaran tagihan tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+  )
+
+  const bill = payment.bill_id
+    ? await syncBillStatusFromPayments(adminClient, payment.bill_id)
+    : null
+
+  return {
+    payment,
+    bill,
+  }
+}
+
+async function hardDeleteExpenseAttachmentRecord(adminClient, serviceClient, attachmentId) {
+  const normalizedAttachmentId = normalizeText(attachmentId, null)
+
+  if (!normalizedAttachmentId) {
+    throw createHttpError(400, 'Attachment ID wajib diisi.')
+  }
+
+  const { data: attachment, error: attachmentError } = await adminClient
+    .from('expense_attachments')
+    .select('id, expense_id, team_id, deleted_at')
+    .eq('id', normalizedAttachmentId)
+    .maybeSingle()
+
+  if (attachmentError) {
+    throw attachmentError
+  }
+
+  if (!attachment?.id) {
+    throw createHttpError(404, 'Lampiran tidak ditemukan.')
+  }
+
+  if (!attachment.deleted_at) {
+    throw createHttpError(400, 'Lampiran harus ada di recycle bin sebelum dihapus permanen.')
+  }
+
+  const { data: deletedRows, error: deleteError } = await serviceClient
+    .from('expense_attachments')
+    .delete()
+    .eq('id', normalizedAttachmentId)
+    .not('deleted_at', 'is', null)
+    .select('id')
+
+  if (deleteError) {
+    throw deleteError
+  }
+
+  assertDeletedRows(
+    deletedRows,
+    'Lampiran tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+  )
+
+  return {
+    attachment,
   }
 }
 
@@ -3018,6 +3329,81 @@ function getBillPaymentStatus(totalAmount, paidAmount, existingPaidAt = null) {
   }
 }
 
+async function syncBillStatusFromPayments(adminClient, billId) {
+  const normalizedBillId = normalizeText(billId)
+
+  if (!normalizedBillId) {
+    throw createHttpError(400, 'Bill ID tidak valid.')
+  }
+
+  const { data: bill, error: billError } = await adminClient
+    .from('bills')
+    .select('id, expense_id, project_income_id, team_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, worker_name_snapshot, supplier_name_snapshot, project_name_snapshot, created_at, updated_at, deleted_at')
+    .eq('id', normalizedBillId)
+    .maybeSingle()
+
+  if (billError) {
+    throw billError
+  }
+
+  if (!bill?.id) {
+    return null
+  }
+
+  const { data: payments, error: paymentsError } = await adminClient
+    .from('bill_payments')
+    .select('amount, payment_date')
+    .eq('bill_id', normalizedBillId)
+    .is('deleted_at', null)
+
+  if (paymentsError) {
+    throw paymentsError
+  }
+
+  const paidAmount = (payments ?? []).reduce(
+    (sum, payment) => sum + Number(payment?.amount ?? 0),
+    0
+  )
+  const latestPaymentDate = (payments ?? []).reduce((latest, payment) => {
+    const paymentDate = normalizeText(payment?.payment_date, null)
+
+    if (!paymentDate) {
+      return latest
+    }
+
+    if (!latest) {
+      return paymentDate
+    }
+
+    return new Date(paymentDate).getTime() > new Date(latest).getTime() ? paymentDate : latest
+  }, null)
+  const nextBillState = getBillPaymentStatus(
+    Number(bill.amount ?? 0),
+    paidAmount,
+    latestPaymentDate
+  )
+
+  const { data: syncedBill, error: syncError } = await adminClient
+    .from('bills')
+    .update({
+      paid_amount: paidAmount,
+      status: nextBillState.status,
+      paid_at: nextBillState.paidAt,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', normalizedBillId)
+    .select(
+      'id, expense_id, project_income_id, team_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, worker_name_snapshot, supplier_name_snapshot, project_name_snapshot, created_at, updated_at, deleted_at'
+    )
+    .single()
+
+  if (syncError) {
+    throw syncError
+  }
+
+  return mapBillRecycleRow(syncedBill)
+}
+
 async function restoreBill(adminClient, id, telegramUserId = null, teamId = null) {
   const normalizedId = normalizeText(id)
   const normalizedTeamId = normalizeText(teamId, null)
@@ -3263,7 +3649,7 @@ async function restoreAttendanceRecord(adminClient, id) {
   return mapAttendanceRecycleRow(nextAttendance)
 }
 
-async function hardDeleteProjectIncome(adminClient, id) {
+async function hardDeleteProjectIncome(adminClient, serviceClient, id) {
   const normalizedId = normalizeText(id)
 
   if (!normalizedId) {
@@ -3296,7 +3682,7 @@ async function hardDeleteProjectIncome(adminClient, id) {
   const billIds = (bills ?? []).map((bill) => bill.id).filter(Boolean)
 
   if (billIds.length > 0) {
-    const { error: paymentError } = await adminClient
+    const { error: paymentError } = await serviceClient
       .from('bill_payments')
       .delete()
       .in('bill_id', billIds)
@@ -3305,7 +3691,7 @@ async function hardDeleteProjectIncome(adminClient, id) {
       throw paymentError
     }
 
-    const { error: billDeleteError } = await adminClient
+    const { error: billDeleteError } = await serviceClient
       .from('bills')
       .delete()
       .eq('project_income_id', normalizedId)
@@ -3315,19 +3701,26 @@ async function hardDeleteProjectIncome(adminClient, id) {
     }
   }
 
-  const { error: incomeDeleteError } = await adminClient
+  const { data: deletedRows, error: incomeDeleteError } = await serviceClient
     .from('project_incomes')
     .delete()
     .eq('id', normalizedId)
+    .not('deleted_at', 'is', null)
+    .select('id')
 
   if (incomeDeleteError) {
     throw incomeDeleteError
   }
 
+  assertDeletedRows(
+    deletedRows,
+    'Pemasukan proyek tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+  )
+
   return true
 }
 
-async function hardDeleteLoan(adminClient, id) {
+async function hardDeleteLoan(adminClient, serviceClient, id) {
   const normalizedId = normalizeText(id)
 
   if (!normalizedId) {
@@ -3348,7 +3741,7 @@ async function hardDeleteLoan(adminClient, id) {
     throw createHttpError(400, 'Pinjaman harus ada di recycle bin sebelum dihapus permanen.')
   }
 
-  const { error: paymentError } = await adminClient
+  const { error: paymentError } = await serviceClient
     .from('loan_payments')
     .delete()
     .eq('loan_id', normalizedId)
@@ -3357,16 +3750,26 @@ async function hardDeleteLoan(adminClient, id) {
     throw paymentError
   }
 
-  const { error: deleteError } = await adminClient.from('loans').delete().eq('id', normalizedId)
+  const { data: deletedRows, error: deleteError } = await serviceClient
+    .from('loans')
+    .delete()
+    .eq('id', normalizedId)
+    .not('deleted_at', 'is', null)
+    .select('id')
 
   if (deleteError) {
     throw deleteError
   }
 
+  assertDeletedRows(
+    deletedRows,
+    'Pinjaman tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+  )
+
   return true
 }
 
-async function hardDeleteBill(adminClient, id) {
+async function hardDeleteBill(adminClient, serviceClient, id) {
   const normalizedId = normalizeText(id)
 
   if (!normalizedId) {
@@ -3387,7 +3790,7 @@ async function hardDeleteBill(adminClient, id) {
     throw createHttpError(400, 'Tagihan harus ada di recycle bin sebelum dihapus permanen.')
   }
 
-  const { error: paymentError } = await adminClient
+  const { error: paymentError } = await serviceClient
     .from('bill_payments')
     .delete()
     .eq('bill_id', normalizedId)
@@ -3396,8 +3799,24 @@ async function hardDeleteBill(adminClient, id) {
     throw paymentError
   }
 
+  const { data: deletedRows, error: billDeleteError } = await serviceClient
+    .from('bills')
+    .delete()
+    .eq('id', normalizedId)
+    .not('deleted_at', 'is', null)
+    .select('id')
+
+  if (billDeleteError) {
+    throw billDeleteError
+  }
+
+  assertDeletedRows(
+    deletedRows,
+    'Tagihan tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+  )
+
   if (bill.expense_id) {
-    const { error: lineItemError } = await adminClient
+    const { error: lineItemError } = await serviceClient
       .from('expense_line_items')
       .delete()
       .eq('expense_id', bill.expense_id)
@@ -3406,7 +3825,7 @@ async function hardDeleteBill(adminClient, id) {
       throw lineItemError
     }
 
-    const { error: expenseError } = await adminClient
+    const { error: expenseError } = await serviceClient
       .from('expenses')
       .delete()
       .eq('id', bill.expense_id)
@@ -3416,16 +3835,10 @@ async function hardDeleteBill(adminClient, id) {
     }
   }
 
-  const { error: billDeleteError } = await adminClient.from('bills').delete().eq('id', normalizedId)
-
-  if (billDeleteError) {
-    throw billDeleteError
-  }
-
   return true
 }
 
-async function hardDeleteAttendance(adminClient, id) {
+async function hardDeleteAttendance(adminClient, serviceClient, id) {
   const normalizedId = normalizeText(id)
 
   if (!normalizedId) {
@@ -3447,7 +3860,7 @@ async function hardDeleteAttendance(adminClient, id) {
   }
 
   if (attendance.salary_bill_id) {
-    const { error: paymentError } = await adminClient
+    const { error: paymentError } = await serviceClient
       .from('bill_payments')
       .delete()
       .eq('bill_id', attendance.salary_bill_id)
@@ -3456,7 +3869,7 @@ async function hardDeleteAttendance(adminClient, id) {
       throw paymentError
     }
 
-    const { error: billError } = await adminClient
+    const { error: billError } = await serviceClient
       .from('bills')
       .delete()
       .eq('id', attendance.salary_bill_id)
@@ -3466,14 +3879,21 @@ async function hardDeleteAttendance(adminClient, id) {
     }
   }
 
-  const { error: deleteError } = await adminClient
+  const { data: deletedRows, error: deleteError } = await serviceClient
     .from('attendance_records')
     .delete()
     .eq('id', normalizedId)
+    .not('deleted_at', 'is', null)
+    .select('id')
 
   if (deleteError) {
     throw deleteError
   }
+
+  assertDeletedRows(
+    deletedRows,
+    'Absensi tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+  )
 
   return true
 }
@@ -4051,6 +4471,20 @@ export default async function handler(req, res) {
         })
       }
 
+      if (normalizeText(body.action, '') === 'permanent-delete-all-eligible') {
+        const result = await purgeRecycleBinRecords({
+          readClient: serviceClient,
+          writeClient: serviceClient,
+          teamId: effectiveTeamId,
+          batchLimit: body.batchLimit ?? body.batch_limit ?? 100,
+        })
+
+        return res.status(200).json({
+          success: true,
+          ...result,
+        })
+      }
+
       if (normalizeText(body.action, '') === 'permanent-delete') {
         const teamId = normalizeText(body.teamId ?? body.team_id, null)
 
@@ -4062,7 +4496,7 @@ export default async function handler(req, res) {
           }
 
           await assertTeamAccess(adminClient, telegramUserId, teamId ?? effectiveTeamId)
-          await hardDeleteProjectIncome(adminClient, body.id)
+          await hardDeleteProjectIncome(adminClient, serviceClient, body.id)
 
           return res.status(200).json({
             success: true,
@@ -4077,7 +4511,7 @@ export default async function handler(req, res) {
           }
 
           await assertTeamAccess(adminClient, telegramUserId, teamId ?? effectiveTeamId)
-          await hardDeleteLoan(adminClient, body.id)
+          await hardDeleteLoan(adminClient, serviceClient, body.id)
 
           return res.status(200).json({
             success: true,
@@ -4092,7 +4526,7 @@ export default async function handler(req, res) {
           }
 
           await assertTeamAccess(adminClient, telegramUserId, teamId ?? effectiveTeamId)
-          await hardDeleteBill(adminClient, body.id)
+          await hardDeleteBill(adminClient, serviceClient, body.id)
 
           return res.status(200).json({
             success: true,
@@ -4107,7 +4541,7 @@ export default async function handler(req, res) {
           }
 
           await assertTeamAccess(adminClient, telegramUserId, teamId ?? effectiveTeamId)
-          await hardDeleteAttendance(adminClient, body.id)
+          await hardDeleteAttendance(adminClient, serviceClient, body.id)
 
           return res.status(200).json({
             success: true,

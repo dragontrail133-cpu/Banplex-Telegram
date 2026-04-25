@@ -395,12 +395,37 @@ export async function restoreExpenseFromApi(expenseId, teamId, expectedUpdatedAt
   return result.expense ?? null
 }
 
-export async function createMaterialInvoiceFromApi(headerData, itemsData) {
+export async function extractMaterialInvoiceAiDraftFromApi({
+  teamId,
+  imageDataBase64,
+  mimeType,
+  fileName = null,
+} = {}) {
+  const result = await requestRecordsApi('POST', {
+    resource: 'material-invoice-ai-draft',
+    body: {
+      teamId,
+      imageDataBase64,
+      mimeType,
+      fileName,
+    },
+  })
+
+  return {
+    draft: result.draft ?? null,
+    review: result.review ?? [],
+  }
+}
+
+export async function createMaterialInvoiceFromApi(headerData, itemsData, options = {}) {
   const result = await requestRecordsApi('POST', {
     resource: 'material-invoices',
     body: {
       headerData,
       itemsData,
+      materialDrafts: Array.isArray(options.materialDrafts)
+        ? options.materialDrafts
+        : [],
     },
   })
 

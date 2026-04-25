@@ -207,6 +207,7 @@ function buildMaterialInvoicePayload(headerData = {}, itemsData = []) {
 
   const normalizedItems = itemsData.map((item, index) => {
     const materialId = normalizeText(item.material_id ?? item.materialId)
+    const materialDraftId = normalizeText(item.material_draft_id ?? item.materialDraftId, null)
     const itemName = normalizeText(item.item_name ?? item.itemName ?? item.material_name)
     const qty = toNumber(item.qty)
     const unitPrice = isDeliveryOrder
@@ -214,7 +215,7 @@ function buildMaterialInvoicePayload(headerData = {}, itemsData = []) {
       : toNumber(item.unit_price ?? item.unitPrice)
     const computedLineTotal = qty * unitPrice
 
-    if (!materialId) {
+    if (!materialId && !materialDraftId) {
       throw new Error(`Material pada baris ${index + 1} wajib dipilih.`)
     }
 
@@ -241,6 +242,7 @@ function buildMaterialInvoicePayload(headerData = {}, itemsData = []) {
 
     return {
       material_id: materialId,
+      material_draft_id: materialDraftId,
       item_name: itemName,
       qty,
       unit_price: unitPrice,
@@ -569,7 +571,7 @@ const useTransactionStore = create((set) => ({
       throw normalizedError
     }
   },
-  submitMaterialInvoice: async (headerData, itemsData) => {
+  submitMaterialInvoice: async (headerData, itemsData, options = {}) => {
     set({ isSubmitting: true, error: null })
 
     try {
@@ -581,7 +583,12 @@ const useTransactionStore = create((set) => ({
         buildMaterialInvoicePayload(headerData, itemsData)
       const result = await createMaterialInvoiceFromApi(
         headerPayload,
-        lineItemsPayload
+        lineItemsPayload,
+        {
+          materialDrafts: Array.isArray(options.materialDrafts)
+            ? options.materialDrafts
+            : [],
+        }
       )
 
       if (!result?.expense?.id) {

@@ -1,9 +1,9 @@
 const DEV_AUTH_BYPASS_QUERY_KEYS = ['devAuthBypass', 'tgDevBypass', 'mockTelegram']
 const DEV_AUTH_BYPASS_STORAGE_KEY = 'banplex.dev-auth-bypass'
-const DEV_AUTH_USER_ID = '20002'
-const DEV_AUTH_TEAM_ID = 'dev-team'
-const DEV_AUTH_TEAM_NAME = 'Local Dev Team'
-const DEV_AUTH_TEAM_SLUG = 'local-dev'
+const DEV_AUTH_USER_ID = '7592811205'
+const DEV_AUTH_TEAM_ID = '2213b84a-a513-47fa-afbb-8b99ae3b64be'
+const DEV_AUTH_TEAM_NAME = 'Default Workspace'
+const DEV_AUTH_TEAM_SLUG = 'default-workspace'
 const DEV_AUTH_ACCESS_TOKEN = 'dev-local-access-token'
 const DEV_AUTH_REFRESH_TOKEN = 'dev-local-refresh-token'
 const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on'])

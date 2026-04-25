@@ -308,6 +308,91 @@ function buildRecycleBinRecordMockApi(record, { permanentDeleteRecordType = reco
   }
 }
 
+function buildBulkPermanentDeleteMockApi() {
+  const restoreOnlyRecord = {
+    id: 'expense-restore-only-1',
+    sourceType: 'expense',
+    type: 'expense',
+    amount: 450_000,
+    description: 'Pengeluaran Restore Only',
+    deleted_at: '2026-04-21T07:00:00.000Z',
+    updated_at: '2026-04-21T07:00:00.000Z',
+    created_at: '2026-04-20T07:00:00.000Z',
+    canPermanentDelete: false,
+    canRestore: true,
+    group: 'document',
+  }
+  const eligiblePaymentRecord = {
+    id: 'loan-payment-bulk-1',
+    sourceType: 'loan-payment',
+    type: 'expense',
+    amount: 350_000,
+    description: 'Pembayaran Pinjaman Bulk',
+    deleted_at: '2026-04-21T08:00:00.000Z',
+    updated_at: '2026-04-21T08:00:00.000Z',
+    created_at: '2026-04-20T08:00:00.000Z',
+    canPermanentDelete: true,
+    canRestore: true,
+    group: 'payment',
+  }
+  const eligibleBillRecord = {
+    id: 'bill-bulk-1',
+    sourceType: 'bill',
+    type: 'expense',
+    amount: 900_000,
+    description: 'Tagihan Bulk',
+    deleted_at: '2026-04-21T09:00:00.000Z',
+    updated_at: '2026-04-21T09:00:00.000Z',
+    created_at: '2026-04-20T09:00:00.000Z',
+    canPermanentDelete: true,
+    canRestore: true,
+    group: 'transaction',
+  }
+  const state = {
+    records: [eligiblePaymentRecord, eligibleBillRecord, restoreOnlyRecord],
+    lastBulkDeleteRequest: null,
+  }
+
+  return {
+    state,
+    notify: async () => ({ success: true }),
+    transactions: async ({ method, url, body }) => {
+      if (method === 'GET' && url.searchParams.get('view') === 'recycle-bin') {
+        return {
+          success: true,
+          recycleBinRecords: state.records,
+          cashMutations: state.records,
+          pageInfo: {
+            hasMore: false,
+            nextCursor: null,
+            totalCount: state.records.length,
+          },
+        }
+      }
+
+      if (method === 'DELETE' && body?.action === 'permanent-delete-all-eligible') {
+        const deletedCount = state.records.filter(
+          (record) => record.canPermanentDelete === true
+        ).length
+
+        state.records = state.records.filter((record) => record.canPermanentDelete !== true)
+        state.lastBulkDeleteRequest = body
+
+        return {
+          success: true,
+          deletedCount,
+          skippedCount: 0,
+          failedCount: 0,
+          candidateCount: deletedCount,
+          errors: [],
+        }
+      }
+
+      return undefined
+    },
+  }
+}
+
 test.describe('restore surfaces', () => {
   test('opens transaction recycle bin', async ({ page }) => {
     await openApp(page, '/transactions/recycle-bin', {
@@ -425,6 +510,33 @@ test.describe('restore surfaces', () => {
     expect(mockApi.state.lastPaymentPermanentDeleteRequest).toMatchObject({
       action: 'permanent-delete',
       paymentId: 'bill-payment-restore-2',
+    })
+  })
+
+  test('permanently deletes all eligible recycle bin records only', async ({ page }) => {
+    const mockApi = buildBulkPermanentDeleteMockApi()
+
+    await openApp(page, '/transactions/recycle-bin', {
+      mockApi,
+    })
+
+    await expectHeading(page, 'Arsip')
+    await expect(page.getByRole('button', { name: /Pembayaran Pinjaman Bulk/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Tagihan Bulk/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Pengeluaran Restore Only/ })).toBeVisible()
+
+    page.once('dialog', async (dialog) => {
+      await dialog.accept()
+    })
+
+    await page.getByRole('button', { name: 'Hapus Semua' }).click()
+
+    await expect(page.getByRole('button', { name: /Pembayaran Pinjaman Bulk/ })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /Tagihan Bulk/ })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /Pengeluaran Restore Only/ })).toBeVisible()
+    expect(mockApi.state.lastBulkDeleteRequest).toMatchObject({
+      action: 'permanent-delete-all-eligible',
+      teamId: 'e2e-team',
     })
   })
 

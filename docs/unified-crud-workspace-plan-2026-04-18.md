@@ -3118,3 +3118,21 @@ Saat ada brief baru yang masih terkait stream ini, update dokumen dengan format:
   - Dependensi: `UCW-404`, `UCW-405`.
   - Validasi minimum: lint/build dan smoke navigasi cepat antar halaman utama.
   - Addendum audit 2026-04-25: `MainLayout` kini remount route shell tanpa overlap exit, `FormLayout` dibuat opaque saat slide-in, dan Playwright smoke sengaja di-skip sesuai instruksi user setelah lint dan build lolos.
+- [x] UCW-409 - Implement AI draft Faktur Barang via Gemini
+  - Faktur Barang create mode mendapat flow scan foto/screenshot dengan Gemini API untuk menghasilkan draft item, review inline, dan pembuatan master barang baru saat faktur disimpan.
+  - Scope target: `src/components/MaterialInvoiceForm.jsx`, `src/lib/material-invoice-ai.js`, `src/lib/records-api.js`, `src/store/useTransactionStore.js`, `api/records.js`, `tests/unit/material-invoice-ai.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: kontrak `Faktur Barang` di freeze source-of-truth dan flow material invoice API-backed.
+  - Validasi minimum: unit helper AI, lint file scope, node syntax check backend/helper, dan build.
+  - Addendum audit 2026-04-25: flow tidak keluar ke route Master Barang; barang missing disimpan sebagai draft inline, wajib punya satuan, lalu backend membuat master baru pada submit faktur dengan re-check exact match untuk mencegah duplikat.
+- [x] UCW-410 - Finalkan permanent delete dan auto-retention Arsip
+  - Hapus permanen Arsip harus benar-benar menghapus row di database dan refresh UI; bulk delete hanya menargetkan item `canPermanentDelete`, sedangkan auto-retention menghapus item eligible yang melewati batas umur.
+  - Scope target: `api/transactions.js`, `api/records.js`, `api/recycle-bin-retention.js`, `src/lib/transactions-api.js`, `src/pages/TransactionsRecycleBinPage.jsx`, `tests/e2e/restore.spec.js`, `vercel.json`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: route `/transactions/recycle-bin`, wrapper `/api/transactions`, wrapper `/api/records`, view Supabase `public.vw_recycle_bin_records`, dan existing service-role environment.
+  - Validasi minimum: lint/build, smoke Playwright restore/recycle-bin, dan audit source-of-truth route/store/API/view.
+  - Addendum audit 2026-04-25: hard delete memakai service client tanpa bearer user setelah team access diverifikasi, bulk `Hapus Semua` memakai action `permanent-delete-all-eligible`, dan auto-retention harian memakai endpoint cron `/api/recycle-bin-retention` dengan `CRON_SECRET`.
+- [x] UCW-411 - Stabilkan overload Gemini scan Faktur Barang
+  - Endpoint AI faktur harus retry singkat saat Gemini `503 UNAVAILABLE`, mencoba fallback model yang masih mendukung image dan structured output, dan menampilkan error operasional yang jelas tanpa JSON mentah provider.
+  - Scope target: `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-409`.
+  - Validasi minimum: syntax backend, lint file scope, dan build.
+  - Addendum audit 2026-04-25: backend mencoba ulang model utama sekali, lalu memakai fallback default `gemini-2.5-flash-lite` atau daftar `GEMINI_INVOICE_FALLBACK_MODELS`; error 503 dan 429 sekarang dipetakan ke pesan yang bisa ditindaklanjuti.

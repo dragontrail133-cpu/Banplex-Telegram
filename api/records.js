@@ -9,6 +9,11 @@ import {
   resolveAttendanceEffectiveTotalPay,
 } from '../src/lib/attendance-payroll.js'
 import { assertCapabilityAccess } from '../src/lib/capabilities.js'
+import {
+  buildMaterialInvoiceAiReview,
+  normalizeMaterialName,
+  normalizeUnitLabel,
+} from '../src/lib/material-invoice-ai.js'
 import { nowMs } from '../src/lib/timing.js'
 
 const attendanceSelectColumns =
@@ -38,6 +43,12 @@ const stockMaterialColumns =
   'id, team_id, name, material_name, unit, current_stock, reorder_point, updated_at'
 const stockTransactionColumns =
   'id, team_id, material_id, project_id, expense_id, expense_line_item_id, quantity, direction, source_type, transaction_date, price_per_unit, notes, created_at, updated_at, materials:material_id ( id, name, material_name, unit ), projects:project_id ( id, name, project_name )'
+const materialInvoiceAiImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
+const materialInvoiceAiMaxImageBytes = 3 * 1024 * 1024
+const materialInvoiceAiMaxItems = 100
+const materialInvoiceGeminiDefaultFallbackModels = ['gemini-2.5-flash-lite']
+const materialInvoiceGeminiRetryableStatuses = new Set([500, 503, 504])
+const materialInvoiceGeminiRetryDelaysMs = [750]
 
 function isMissingAttendanceOvertimeFeeColumnError(error) {
   const normalizedCode = normalizeText(error?.code, null)
@@ -578,6 +589,12 @@ function createHttpError(status, message) {
   error.statusCode = status
 
   return error
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
 }
 
 function getBearerToken(req) {
@@ -2095,7 +2112,7 @@ async function deleteBillPayment(adminClient, body = {}, telegramUserId) {
   }
 }
 
-async function hardDeleteBillPayment(adminClient, body = {}, telegramUserId) {
+async function hardDeleteBillPayment(adminClient, serviceClient, body = {}, telegramUserId) {
   const paymentId = normalizeText(body.paymentId ?? body.id, null)
 
   if (!paymentId) {
@@ -2129,13 +2146,22 @@ async function hardDeleteBillPayment(adminClient, body = {}, telegramUserId) {
     )
   }
 
-  const { error: deleteError } = await adminClient
+  const { data: deletedRows, error: deleteError } = await serviceClient
     .from('bill_payments')
     .delete()
     .eq('id', payment.id)
+    .not('deleted_at', 'is', null)
+    .select('id')
 
   if (deleteError) {
     throw deleteError
+  }
+
+  if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+    throw createHttpError(
+      409,
+      'Pembayaran tagihan tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+    )
   }
 
   const updatedBill = bill?.id ? await recalculateBillPaymentSummary(adminClient, bill.id) : null
@@ -2767,7 +2793,7 @@ async function restoreExpenseAttachment(adminClient, body, telegramUserId) {
   return normalizeExpenseAttachmentRow(data)
 }
 
-async function permanentDeleteExpenseAttachment(adminClient, body, telegramUserId) {
+async function permanentDeleteExpenseAttachment(adminClient, serviceClient, body, telegramUserId) {
   const attachmentId = normalizeText(body.attachmentId ?? body.id, null)
   const teamId = normalizeText(body.teamId ?? body.team_id, null)
 
@@ -2780,7 +2806,7 @@ async function permanentDeleteExpenseAttachment(adminClient, body, telegramUserI
   })
 
   if (!attachment?.id) {
-    return true
+    throw createHttpError(404, 'Lampiran tidak ditemukan.')
   }
 
   if (!attachment.deleted_at) {
@@ -2797,13 +2823,22 @@ async function permanentDeleteExpenseAttachment(adminClient, body, telegramUserI
 
   await assertTeamAccess(adminClient, telegramUserId, teamId ?? expense.team_id)
 
-  const { error } = await adminClient
+  const { data: deletedRows, error } = await serviceClient
     .from('expense_attachments')
     .delete()
     .eq('id', attachment.id)
+    .not('deleted_at', 'is', null)
+    .select('id')
 
   if (error) {
     throw error
+  }
+
+  if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+    throw createHttpError(
+      409,
+      'Lampiran tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+    )
   }
 
   return true
@@ -3424,9 +3459,685 @@ async function resolveMaterialSupplier(adminClient, { supplierId = null, supplie
   return upsertMaterialSupplier(adminClient, supplierName, teamId)
 }
 
+function sanitizeMaterialInvoiceAiBase64(value) {
+  const rawValue = normalizeText(value, '')
+  const base64Value = rawValue.includes(',')
+    ? rawValue.slice(rawValue.indexOf(',') + 1)
+    : rawValue
+  const normalizedValue = base64Value.replace(/\s+/g, '')
+
+  if (!normalizedValue || !/^[A-Za-z0-9+/=]+$/.test(normalizedValue)) {
+    throw createHttpError(400, 'File gambar AI tidak valid.')
+  }
+
+  const estimatedBytes = Math.floor((normalizedValue.length * 3) / 4)
+
+  if (estimatedBytes > materialInvoiceAiMaxImageBytes) {
+    throw createHttpError(413, 'File gambar terlalu besar untuk diproses AI.')
+  }
+
+  return normalizedValue
+}
+
+function normalizeMaterialInvoiceAiDate(value) {
+  const normalizedValue = normalizeText(value, '')
+
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalizedValue) ? normalizedValue : ''
+}
+
+function normalizeGeminiInvoiceNumber(value) {
+  return normalizeText(value, '')
+    .replace(/^[-–—]+$/, '')
+    .trim()
+}
+
+function normalizeGeminiInvoiceDraft(value = {}) {
+  const rawItems = Array.isArray(value?.items) ? value.items : []
+  const items = rawItems
+    .slice(0, materialInvoiceAiMaxItems)
+    .map((item, index) => {
+      const name = normalizeText(
+        item?.name ?? item?.materialName ?? item?.material_name ?? item?.item_name,
+        ''
+      )
+      const qty = toNumber(item?.qty ?? item?.quantity ?? item?.jumlah)
+      const unit = normalizeText(item?.unit ?? item?.satuan, '')
+      const unitPrice = toNumber(item?.unitPrice ?? item?.unit_price ?? item?.harga_satuan)
+      const rawLineTotal = toNumber(item?.lineTotal ?? item?.line_total ?? item?.subtotal)
+      const lineTotal =
+        Number.isFinite(rawLineTotal) && rawLineTotal > 0
+          ? rawLineTotal
+          : Number.isFinite(qty) && qty > 0 && Number.isFinite(unitPrice) && unitPrice > 0
+            ? qty * unitPrice
+            : ''
+
+      return {
+        tempId: `gemini-item-${index + 1}`,
+        name,
+        unit,
+        qty: Number.isFinite(qty) && qty > 0 ? qty : '',
+        unitPrice: Number.isFinite(unitPrice) && unitPrice > 0 ? unitPrice : '',
+        lineTotal,
+        confidence: Number.isFinite(toNumber(item?.confidence)) ? toNumber(item.confidence) : '',
+        sourceText: normalizeText(item?.sourceText ?? item?.source_text, ''),
+      }
+    })
+    .filter((item) => item.name)
+
+  if (items.length === 0) {
+    throw createHttpError(422, 'AI belum menemukan item barang yang bisa direview.')
+  }
+
+  return {
+    documentDate: normalizeMaterialInvoiceAiDate(
+      value?.documentDate ?? value?.document_date ?? value?.invoiceDate ?? value?.invoice_date
+    ),
+    supplierName: normalizeText(value?.supplierName ?? value?.supplier_name, ''),
+    invoiceNumber: normalizeGeminiInvoiceNumber(
+      value?.invoiceNumber ?? value?.invoice_number ?? value?.number
+    ),
+    notes: normalizeText(value?.notes, ''),
+    items,
+  }
+}
+
+function extractJsonCandidateText(text) {
+  const normalizedText = normalizeText(text, '')
+
+  if (!normalizedText) {
+    return ''
+  }
+
+  const fenceMatch = normalizedText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+
+  if (fenceMatch?.[1]) {
+    return fenceMatch[1].trim()
+  }
+
+  const firstObjectBrace = normalizedText.indexOf('{')
+  const lastObjectBrace = normalizedText.lastIndexOf('}')
+
+  if (firstObjectBrace >= 0 && lastObjectBrace > firstObjectBrace) {
+    return normalizedText.slice(firstObjectBrace, lastObjectBrace + 1).trim()
+  }
+
+  return normalizedText
+}
+
+function parseGeminiInvoiceDraft(text) {
+  const candidateText = extractJsonCandidateText(text)
+
+  if (!candidateText) {
+    throw createHttpError(422, 'Gemini tidak mengembalikan draft faktur.')
+  }
+
+  try {
+    return normalizeGeminiInvoiceDraft(JSON.parse(candidateText))
+  } catch (error) {
+    const repairedCandidateText = repairGeminiJsonText(candidateText)
+
+    if (repairedCandidateText && repairedCandidateText !== candidateText) {
+      try {
+        return normalizeGeminiInvoiceDraft(JSON.parse(repairedCandidateText))
+      } catch {
+        // fall through to the normalized error below
+      }
+    }
+
+    const parseMessage =
+      error instanceof Error && error.message ? error.message : 'JSON Gemini tidak valid.'
+
+    throw createHttpError(
+      422,
+      `Gemini mengembalikan format JSON tidak valid: ${parseMessage}`
+    )
+  }
+}
+
+function parseGeminiModelList(value) {
+  return String(value ?? '')
+    .split(',')
+    .map((model) => normalizeText(model, ''))
+    .filter(Boolean)
+}
+
+function getGeminiInvoiceConfig() {
+  const apiKey = normalizeText(getEnv('GEMINI_API_KEY'), '')
+  const model = normalizeText(getEnv('GEMINI_INVOICE_MODEL'), '')
+  const fallbackModels = parseGeminiModelList(getEnv('GEMINI_INVOICE_FALLBACK_MODELS', ''))
+  const models = [
+    ...new Set([
+      model,
+      ...fallbackModels,
+      ...materialInvoiceGeminiDefaultFallbackModels,
+    ].filter(Boolean)),
+  ]
+
+  if (!apiKey || !model) {
+    throw createHttpError(
+      500,
+      'Konfigurasi Gemini faktur belum lengkap. Set GEMINI_API_KEY dan GEMINI_INVOICE_MODEL.'
+    )
+  }
+
+  return { apiKey, models }
+}
+
+function buildMaterialInvoiceGeminiPrompt() {
+  return [
+    'Ekstrak draft faktur barang dari gambar ini.',
+    'Kembalikan hanya data yang terbaca jelas. Jangan menebak barang, qty, harga, tanggal, atau supplier.',
+    'Keluarkan hanya field yang diminta oleh schema. Jangan tambahkan sourceText, metadata, atau penjelasan lain.',
+    'Nominal rupiah harus lengkap dan jangan menghapus nol di belakang angka yang terbaca jelas.',
+    'Nama barang harus mengikuti teks pada faktur/screenshot.',
+    'Jika satuan tidak terbaca, isi string kosong.',
+    'Jika harga satuan tidak terbaca tetapi subtotal dan qty terbaca, harga satuan boleh dikosongkan.',
+    'Format tanggal wajib YYYY-MM-DD jika terbaca jelas, selain itu string kosong.',
+  ].join('\n')
+}
+
+const materialInvoiceGeminiSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    documentDate: { type: 'string' },
+    supplierName: { type: 'string' },
+    invoiceNumber: { type: 'string' },
+    notes: { type: 'string' },
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string' },
+          unit: { type: 'string' },
+          qty: { type: 'number' },
+          unitPrice: { type: 'number' },
+          lineTotal: { type: 'number' },
+          confidence: { type: 'number' },
+        },
+        required: ['name'],
+      },
+    },
+  },
+  required: ['items'],
+}
+
+function repairGeminiJsonText(text) {
+  const normalizedText = normalizeText(text, '')
+
+  if (!normalizedText) {
+    return ''
+  }
+
+  let repairedText = ''
+  let isInsideString = false
+  let isEscaped = false
+
+  for (let index = 0; index < normalizedText.length; index += 1) {
+    const character = normalizedText[index]
+
+    if (!isInsideString) {
+      repairedText += character
+
+      if (character === '"') {
+        isInsideString = true
+      }
+
+      continue
+    }
+
+    if (isEscaped) {
+      repairedText += character
+      isEscaped = false
+      continue
+    }
+
+    if (character === '\\') {
+      repairedText += character
+      isEscaped = true
+      continue
+    }
+
+    if (character === '\n') {
+      repairedText += '\\n'
+      continue
+    }
+
+    if (character === '\r') {
+      repairedText += '\\r'
+      continue
+    }
+
+    if (character === '\t') {
+      repairedText += '\\t'
+      continue
+    }
+
+    if (character === '"') {
+      let lookaheadIndex = index + 1
+
+      while (lookaheadIndex < normalizedText.length && /\s/.test(normalizedText[lookaheadIndex])) {
+        lookaheadIndex += 1
+      }
+
+      const nextCharacter = normalizedText[lookaheadIndex] ?? ''
+
+      if (
+        nextCharacter === '' ||
+        nextCharacter === ',' ||
+        nextCharacter === '}' ||
+        nextCharacter === ']' ||
+        nextCharacter === ':'
+      ) {
+        repairedText += character
+        isInsideString = false
+      } else {
+        repairedText += '\\"'
+      }
+
+      continue
+    }
+
+    repairedText += character
+  }
+
+  if (isInsideString) {
+    repairedText += '"'
+  }
+
+  return repairedText
+}
+
+function parseGeminiApiError(responseText) {
+  if (!responseText) {
+    return null
+  }
+
+  try {
+    const payload = JSON.parse(responseText)
+    const error = payload?.error
+
+    if (!error || typeof error !== 'object') {
+      return null
+    }
+
+    return {
+      code: Number(error.code),
+      message: normalizeText(error.message, ''),
+      status: normalizeText(error.status, ''),
+    }
+  } catch {
+    return null
+  }
+}
+
+function createGeminiApiError(response, responseText, model) {
+  const parsedError = parseGeminiApiError(responseText)
+  const statusCode = Number.isFinite(parsedError?.code) ? parsedError.code : response.status
+  const providerStatus = normalizeText(parsedError?.status, '')
+  const providerMessage = normalizeText(parsedError?.message, '')
+  const modelLabel = normalizeText(model, 'Gemini')
+  const message =
+    statusCode === 503 || providerStatus === 'UNAVAILABLE'
+      ? `Gemini model ${modelLabel} sedang penuh. Coba ulang beberapa saat lagi.`
+      : statusCode === 429 || providerStatus === 'RESOURCE_EXHAUSTED'
+        ? `Kuota Gemini model ${modelLabel} sedang habis atau terkena rate limit. Coba ulang nanti atau gunakan API key/model lain.`
+      : providerMessage
+        ? `Gemini gagal membaca faktur (${modelLabel}): ${providerMessage}`
+        : `Gemini gagal membaca faktur (${modelLabel}).`
+  const error = createHttpError(statusCode, message)
+
+  error.isGeminiRetryable =
+    materialInvoiceGeminiRetryableStatuses.has(statusCode) ||
+    ['INTERNAL', 'UNAVAILABLE', 'DEADLINE_EXCEEDED'].includes(providerStatus)
+  error.providerStatus = providerStatus
+  error.providerMessage = providerMessage
+  error.model = modelLabel
+
+  return error
+}
+
+async function requestGeminiMaterialInvoiceDraft({ apiKey, model, imageDataBase64, mimeType }) {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 25000)
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'x-goog-api-key': apiKey,
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: buildMaterialInvoiceGeminiPrompt() },
+                {
+                  inline_data: {
+                    mime_type: mimeType,
+                    data: imageDataBase64,
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 4096,
+            responseMimeType: 'application/json',
+            responseJsonSchema: materialInvoiceGeminiSchema,
+          },
+        }),
+      }
+    )
+    const responseText = (await response.text()).trim()
+
+    if (!response.ok) {
+      throw createGeminiApiError(response, responseText, model)
+    }
+
+    let responseJson = {}
+
+    if (responseText) {
+      try {
+        responseJson = JSON.parse(responseText)
+      } catch (error) {
+        const parseMessage =
+          error instanceof Error && error.message ? error.message : 'Respons Gemini tidak valid.'
+
+        throw createHttpError(502, `Respons Gemini tidak valid: ${parseMessage}`)
+      }
+    }
+
+    const candidateText = normalizeText(
+      (responseJson?.candidates?.[0]?.content?.parts ?? [])
+        .map((part) => normalizeText(part?.text, ''))
+        .filter(Boolean)
+        .join(''),
+      ''
+    )
+
+    return parseGeminiInvoiceDraft(candidateText)
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+async function callGeminiMaterialInvoiceParser({ imageDataBase64, mimeType }) {
+  const { apiKey, models } = getGeminiInvoiceConfig()
+  const attemptedModels = []
+  let lastError = null
+
+  for (const model of models) {
+    const maxAttempts = model === models[0] ? materialInvoiceGeminiRetryDelaysMs.length + 1 : 1
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      attemptedModels.push(model)
+
+      try {
+        return await requestGeminiMaterialInvoiceDraft({
+          apiKey,
+          model,
+          imageDataBase64,
+          mimeType,
+        })
+      } catch (error) {
+        lastError = error
+
+        if (!error?.isGeminiRetryable || attempt >= maxAttempts - 1) {
+          break
+        }
+
+        await wait(materialInvoiceGeminiRetryDelaysMs[attempt])
+      }
+    }
+
+    if (!lastError?.isGeminiRetryable) {
+      break
+    }
+  }
+
+  if (lastError?.isGeminiRetryable) {
+    const uniqueModels = [...new Set(attemptedModels)]
+
+    throw createHttpError(
+      503,
+      `Gemini sedang penuh setelah mencoba model: ${uniqueModels.join(', ')}. Coba ulang beberapa saat lagi atau set GEMINI_INVOICE_FALLBACK_MODELS ke model lain.`
+    )
+  }
+
+  throw lastError ?? createHttpError(502, 'Gemini gagal membaca faktur.')
+}
+
+async function loadActiveMaterialsForTeam(adminClient, teamId) {
+  const normalizedTeamId = normalizeText(teamId, null)
+
+  if (!normalizedTeamId) {
+    throw createHttpError(400, 'Team ID wajib diisi.')
+  }
+
+  const { data, error } = await adminClient
+    .from('materials')
+    .select('id, team_id, name, material_name, unit, current_stock, deleted_at, is_active')
+    .eq('team_id', normalizedTeamId)
+    .is('deleted_at', null)
+    .eq('is_active', true)
+    .order('material_name', { ascending: true })
+
+  if (error) {
+    throw error
+  }
+
+  return data ?? []
+}
+
+async function extractMaterialInvoiceAiDraft(adminClient, body, telegramUserId) {
+  const teamId = normalizeText(body?.teamId ?? body?.team_id, null)
+  const effectiveTeamId = await assertTeamAccess(adminClient, telegramUserId, teamId)
+  const mimeType = normalizeText(body?.mimeType ?? body?.mime_type, '').toLowerCase()
+
+  if (!materialInvoiceAiImageTypes.has(mimeType)) {
+    throw createHttpError(400, 'Tipe gambar harus JPEG, PNG, atau WEBP.')
+  }
+
+  const imageDataBase64 = sanitizeMaterialInvoiceAiBase64(
+    body?.imageDataBase64 ?? body?.image_data_base64
+  )
+  const materials = await loadActiveMaterialsForTeam(adminClient, effectiveTeamId)
+  const draft = await callGeminiMaterialInvoiceParser({
+    imageDataBase64,
+    mimeType,
+  })
+  const review = buildMaterialInvoiceAiReview({
+    aiItems: draft.items,
+    materials,
+  })
+
+  return {
+    teamId: effectiveTeamId,
+    draft,
+    review,
+  }
+}
+
+function normalizeMaterialDrafts(materialDrafts = []) {
+  return (Array.isArray(materialDrafts) ? materialDrafts : [])
+    .map((draft) => {
+      const tempId = normalizeText(draft?.tempId ?? draft?.temp_id, '')
+      const name = normalizeText(draft?.name ?? draft?.material_name ?? draft?.materialName, '')
+      const unit = normalizeText(draft?.unit, '')
+
+      return {
+        tempId,
+        name,
+        unit,
+        normalizedName: normalizeMaterialName(name),
+        normalizedUnit: normalizeUnitLabel(unit),
+      }
+    })
+    .filter((draft) => draft.tempId && draft.normalizedName && draft.normalizedUnit)
+}
+
+function findExactMaterial(materials, materialName) {
+  const normalizedName = normalizeMaterialName(materialName)
+
+  return (
+    materials.find(
+      (material) => normalizeMaterialName(material?.material_name ?? material?.name) === normalizedName
+    ) ?? null
+  )
+}
+
+async function insertInvoiceMaterialDraft(adminClient, { teamId, draft }) {
+  const exactMaterial = findExactMaterial(await loadActiveMaterialsForTeam(adminClient, teamId), draft.name)
+
+  if (exactMaterial?.id) {
+    return {
+      material: exactMaterial,
+      created: false,
+    }
+  }
+
+  const { data, error } = await adminClient
+    .from('materials')
+    .insert({
+      team_id: teamId,
+      name: draft.name,
+      unit: draft.unit,
+      current_stock: 0,
+      category_id: null,
+      reorder_point: 0,
+      is_active: true,
+    })
+    .select('id, team_id, name, material_name, unit, current_stock, deleted_at, is_active')
+    .single()
+
+  if (error) {
+    if (error.code === '23505') {
+      const materialAfterRace = findExactMaterial(
+        await loadActiveMaterialsForTeam(adminClient, teamId),
+        draft.name
+      )
+
+      if (materialAfterRace?.id) {
+        return {
+          material: materialAfterRace,
+          created: false,
+        }
+      }
+    }
+
+    throw error
+  }
+
+  return {
+    material: data,
+    created: true,
+  }
+}
+
+async function cleanupCreatedInvoiceMaterials(adminClient, materialIds = [], teamId) {
+  const normalizedIds = [...new Set(materialIds.map((id) => normalizeText(id, null)).filter(Boolean))]
+
+  if (normalizedIds.length === 0) {
+    return
+  }
+
+  const { data: usedLineItems, error: usageError } = await adminClient
+    .from('expense_line_items')
+    .select('material_id')
+    .in('material_id', normalizedIds)
+    .limit(normalizedIds.length)
+
+  if (usageError) {
+    console.error('Gagal mengecek penggunaan material draft AI:', usageError)
+    return
+  }
+
+  const usedMaterialIds = new Set((usedLineItems ?? []).map((row) => normalizeText(row?.material_id, null)))
+  const unusedMaterialIds = normalizedIds.filter((materialId) => !usedMaterialIds.has(materialId))
+
+  if (unusedMaterialIds.length === 0) {
+    return
+  }
+
+  const { error } = await adminClient
+    .from('materials')
+    .delete()
+    .eq('team_id', teamId)
+    .in('id', unusedMaterialIds)
+
+  if (error) {
+    console.error('Gagal membersihkan material draft AI:', error)
+  }
+}
+
+async function resolveMaterialInvoiceMaterialDrafts(adminClient, { teamId, items, materialDrafts }) {
+  const normalizedDrafts = normalizeMaterialDrafts(materialDrafts)
+  const draftById = new Map(normalizedDrafts.map((draft) => [draft.tempId, draft]))
+  const materialByDraftId = new Map()
+  const createdMaterialIds = []
+  let activeMaterials = await loadActiveMaterialsForTeam(adminClient, teamId)
+
+  for (const draft of normalizedDrafts) {
+    const existingMaterial = findExactMaterial(activeMaterials, draft.name)
+
+    if (existingMaterial?.id) {
+      materialByDraftId.set(draft.tempId, existingMaterial)
+      continue
+    }
+
+    const { material, created } = await insertInvoiceMaterialDraft(adminClient, {
+      teamId,
+      draft,
+    })
+
+    materialByDraftId.set(draft.tempId, material)
+
+    if (created && material?.id) {
+      createdMaterialIds.push(material.id)
+      activeMaterials = [...activeMaterials, material]
+    }
+  }
+
+  const resolvedItems = items.map((item, index) => {
+    if (item.material_id) {
+      return item
+    }
+
+    const draftId = normalizeText(item.material_draft_id ?? item.materialDraftId, null)
+    const draft = draftId ? draftById.get(draftId) : null
+    const material = draftId ? materialByDraftId.get(draftId) : null
+
+    if (!draft || !material?.id) {
+      throw createHttpError(400, `Master barang baru pada baris ${index + 1} belum valid.`)
+    }
+
+    return {
+      ...item,
+      material_id: material.id,
+      item_name: material.name ?? material.material_name ?? draft.name,
+    }
+  })
+
+  return {
+    items: resolvedItems,
+    createdMaterialIds,
+  }
+}
+
 async function createMaterialInvoice(adminClient, body, authUserId, telegramUserId, teamId) {
   const headerData = body?.headerData ?? {}
   const itemsData = Array.isArray(body?.itemsData) ? body.itemsData : []
+  const materialDrafts = Array.isArray(body?.materialDrafts) ? body.materialDrafts : []
   const projectId = normalizeText(headerData.project_id ?? headerData.projectId)
   const supplierId = normalizeText(headerData.supplier_id ?? headerData.supplierId)
   const supplierName = normalizeText(headerData.supplier_name ?? headerData.supplierName)
@@ -3472,12 +4183,13 @@ async function createMaterialInvoice(adminClient, body, authUserId, telegramUser
 
   const normalizedItems = itemsData.map((item, index) => {
     const materialId = normalizeText(item.material_id ?? item.materialId)
+    const materialDraftId = normalizeText(item.material_draft_id ?? item.materialDraftId, null)
     const itemName = normalizeText(item.item_name ?? item.itemName ?? item.material_name)
     const qty = toNumber(item.qty)
     const unitPrice = isDeliveryOrder ? 0 : toNumber(item.unit_price ?? item.unitPrice)
     const computedLineTotal = qty * unitPrice
 
-    if (!materialId) {
+    if (!materialId && !materialDraftId) {
       throw createHttpError(400, `Material pada baris ${index + 1} wajib dipilih.`)
     }
 
@@ -3499,6 +4211,7 @@ async function createMaterialInvoice(adminClient, body, authUserId, telegramUser
 
     return {
       material_id: materialId,
+      material_draft_id: materialDraftId,
       item_name: itemName,
       qty,
       unit_price: unitPrice,
@@ -3507,92 +4220,124 @@ async function createMaterialInvoice(adminClient, body, authUserId, telegramUser
     }
   })
 
-  const totalAmount = normalizedItems.reduce((sum, item) => sum + item.line_total, 0)
-  const supplier = await resolveMaterialSupplier(adminClient, {
-    supplierId,
-    supplierName,
-    teamId,
-  })
-  const expenseInsertPayload = {
-    telegram_user_id: telegramUserId,
-    created_by_user_id: authUserId,
-    team_id: teamId,
-    project_id: projectId,
-    supplier_id: supplier.id,
-    supplier_name: supplier.name,
-    supplier_name_snapshot: supplier.name,
-    project_name_snapshot: projectNameSnapshot,
-    expense_type: expenseType,
-    document_type: documentType,
-    status,
-    expense_date: expenseDate,
-    amount: totalAmount,
-    total_amount: totalAmount,
-    description,
-    notes,
-  }
+  let insertedExpense = null
+  let createdMaterialIds = []
 
-  const { data: insertedExpense, error: expenseError } = await adminClient
-    .from('expenses')
-    .insert(expenseInsertPayload)
-    .select(
-      'id, telegram_user_id, created_by_user_id, team_id, project_id, supplier_id, supplier_name_snapshot, project_name_snapshot, expense_type, document_type, status, expense_date, amount, total_amount, description, notes, created_at, updated_at, deleted_at'
-    )
-    .single()
+  try {
+    const materialResolution = await resolveMaterialInvoiceMaterialDrafts(adminClient, {
+      teamId,
+      items: normalizedItems,
+      materialDrafts,
+    })
+    const resolvedItems = materialResolution.items
 
-  if (expenseError) {
-    throw expenseError
-  }
+    createdMaterialIds = materialResolution.createdMaterialIds
 
-  const expenseId = insertedExpense?.id ?? null
+    const totalAmount = resolvedItems.reduce((sum, item) => sum + item.line_total, 0)
+    const supplier = await resolveMaterialSupplier(adminClient, {
+      supplierId,
+      supplierName,
+      teamId,
+    })
+    const expenseInsertPayload = {
+      telegram_user_id: telegramUserId,
+      created_by_user_id: authUserId,
+      team_id: teamId,
+      project_id: projectId,
+      supplier_id: supplier.id,
+      supplier_name: supplier.name,
+      supplier_name_snapshot: supplier.name,
+      project_name_snapshot: projectNameSnapshot,
+      expense_type: expenseType,
+      document_type: documentType,
+      status,
+      expense_date: expenseDate,
+      amount: totalAmount,
+      total_amount: totalAmount,
+      description,
+      notes,
+    }
 
-  if (!expenseId) {
-    throw createHttpError(500, 'ID faktur material gagal dibuat.')
-  }
+    const { data: expenseData, error: expenseError } = await adminClient
+      .from('expenses')
+      .insert(expenseInsertPayload)
+      .select(
+        'id, telegram_user_id, created_by_user_id, team_id, project_id, supplier_id, supplier_name_snapshot, project_name_snapshot, expense_type, document_type, status, expense_date, amount, total_amount, description, notes, created_at, updated_at, deleted_at'
+      )
+      .single()
 
-  const lineItemsPayload = normalizedItems.map((item) => ({
-    ...item,
-    expense_id: expenseId,
-    team_id: insertedExpense.team_id ?? teamId,
-  }))
+    if (expenseError) {
+      throw expenseError
+    }
 
-  const { error: lineItemsError } = await adminClient
-    .from('expense_line_items')
-    .insert(lineItemsPayload)
+    insertedExpense = expenseData
 
-  if (lineItemsError) {
-    const rollbackError = await rollbackExpense(adminClient, expenseId)
+    const expenseId = insertedExpense?.id ?? null
 
-    if (rollbackError) {
+    if (!expenseId) {
+      throw createHttpError(500, 'ID faktur material gagal dibuat.')
+    }
+
+    const lineItemsPayload = resolvedItems.map((item) => {
+      const lineItem = { ...item }
+
+      delete lineItem.material_draft_id
+
+      return {
+        ...lineItem,
+        expense_id: expenseId,
+        team_id: insertedExpense.team_id ?? teamId,
+      }
+    })
+
+    const { error: lineItemsError } = await adminClient
+      .from('expense_line_items')
+      .insert(lineItemsPayload)
+
+    if (lineItemsError) {
+      const rollbackError = await rollbackExpense(adminClient, expenseId)
+
+      if (rollbackError) {
+        throw createHttpError(
+          500,
+          `Gagal menyimpan item faktur material. Rollback header juga gagal: ${formatRecordError(rollbackError)}`
+        )
+      }
+
       throw createHttpError(
         500,
-        `Gagal menyimpan item faktur material. Rollback header juga gagal: ${formatRecordError(rollbackError)}`
+        `Gagal menyimpan item faktur material: ${formatRecordError(lineItemsError)}`
       )
     }
 
-    throw createHttpError(
-      500,
-      `Gagal menyimpan item faktur material: ${formatRecordError(lineItemsError)}`
-    )
-  }
+    const createdLineItems = await loadMaterialInvoiceLineItems(adminClient, expenseId)
 
-  const createdLineItems = await loadMaterialInvoiceLineItems(adminClient, expenseId)
+    await syncMaterialInvoiceStockMovement(adminClient, {
+      expenseId,
+      previousItems: [],
+      nextItems: createdLineItems,
+      mode: 'create',
+      documentType,
+      teamId: insertedExpense.team_id ?? teamId,
+      projectId: insertedExpense.project_id ?? projectId,
+      expenseDate,
+    })
 
-  await syncMaterialInvoiceStockMovement(adminClient, {
-    expenseId,
-    previousItems: [],
-    nextItems: createdLineItems,
-    mode: 'create',
-    documentType,
-    teamId: insertedExpense.team_id ?? teamId,
-    projectId: insertedExpense.project_id ?? projectId,
-    expenseDate,
-  })
+    return {
+      expense: insertedExpense,
+      items: lineItemsPayload,
+      totalAmount,
+    }
+  } catch (error) {
+    if (insertedExpense?.id) {
+      await rollbackExpense(adminClient, insertedExpense.id).catch((rollbackError) => {
+        console.error('Rollback faktur material AI gagal:', rollbackError)
+      })
+    }
 
-  return {
-    expense: insertedExpense,
-    items: lineItemsPayload,
-    totalAmount,
+    await cleanupCreatedInvoiceMaterials(adminClient, createdMaterialIds, teamId)
+
+    throw error
   }
 }
 
@@ -6114,6 +6859,7 @@ export default async function handler(req, res) {
       databaseKey,
       context.bearerToken
     )
+    const serviceClient = createDatabaseClient(supabaseUrl, databaseKey)
     const { data: profile, error: profileError } = await adminClient
       .from('profiles')
       .select('id, telegram_user_id')
@@ -6222,7 +6968,12 @@ export default async function handler(req, res) {
       if (method === 'DELETE') {
         const body = await parseRequestBody(req)
         if (normalizeText(body.action, '') === 'permanent-delete') {
-          const result = await hardDeleteBillPayment(adminClient, body, telegramUserId)
+          const result = await hardDeleteBillPayment(
+            adminClient,
+            serviceClient,
+            body,
+            telegramUserId
+          )
           const bill = result.bill?.id ? await loadBillById(adminClient, result.bill.id) : null
 
           return res.status(200).json({
@@ -6445,7 +7196,12 @@ export default async function handler(req, res) {
         const body = await parseRequestBody(req)
 
         if (normalizeText(body.action, '') === 'permanent-delete') {
-          await permanentDeleteExpenseAttachment(adminClient, body, telegramUserId)
+          await permanentDeleteExpenseAttachment(
+            adminClient,
+            serviceClient,
+            body,
+            telegramUserId
+          )
 
           return res.status(200).json({
             success: true,
@@ -6646,6 +7402,20 @@ export default async function handler(req, res) {
           expense: mapExpenseRow(deletedExpense, deletedBill),
         })
       }
+    }
+
+    if (resource === 'material-invoice-ai-draft') {
+      if (method !== 'POST') {
+        throw createHttpError(405, 'Method tidak didukung.')
+      }
+
+      const body = await parseRequestBody(req)
+      const result = await extractMaterialInvoiceAiDraft(adminClient, body, telegramUserId)
+
+      return res.status(200).json({
+        success: true,
+        ...result,
+      })
     }
 
     if (resource === 'material-invoices') {

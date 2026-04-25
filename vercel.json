@@ -2,5 +2,11 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "devCommand": "vite --host 127.0.0.1 --port $PORT",
-  "outputDirectory": "dist"
+  "outputDirectory": "dist",
+  "crons": [
+    {
+      "path": "/api/recycle-bin-retention",
+      "schedule": "0 19 * * *"
+    }
+  ]
 }

@@ -623,7 +623,7 @@ function OverlayPanel({
   footer = null,
   placement = 'bottom',
   maxWidth = 'md',
-  maxHeightClassName = 'max-h-[calc(100dvh-1rem)]',
+  maxHeightClassName = 'max-h-[calc(100dvh-3.5rem)]',
   contentClassName = null,
   className = '',
 }) {
@@ -670,8 +670,10 @@ function OverlayPanel({
       {open ? (
         <div
           className={joinClasses(
-            'fixed inset-0 z-[140] flex justify-center px-2 py-2',
-            isBottomPlacement ? 'items-end sm:items-center' : 'items-center'
+            'fixed inset-0 z-[140] flex justify-center px-2',
+            isBottomPlacement
+              ? 'items-end pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] sm:items-center sm:py-2'
+              : 'items-center py-2'
           )}
         >
           <Motion.div

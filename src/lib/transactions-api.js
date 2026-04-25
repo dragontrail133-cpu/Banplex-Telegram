@@ -262,6 +262,23 @@ export async function permanentDeleteTransactionFromApi(recordType, id, teamId) 
   return true
 }
 
+export async function permanentDeleteAllEligibleTransactionsFromApi(teamId) {
+  const result = await requestTransactionsApi('DELETE', {
+    body: {
+      action: 'permanent-delete-all-eligible',
+      teamId,
+    },
+  })
+
+  return {
+    deletedCount: Number(result.deletedCount ?? 0),
+    skippedCount: Number(result.skippedCount ?? 0),
+    failedCount: Number(result.failedCount ?? 0),
+    candidateCount: Number(result.candidateCount ?? 0),
+    errors: Array.isArray(result.errors) ? result.errors : [],
+  }
+}
+
 export async function updateLoanPaymentFromApi(paymentId, payload) {
   const result = await requestTransactionsApi('PATCH', {
     query: {

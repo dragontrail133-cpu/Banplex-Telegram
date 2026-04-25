@@ -23,14 +23,42 @@ Dokumen ini adalah log progres khusus untuk stream `Unified CRUD Workspace`.
 - Active stream: `Unified CRUD Workspace`
 - Referensi plan: `docs/unified-crud-workspace-plan-2026-04-18.md`
 - Primary freeze authority: `docs/freeze/00-index.md`
-- Current task: `UCW-407`
+- Current task: `UCW-411`
 - Current status: `validated`
-- Catatan fokus: `UCW-399` sudah validated sebagai PDF Penerima per instansi via DM, `UCW-408` sudah validated untuk menghapus ghosting transisi halaman, dan `UCW-407` kini sudah validated untuk trim shared overlay motion stack; sementara `UCW-384` tetap blocked di blocker identity bridge karena live project belum punya row `profiles.legacy_firebase_id` untuk 4 legacy creator UID, jadi tidak ada target exact-match yang bisa dibackfill.
+- Catatan fokus: `UCW-411` sudah validated untuk stabilisasi overload Gemini scan Faktur Barang; `UCW-410` tetap validated untuk permanent delete, bulk delete eligible, dan auto-retention Arsip; `UCW-409` tetap tercatat sebagai flow AI draft Faktur Barang yang sudah masuk backlog, sementara `UCW-384` tetap blocked di blocker identity bridge karena live project belum punya row `profiles.legacy_firebase_id` untuk 4 legacy creator UID, jadi tidak ada target exact-match yang bisa dibackfill.
 - Catatan brief terbaru: user meminta backlog docs-only untuk audit `created_by` legacy, detail teknis, UI/flow HRD dan Penerima, import CSV, PDF grouped ke DM, dan quick action Dashboard; `UCW-383` sudah divalidasi sebagai audit read-only, `UCW-385` sudah divalidasi sebagai perbaikan route kembali technical detail, `UCW-386` sudah divalidasi sebagai penghapusan card keterangan duplikat, `UCW-387` sudah divalidasi sebagai safe-zone shell, `UCW-388` sudah divalidasi sebagai redesign KPI solid 2x2, `UCW-389` sudah divalidasi sebagai ringkasan row list, `UCW-390` sudah divalidasi sebagai pemindahan aksi ke bottom sheet, `UCW-391` sudah divalidasi sebagai picker no-search untuk status filter, `UCW-392` sudah divalidasi sebagai picker no-search untuk filter Jenjang, `UCW-393` sudah divalidasi sebagai picker searchable untuk filter Instansi, `UCW-394` sudah divalidasi sebagai shared CSV template/import preview, `UCW-395` sudah divalidasi sebagai import batch Penerima, `UCW-396` sudah divalidasi sebagai import batch HRD, `UCW-397` sudah ditandai `deferred` karena XLSX butuh parser/dependency/sample file, `UCW-398` sudah divalidasi sebagai audit contract PDF grouped HRD/Penerima, dan `UCW-399` sudah divalidasi sebagai PDF Penerima per instansi via DM; `Playwright` untuk `UCW-399` sengaja di-skip sesuai instruksi user, sementara lint, unit PDF/delivery, dan build sudah lolos.
 - Catatan brief lanjutan: user juga meminta quick action Dashboard Tim diganti ke `Stok Barang`; `UCW-401` sudah divalidasi, lalu brief UI fast-path dan freeze reconciliation melanjutkan backlog `UCW-402` sampai `UCW-407` untuk `GlobalToast`, refresh Dashboard, delay `Framer Motion`, audit performa lintas surface, selarasan `Tagihan Upah` ke repo aktual, dan follow-up trim shared overlay motion stack; setelah audit motion terbaru, `UCW-408` ditambahkan untuk menghapus ghosting route shell, lalu `UCW-402` sampai `UCW-408` sudah divalidasi.
 - Catatan audit freeze terbaru: fee bill saat ini masih `project_incomes -> bills.project_income_id`; user memilih UI/read-model grouping tanpa schema rewrite untuk tahap release mobile.
-- Status transitions touched: `UCW-370` tetap `validated`; `UCW-371` tetap `validated`; `UCW-372` tetap `validated`; `UCW-373` selesai `validated`; `UCW-374` selesai `validated`; `UCW-375` selesai `validated`; `UCW-376` selesai `validated`; `UCW-377` selesai `validated`; `UCW-378` selesai `validated`; `UCW-379` selesai `validated`; `UCW-380`, `UCW-381`, dan `UCW-382` tetap `validated`; `UCW-383` selesai `validated`; `UCW-384` ditandai `blocked`; `UCW-385` selesai `validated`; `UCW-386` selesai `validated`; `UCW-387` selesai `validated`; `UCW-388` selesai `validated`; `UCW-389` selesai `validated`; `UCW-390` selesai `validated`; `UCW-391` selesai `validated`; `UCW-392` selesai `validated`; `UCW-393` selesai `validated`; `UCW-394` selesai `validated`; `UCW-395` selesai `validated`; `UCW-396` selesai `validated`; `UCW-397` ditandai `deferred`; `UCW-398` selesai `validated`; `UCW-399` selesai `validated`; `UCW-400` selesai `validated`; `UCW-401` selesai `validated`; `UCW-402` selesai `validated`; `UCW-403` selesai `validated`; `UCW-404` selesai `validated`; `UCW-405` selesai `validated`; `UCW-406` selesai `validated`; `UCW-407` selesai `validated`; `UCW-408` selesai `validated`.
+- Status transitions touched: `UCW-370` tetap `validated`; `UCW-371` tetap `validated`; `UCW-372` tetap `validated`; `UCW-373` selesai `validated`; `UCW-374` selesai `validated`; `UCW-375` selesai `validated`; `UCW-376` selesai `validated`; `UCW-377` selesai `validated`; `UCW-378` selesai `validated`; `UCW-379` selesai `validated`; `UCW-380`, `UCW-381`, dan `UCW-382` tetap `validated`; `UCW-383` selesai `validated`; `UCW-384` ditandai `blocked`; `UCW-385` selesai `validated`; `UCW-386` selesai `validated`; `UCW-387` selesai `validated`; `UCW-388` selesai `validated`; `UCW-389` selesai `validated`; `UCW-390` selesai `validated`; `UCW-391` selesai `validated`; `UCW-392` selesai `validated`; `UCW-393` selesai `validated`; `UCW-394` selesai `validated`; `UCW-395` selesai `validated`; `UCW-396` selesai `validated`; `UCW-397` ditandai `deferred`; `UCW-398` selesai `validated`; `UCW-399` selesai `validated`; `UCW-400` selesai `validated`; `UCW-401` selesai `validated`; `UCW-402` selesai `validated`; `UCW-403` selesai `validated`; `UCW-404` selesai `validated`; `UCW-405` selesai `validated`; `UCW-406` selesai `validated`; `UCW-407` selesai `validated`; `UCW-408` selesai `validated`; `UCW-410` selesai `validated`; `UCW-411` selesai `validated`.
 - Review order: tidak ada task runnable berikutnya dari brief ini; tunggu brief baru, dan `UCW-384` tetap memerlukan identity bridge/profile rows sebelum DML live.
+
+### [2026-04-25] `UCW-410` - Finalkan permanent delete dan auto-retention Arsip
+- Status: `validated`
+- Ringkasan:
+  - Permanent delete kini memakai service client tanpa bearer user setelah team access diverifikasi, sehingga delete tidak tertahan RLS user context.
+  - Arsip transaksi mendapat tombol `Hapus Semua` untuk item eligible, dan endpoint cron `/api/recycle-bin-retention` menghapus item eligible yang melewati retention window.
+- File berubah:
+  - `api/transactions.js`
+  - `api/records.js`
+  - `api/recycle-bin-retention.js`
+  - `src/lib/transactions-api.js`
+  - `src/pages/TransactionsRecycleBinPage.jsx`
+  - `tests/e2e/restore.spec.js`
+  - `vercel.json`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Read source Arsip tetap `public.vw_recycle_bin_records` via `/api/transactions?view=recycle-bin`.
+  - Write path per-item dan bulk memakai dispatcher source type eligible (`bill`, `bill-payment`, `expense-attachment`, `loan-disbursement`, `loan-payment`, `project-income`, `attendance-record`) dengan urutan child-first.
+  - Expense/material-invoice dokumen tetap restore-only karena tidak masuk daftar eligible permanent delete.
+  - Auto-retention membutuhkan env `CRON_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, dan opsional `RECYCLE_BIN_RETENTION_DAYS` / `RECYCLE_BIN_RETENTION_BATCH_LIMIT`.
+- Validasi:
+  - `npx eslint api/transactions.js api/records.js api/recycle-bin-retention.js src/lib/transactions-api.js src/pages/TransactionsRecycleBinPage.jsx tests/e2e/restore.spec.js`
+  - `npm run build`
+  - `npx playwright test tests/e2e/restore.spec.js --reporter=line --workers=1` dengan Vite dev server di-warm terlebih dahulu.
+- Risiko/regresi:
+  - Bulk delete dan retention bersifat destruktif; konfigurasi `CRON_SECRET` dan retention days harus diverifikasi sebelum production.
+  - File `api/records.js` sudah dirty dari brief AI Faktur Barang; perubahan task ini hanya membatasi hard delete payment/lampiran.
 
 ### [2026-04-25] `UCW-408` - Hilangkan ghosting pada transisi halaman
 - Status: `validated`
@@ -9158,4 +9186,53 @@ Gunakan section ini setiap ada brief baru sebelum memulai task berikutnya.
   - dekoratif blur dan chip yang paling mengganggu kontras sudah dirapikan tanpa mengubah alur data atau navigasi.
 - Validasi:
   - `npm run lint`
+  - `npm run build`
+
+### [2026-04-25] `UCW-409` - Implement AI draft Faktur Barang via Gemini
+- Status: `validated`
+- Ringkasan:
+  - `Faktur Barang` create mode sekarang punya bottom sheet scan foto/screenshot via Gemini API, review inline, dan apply draft ke baris item tanpa navigasi keluar form.
+  - Master barang yang tidak cocok exact disimpan sebagai draft inline; satuan wajib diisi, dan master baru dibuat server-side saat faktur disimpan.
+- File target:
+  - `src/components/MaterialInvoiceForm.jsx`
+  - `src/lib/material-invoice-ai.js`
+  - `src/lib/records-api.js`
+  - `src/store/useTransactionStore.js`
+  - `api/records.js`
+  - `tests/unit/material-invoice-ai.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - kualitas OCR tetap bergantung pada foto dan model Gemini; user masih harus review item, qty, harga, dan satuan sebelum simpan.
+  - jika invoice gagal setelah master draft dibuat, cleanup backend bersifat best-effort dan dapat tertahan bila child line item sudah terbuat.
+- Audit hasil:
+  - source of truth write tetap `/api/records` resource `material-invoices`; endpoint AI hanya ekstraksi draft dan tidak menulis transaksi.
+  - flow missing master tidak memakai route `/master/:tab/add`, sehingga form faktur tidak berisiko reset karena navigasi keluar.
+  - backend re-check exact normalized name sebelum insert master baru untuk mengurangi risiko duplikasi.
+- Validasi:
+  - `node --check api/records.js`
+  - `node --check src/lib/material-invoice-ai.js`
+  - `node --check tests/unit/material-invoice-ai.test.js`
+  - `node --test tests/unit/material-invoice-ai.test.js`
+  - `npx eslint api/records.js src/components/MaterialInvoiceForm.jsx src/lib/records-api.js src/lib/material-invoice-ai.js src/store/useTransactionStore.js tests/unit/material-invoice-ai.test.js`
+  - `npm run build`
+  - Catatan: `npm run lint` penuh masih gagal pada artefak generated `.vercel/output/static/*` yang sudah berada di luar scope task.
+
+### [2026-04-25] `UCW-411` - Stabilkan overload Gemini scan Faktur Barang
+- Status: `validated`
+- Ringkasan:
+  - Endpoint AI faktur sekarang retry pendek saat Gemini mengembalikan `503 UNAVAILABLE`, lalu mencoba fallback model agar test lokal tidak langsung gagal saat model utama penuh.
+  - Pesan error provider untuk `503` dan `429` dipetakan menjadi pesan operasional, bukan JSON mentah dari Gemini.
+- File target:
+  - `api/records.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko:
+  - retry/fallback tetap bergantung pada kapasitas dan quota Gemini; jika semua model penuh, user masih harus menunggu atau mengganti `GEMINI_INVOICE_FALLBACK_MODELS`.
+- Audit hasil:
+  - source of truth endpoint tetap `/api/records` resource `material-invoice-ai-draft`; tidak ada perubahan schema atau kontrak UI.
+  - fallback default memakai `gemini-2.5-flash-lite`, sedangkan fallback eksplisit bisa dikonfigurasi via env.
+- Validasi:
+  - `node --check api/records.js`
+  - `npx eslint api/records.js`
   - `npm run build`

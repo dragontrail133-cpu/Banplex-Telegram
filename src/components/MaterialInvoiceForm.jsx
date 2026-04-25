@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Plus, Sparkles, Trash2, Upload } from 'lucide-react'
 import useTelegram from '../hooks/useTelegram'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
 import useTransactionStore from '../store/useTransactionStore'
+import { compressImageFile } from '../lib/attachment-upload'
 import { getAppTodayKey } from '../lib/date-time'
+import {
+  MATERIAL_REVIEW_STATUS,
+} from '../lib/material-invoice-ai'
+import { extractMaterialInvoiceAiDraftFromApi } from '../lib/records-api'
 import useMutationToast from '../hooks/useMutationToast'
 import ExpenseAttachmentSection from './ExpenseAttachmentSection'
 import FormLayout from './layouts/FormLayout'
@@ -15,6 +20,7 @@ import {
   AppButton,
   AppErrorState,
   AppNominalInput,
+  AppSheet,
   AppToggleGroup,
   FormSection,
 } from './ui/AppPrimitives'
@@ -167,6 +173,36 @@ function getLineTotal(item) {
   return qty * unitPrice
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(new Error('Gagal membaca file gambar.'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function stripDataUrlPrefix(value) {
+  const rawValue = String(value ?? '')
+
+  return rawValue.includes(',') ? rawValue.slice(rawValue.indexOf(',') + 1) : rawValue
+}
+
+function normalizeAiInputValue(value) {
+  if (value === '' || value == null) {
+    return ''
+  }
+
+  const parsedValue = Number(value)
+
+  return Number.isFinite(parsedValue) && parsedValue > 0 ? String(parsedValue) : ''
+}
+
+function normalizeSupplierName(value) {
+  return String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
 function MaterialInvoiceForm({
   onSuccess,
   onClose = null,
@@ -187,13 +223,24 @@ function MaterialInvoiceForm({
       ? draftSnapshot.items
       : createInitialItems(initialData)
   )
+  const [pendingMaterialDrafts, setPendingMaterialDrafts] = useState(() =>
+    Array.isArray(draftSnapshot?.materialDrafts) ? draftSnapshot.materialDrafts : []
+  )
   const [savedExpenseId, setSavedExpenseId] = useState(
     recordId ?? initialData?.id ?? null
   )
   const [attachmentResetRequestId, setAttachmentResetRequestId] = useState(null)
+  const [isAiSheetOpen, setIsAiSheetOpen] = useState(false)
+  const [aiFile, setAiFile] = useState(null)
+  const [aiDraft, setAiDraft] = useState(null)
+  const [aiReviewRows, setAiReviewRows] = useState([])
+  const [aiError, setAiError] = useState('')
+  const [isAiProcessing, setIsAiProcessing] = useState(false)
   const skipNextDraftWriteRef = useRef(false)
+  const aiFileInputRef = useRef(null)
   const { user } = useTelegram()
   const authUser = useAuthStore((state) => state.user)
+  const currentTeamId = useAuthStore((state) => state.currentTeamId)
   const projects = useMasterStore((state) => state.projects)
   const suppliers = useMasterStore((state) => state.suppliers)
   const materials = useMasterStore((state) => state.materials)
@@ -274,10 +321,11 @@ function MaterialInvoiceForm({
       })),
     [materials]
   )
+  const hasPendingMaterialDraftRows = items.some((item) => item.materialDraftId)
   const isMasterDataReady =
     !isMasterLoading &&
     projects.length > 0 &&
-    materials.length > 0 &&
+    (materials.length > 0 || hasPendingMaterialDraftRows) &&
     availableMaterialSuppliers.length > 0
 
   const handleAttachmentResetSettled = useCallback(
@@ -291,6 +339,11 @@ function MaterialInvoiceForm({
       skipNextDraftWriteRef.current = true
       setHeader(createInitialHeader(initialData))
       setItems(createInitialItems(initialData))
+      setPendingMaterialDrafts([])
+      setAiFile(null)
+      setAiDraft(null)
+      setAiReviewRows([])
+      setAiError('')
       setSavedExpenseId(null)
 
       try {
@@ -332,10 +385,11 @@ function MaterialInvoiceForm({
     const nextDraft = {
       header,
       items,
+      materialDrafts: pendingMaterialDrafts,
     }
 
     writeMaterialInvoiceDraft(draftKey, nextDraft)
-  }, [draftKey, header, items, isEditMode])
+  }, [draftKey, header, items, isEditMode, pendingMaterialDrafts])
 
   useEffect(() => () => clearError(), [clearError])
   useEffect(() => () => clear(), [clear])
@@ -377,6 +431,191 @@ function MaterialInvoiceForm({
     }
   }
 
+  const handleItemMaterialChange = (itemId, nextValue) => {
+    setItems((current) =>
+      current.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              materialId: nextValue,
+              materialDraftId: '',
+              materialDraftName: '',
+              materialDraftUnit: '',
+            }
+          : item
+      )
+    )
+
+    if (error) {
+      clearError()
+    }
+  }
+
+  const handleAiFileChange = (event) => {
+    const file = event.target.files?.[0] ?? null
+
+    setAiFile(file)
+    setAiDraft(null)
+    setAiReviewRows([])
+    setAiError('')
+  }
+
+  const handleAiExtract = async () => {
+    if (!aiFile) {
+      setAiError('Pilih foto atau screenshot faktur terlebih dahulu.')
+      return
+    }
+
+    if (!currentTeamId) {
+      setAiError('Akses workspace tidak ditemukan.')
+      return
+    }
+
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(aiFile.type)) {
+      setAiError('File harus berupa gambar JPEG, PNG, atau WEBP.')
+      return
+    }
+
+    setIsAiProcessing(true)
+    setAiError('')
+
+    try {
+      const { file: compressedFile } = await compressImageFile(aiFile, {
+        thresholdBytes: 1024 * 1024,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        quality: 0.82,
+      })
+      const dataUrl = await readFileAsDataUrl(compressedFile)
+      const result = await extractMaterialInvoiceAiDraftFromApi({
+        teamId: currentTeamId,
+        imageDataBase64: stripDataUrlPrefix(dataUrl),
+        mimeType: compressedFile.type || aiFile.type,
+        fileName: aiFile.name,
+      })
+
+      setAiDraft(result.draft)
+      setAiReviewRows(Array.isArray(result.review) ? result.review : [])
+    } catch (extractError) {
+      setAiError(
+        extractError instanceof Error
+          ? extractError.message
+          : 'AI gagal membaca faktur.'
+      )
+    } finally {
+      setIsAiProcessing(false)
+    }
+  }
+
+  const handleAiRowChange = (tempId, patch) => {
+    setAiReviewRows((current) =>
+      current.map((row) =>
+        row.tempId === tempId
+          ? {
+              ...row,
+              ...patch,
+            }
+          : row
+      )
+    )
+  }
+
+  const handleAiRowMaterialChange = (row, materialId) => {
+    const selectedMaterial = materials.find((material) => material.id === materialId)
+
+    handleAiRowChange(row.tempId, {
+      status: selectedMaterial
+        ? MATERIAL_REVIEW_STATUS.MATCHED
+        : MATERIAL_REVIEW_STATUS.NEW_MATERIAL,
+      selectedMaterialId: selectedMaterial?.id ?? '',
+      selectedMaterialName: selectedMaterial?.name ?? '',
+      selectedMaterialUnit: selectedMaterial?.unit ?? '',
+      materialDraftName: selectedMaterial ? '' : row.name,
+      materialDraftUnit: selectedMaterial ? '' : row.unit,
+      missingUnit: selectedMaterial ? false : !normalizeText(row.unit, ''),
+    })
+  }
+
+  const validateAiReviewRows = () => {
+    if (aiReviewRows.length === 0) {
+      return 'Belum ada hasil AI untuk diterapkan.'
+    }
+
+    const invalidIndex = aiReviewRows.findIndex((row) => row.status === MATERIAL_REVIEW_STATUS.INVALID)
+
+    if (invalidIndex >= 0) {
+      return `Item AI ${invalidIndex + 1} belum valid.`
+    }
+
+    const missingMaterialIndex = aiReviewRows.findIndex((row) => {
+      if (row.selectedMaterialId) {
+        return false
+      }
+
+      return !normalizeText(row.materialDraftName, '') || !normalizeText(row.materialDraftUnit, '')
+    })
+
+    if (missingMaterialIndex >= 0) {
+      return `Nama dan satuan master baru pada item ${missingMaterialIndex + 1} wajib diisi.`
+    }
+
+    return null
+  }
+
+  const handleApplyAiDraft = () => {
+    const validationError = validateAiReviewRows()
+
+    if (validationError) {
+      setAiError(validationError)
+      return
+    }
+
+    const nextMaterialDrafts = []
+    const nextItems = aiReviewRows.map((row, index) => {
+      const selectedMaterialId = normalizeText(row.selectedMaterialId, '')
+      const materialDraftName = normalizeText(row.materialDraftName ?? row.name, '')
+      const materialDraftUnit = normalizeText(row.materialDraftUnit ?? row.unit, '')
+      const draftId = row.tempId || `ai-draft-${Date.now()}-${index}`
+
+      if (!selectedMaterialId) {
+        nextMaterialDrafts.push({
+          tempId: draftId,
+          name: materialDraftName,
+          unit: materialDraftUnit,
+        })
+      }
+
+      return {
+        id: `ai-item-${Date.now()}-${index}-${Math.random().toString(16).slice(2)}`,
+        materialId: selectedMaterialId,
+        materialDraftId: selectedMaterialId ? '' : draftId,
+        materialDraftName: selectedMaterialId ? '' : materialDraftName,
+        materialDraftUnit: selectedMaterialId ? '' : materialDraftUnit,
+        qty: normalizeAiInputValue(row.qty),
+        unitPrice: normalizeAiInputValue(row.unitPrice),
+      }
+    })
+    const normalizedSupplier = normalizeSupplierName(aiDraft?.supplierName)
+    const matchedSupplier = normalizedSupplier
+      ? availableMaterialSuppliers.find(
+          (supplier) => normalizeSupplierName(supplier.name) === normalizedSupplier
+        )
+      : null
+
+    setPendingMaterialDrafts(nextMaterialDrafts)
+    setItems(nextItems.length > 0 ? nextItems : [createLineItem()])
+    setHeader((current) => ({
+      ...current,
+      supplierId: current.supplierId || matchedSupplier?.id || current.supplierId,
+      date: aiDraft?.documentDate || current.date,
+      description:
+        current.description ||
+        (aiDraft?.invoiceNumber ? `Faktur ${aiDraft.invoiceNumber}` : current.description),
+    }))
+    setIsAiSheetOpen(false)
+    setAiError('')
+  }
+
   const handleAddItem = (event) => {
     event?.preventDefault()
     event?.stopPropagation()
@@ -415,13 +654,26 @@ function MaterialInvoiceForm({
         throw new Error('Supplier material wajib dipilih.')
       }
 
+      const materialDraftById = new Map(
+        pendingMaterialDrafts.map((draft) => [draft.tempId, draft])
+      )
       const mappedItems = items.map((item, index) => {
         const selectedMaterial = materials.find(
           (material) => material.id === item.materialId
         )
+        const materialDraft = item.materialDraftId
+          ? materialDraftById.get(item.materialDraftId)
+          : null
 
-        if (!selectedMaterial) {
+        if (!selectedMaterial && !materialDraft) {
           throw new Error(`Material pada baris ${index + 1} wajib dipilih.`)
+        }
+
+        if (
+          materialDraft &&
+          (!normalizeText(materialDraft.name, '') || !normalizeText(materialDraft.unit, ''))
+        ) {
+          throw new Error(`Master barang baru pada baris ${index + 1} belum lengkap.`)
         }
 
         const lineTotal = isDeliveryOrder ? 0 : getLineTotal(item)
@@ -429,13 +681,20 @@ function MaterialInvoiceForm({
         return {
           id: item.id,
           material_id: item.materialId,
-          item_name: selectedMaterial?.name ?? '',
+          material_draft_id: materialDraft?.tempId ?? null,
+          item_name: selectedMaterial?.name ?? materialDraft?.name ?? '',
           qty: item.qty,
           unit_price: isDeliveryOrder ? 0 : item.unitPrice,
           line_total: lineTotal,
           sort_order: index + 1,
         }
       })
+      const usedMaterialDraftIds = new Set(
+        mappedItems.map((item) => item.material_draft_id).filter(Boolean)
+      )
+      const materialDraftsForSubmit = pendingMaterialDrafts.filter((draft) =>
+        usedMaterialDraftIds.has(draft.tempId)
+      )
 
       const headerPayload = {
         telegram_user_id: user?.id ?? authUser?.telegram_user_id ?? null,
@@ -464,7 +723,9 @@ function MaterialInvoiceForm({
           headerData: headerPayload,
           itemsData: mappedItems,
         })
-        : await submitMaterialInvoice(headerPayload, mappedItems)
+        : await submitMaterialInvoice(headerPayload, mappedItems, {
+            materialDrafts: materialDraftsForSubmit,
+          })
 
       setSavedExpenseId(nextExpenseId?.id ?? recordId ?? initialData?.id ?? null)
 
@@ -475,6 +736,7 @@ function MaterialInvoiceForm({
 
       setHeader(createInitialHeader(initialData))
       setItems(createInitialItems(initialData))
+      setPendingMaterialDrafts([])
       if (typeof onSuccess === 'function') {
         await onSuccess()
       }
@@ -648,11 +910,37 @@ function MaterialInvoiceForm({
             title="Baris Material"
             description="Tambahkan material per baris. Qty dan harga satuan tetap mengikuti dokumen yang dicatat."
           >
+            {isCreateMode ? (
+              <AppCard className="app-tone-info">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <p className="app-meta text-[var(--app-tone-info-text)]">
+                      Input dari foto
+                    </p>
+                    <p className="text-sm leading-6">
+                      Scan faktur untuk mengisi item dan menyiapkan master barang baru tanpa keluar dari form.
+                    </p>
+                  </div>
+                  <AppButton
+                    leadingIcon={<Sparkles className="h-4 w-4" />}
+                    onClick={() => setIsAiSheetOpen(true)}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Scan AI
+                  </AppButton>
+                </div>
+              </AppCard>
+            ) : null}
+
             <div className="space-y-3">
               {items.map((item, index) => {
                 const selectedMaterial = materials.find(
                   (material) => material.id === item.materialId
                 )
+                const draftMaterialLabel = item.materialDraftId
+                  ? [item.materialDraftName, item.materialDraftUnit].filter(Boolean).join(' / ')
+                  : ''
                 const lineTotal = getLineTotal(item)
 
                 return (
@@ -666,7 +954,9 @@ function MaterialInvoiceForm({
                           Item {index + 1}
                         </p>
                         <p className="text-xs text-[var(--app-hint-color)]">
-                          {selectedMaterial?.unit
+                          {draftMaterialLabel
+                            ? `Barang baru: ${draftMaterialLabel}`
+                            : selectedMaterial?.unit
                             ? `Satuan: ${selectedMaterial.unit}`
                             : isDeliveryOrder
                               ? 'Pilih material dan qty barang yang diterima.'
@@ -687,16 +977,39 @@ function MaterialInvoiceForm({
                     </div>
 
                     <div className="grid gap-3">
+                      {draftMaterialLabel ? (
+                        <AppCard className="app-tone-warning px-3 py-3" padded={false}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 space-y-1">
+                              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--app-tone-warning-text)]">
+                                Master baru saat simpan
+                              </p>
+                              <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                                {draftMaterialLabel}
+                              </p>
+                            </div>
+                            <AppButton
+                              onClick={() =>
+                                handleItemChange(item.id, 'materialDraftId', '')
+                              }
+                              size="sm"
+                              type="button"
+                              variant="secondary"
+                            >
+                              Batal
+                            </AppButton>
+                          </div>
+                        </AppCard>
+                      ) : null}
+
                       <MasterPickerField
                         disabled={isSubmitting || isMasterLoading || materials.length === 0}
                         emptyMessage="Data material belum tersedia."
                         label="Material"
-                        onChange={(nextValue) =>
-                          handleItemChange(item.id, 'materialId', nextValue)
-                        }
+                        onChange={(nextValue) => handleItemMaterialChange(item.id, nextValue)}
                         options={materialPickerOptions}
-                        placeholder="Pilih material"
-                        required
+                        placeholder={draftMaterialLabel ? 'Ganti ke master existing' : 'Pilih material'}
+                        required={!draftMaterialLabel}
                         searchPlaceholder="Cari material..."
                         title={`Pilih Material ${index + 1}`}
                         value={item.materialId}
@@ -806,9 +1119,9 @@ function MaterialInvoiceForm({
               <AppErrorState description={masterError} title="Master data belum siap" />
             ) : null}
 
-            {materials.length === 0 && !isMasterLoading ? (
+            {materials.length === 0 && !isMasterLoading && !hasPendingMaterialDraftRows ? (
               <AppErrorState
-                description="Data material masih kosong. Tambahkan master material di database agar faktur bisa disimpan."
+                description="Data material masih kosong. Pilih master material atau scan faktur untuk menyiapkan master baru saat simpan."
                 title="Material belum tersedia"
               />
             ) : null}
@@ -823,6 +1136,268 @@ function MaterialInvoiceForm({
           </FormSection>
         </FormLayout>
       </fieldset>
+
+      <AppSheet
+        description="Review hasil AI sebelum baris diterapkan ke form."
+        footer={
+          <div className="grid grid-cols-2 gap-2">
+            <AppButton
+              disabled={isAiProcessing}
+              onClick={() => setIsAiSheetOpen(false)}
+              type="button"
+              variant="secondary"
+            >
+              Tutup
+            </AppButton>
+            <AppButton
+              disabled={isAiProcessing || aiReviewRows.length === 0}
+              onClick={handleApplyAiDraft}
+              type="button"
+            >
+              Terapkan
+            </AppButton>
+          </div>
+        }
+        maxWidth="lg"
+        onClose={() => setIsAiSheetOpen(false)}
+        open={isAiSheetOpen}
+        title="Scan Faktur Barang"
+      >
+        <div className="space-y-4">
+          <input
+            ref={aiFileInputRef}
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={handleAiFileChange}
+            type="file"
+          />
+
+          <AppCard className="space-y-3 bg-white">
+            <div className="space-y-1">
+              <p className="app-meta">File gambar</p>
+              <p className="text-sm leading-6 text-[var(--app-hint-color)]">
+                {aiFile?.name ?? 'Belum ada file dipilih.'}
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <AppButton
+                leadingIcon={<Upload className="h-4 w-4" />}
+                onClick={() => aiFileInputRef.current?.click()}
+                type="button"
+                variant="secondary"
+              >
+                Pilih
+              </AppButton>
+              <AppButton
+                disabled={!aiFile || isAiProcessing}
+                leadingIcon={<Sparkles className="h-4 w-4" />}
+                onClick={handleAiExtract}
+                type="button"
+              >
+                {isAiProcessing ? 'Proses...' : 'Proses AI'}
+              </AppButton>
+            </div>
+          </AppCard>
+
+          {aiError ? <AppErrorState description={aiError} title="Review AI belum valid" /> : null}
+
+          {aiDraft ? (
+            <AppCard className="grid gap-3 bg-white sm:grid-cols-3">
+              <div className="space-y-1">
+                <p className="app-meta">Tanggal</p>
+                <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                  {aiDraft.documentDate || '-'}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <p className="app-meta">Supplier</p>
+                <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                  {aiDraft.supplierName || '-'}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <p className="app-meta">No Faktur</p>
+                <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                  {aiDraft.invoiceNumber || '-'}
+                </p>
+              </div>
+            </AppCard>
+          ) : null}
+
+          {aiReviewRows.length > 0 ? (
+            <div className="space-y-3">
+              {aiReviewRows.map((row, index) => {
+                const isMatched = row.status === MATERIAL_REVIEW_STATUS.MATCHED
+                const isInvalid = row.status === MATERIAL_REVIEW_STATUS.INVALID
+                const hasCandidateLinks = !isInvalid && Array.isArray(row.candidates) && row.candidates.length > 0
+                const needsMaterialDraft = !row.selectedMaterialId
+                const statusIcon = isInvalid ? (
+                  <AlertTriangle className="h-4 w-4" />
+                ) : isMatched ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )
+
+                return (
+                  <AppCard
+                    key={row.tempId}
+                    className="space-y-4 rounded-[24px] border border-slate-200 bg-white"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 space-y-1">
+                        <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                          Item {index + 1}
+                        </p>
+                        <p className="text-xs leading-5 text-[var(--app-hint-color)]">
+                          {row.reason}
+                        </p>
+                      </div>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-[var(--app-outline-soft)] px-2.5 py-1 text-xs font-semibold text-[var(--app-text-color)]">
+                        {statusIcon}
+                        {isMatched ? 'Cocok' : isInvalid ? 'Salah' : 'Cek'}
+                      </span>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <label className="block space-y-2 sm:col-span-2">
+                        <span className="text-sm font-medium text-[var(--app-text-color)]">Nama</span>
+                        <input
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                          onChange={(event) =>
+                            handleAiRowChange(row.tempId, {
+                              name: event.target.value,
+                              materialDraftName: needsMaterialDraft
+                                ? event.target.value
+                                : row.materialDraftName,
+                            })
+                          }
+                          value={row.name}
+                        />
+                      </label>
+                      <label className="block space-y-2">
+                        <span className="text-sm font-medium text-[var(--app-text-color)]">
+                          Qty
+                        </span>
+                        <input
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                          inputMode="decimal"
+                          min="0.01"
+                          onChange={(event) =>
+                            handleAiRowChange(row.tempId, {
+                              qty: event.target.value,
+                            })
+                          }
+                          step="0.01"
+                          type="number"
+                          value={row.qty}
+                        />
+                      </label>
+                    </div>
+
+                    {!isInvalid ? (
+                      <div className="space-y-3">
+                        {hasCandidateLinks ? (
+                          <div className="space-y-1.5">
+                            <p className="text-xs font-medium text-[var(--app-hint-color)]">
+                              Saran cepat
+                            </p>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1">
+                              {row.candidates.map((candidate) => (
+                                <button
+                                  key={candidate.id}
+                                  className="min-h-8 px-0 py-1 text-left text-sm font-medium text-[var(--app-link-color)] underline decoration-dotted underline-offset-4"
+                                  onClick={() => handleAiRowMaterialChange(row, candidate.id)}
+                                  type="button"
+                                >
+                                  {candidate.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <MasterPickerField
+                          disabled={materials.length === 0}
+                          emptyMessage="Master belum ada."
+                          label="Pilih master"
+                          onChange={(nextValue) => handleAiRowMaterialChange(row, nextValue)}
+                          options={materialPickerOptions}
+                          placeholder="Pilih jika cocok"
+                          searchPlaceholder="Cari master..."
+                          title={`Pilih Master ${index + 1}`}
+                          value={row.selectedMaterialId}
+                        />
+                        {row.selectedMaterialId ? (
+                          <AppButton
+                            onClick={() => handleAiRowMaterialChange(row, '')}
+                            size="sm"
+                            type="button"
+                            variant="secondary"
+                          >
+                            Barang baru
+                          </AppButton>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {!isInvalid && needsMaterialDraft ? (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="block space-y-2">
+                          <span className="text-sm font-medium text-[var(--app-text-color)]">
+                            Nama baru
+                          </span>
+                          <input
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                            onChange={(event) =>
+                              handleAiRowChange(row.tempId, {
+                                materialDraftName: event.target.value,
+                              })
+                            }
+                            value={row.materialDraftName ?? row.name}
+                          />
+                        </label>
+                        <label className="block space-y-2">
+                          <span className="text-sm font-medium text-[var(--app-text-color)]">
+                            Satuan baru
+                          </span>
+                          <input
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                            onChange={(event) =>
+                              handleAiRowChange(row.tempId, {
+                                materialDraftUnit: event.target.value,
+                                missingUnit: !normalizeText(event.target.value, ''),
+                              })
+                            }
+                            placeholder="sak, kg, m3"
+                            value={row.materialDraftUnit ?? row.unit}
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {isDeliveryOrder ? null : (
+                      <label className="block space-y-2">
+                        <span className="text-sm font-medium text-[var(--app-text-color)]">Harga</span>
+                        <AppNominalInput
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                          onValueChange={(nextValue) =>
+                            handleAiRowChange(row.tempId, {
+                              unitPrice: nextValue,
+                            })
+                          }
+                          placeholder="Rp 0"
+                          value={row.unitPrice}
+                        />
+                      </label>
+                    )}
+                  </AppCard>
+                )
+              })}
+            </div>
+          ) : null}
+        </div>
+      </AppSheet>
     </form>
   )
 }
