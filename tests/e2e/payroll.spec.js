@@ -2,9 +2,20 @@ import { expect, test } from '@playwright/test'
 import { openApp } from './helpers/app.js'
 
 const paymentDate = '2026-04-21'
+const calendarLabelFormatter = new Intl.DateTimeFormat('id-ID', {
+  weekday: 'short',
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'Asia/Jakarta',
+})
 
 function toIsoTimestamp(index = 0) {
   return new Date(Date.parse(`${paymentDate}T10:00:00.000Z`) + index * 60_000).toISOString()
+}
+
+function formatCalendarLabel(dateKey) {
+  return calendarLabelFormatter.format(new Date(`${dateKey}T00:00:00Z`))
 }
 
 function cloneBill(bill) {
@@ -118,6 +129,10 @@ function buildPayrollFixture() {
         worker_name_snapshot: 'Budi E2E',
       },
     ],
+    lastArchiveRequest: null,
+    lastRestoreRequest: null,
+    lastPermanentDeleteRequest: null,
+    lastReportDeliveryRequest: null,
     projects: [
       {
         id: 'project-e2e-1',
@@ -176,6 +191,19 @@ function buildPayrollFixture() {
     state.payableBill.updatedAt = toIsoTimestamp(state.payableBill.payments.length)
   }
 
+  function syncHistoryBill() {
+    const paidAmount = state.historyBill.payments.reduce(
+      (total, payment) => total + Number(payment.amount ?? 0),
+      0
+    )
+    const remainingAmount = Math.max(Number(state.historyBill.amount ?? 0) - paidAmount, 0)
+
+    state.historyBill.paidAmount = paidAmount
+    state.historyBill.remainingAmount = remainingAmount
+    state.historyBill.status = remainingAmount <= 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid'
+    state.historyBill.updatedAt = toIsoTimestamp(state.historyBill.payments.length)
+  }
+
   function createPayment(payload = {}) {
     const payment = {
       id: `salary-payment-${state.payableBill.payments.length + 1}`,
@@ -203,6 +231,98 @@ function buildPayrollFixture() {
     }
   }
 
+  function archiveHistoryPayment(paymentId, body = {}) {
+    const paymentIndex = state.historyBill.payments.findIndex(
+      (payment) => String(payment.id) === String(paymentId)
+    )
+
+    if (paymentIndex === -1) {
+      return null
+    }
+
+    const archivedPayment = cloneBill(state.historyBill.payments[paymentIndex])
+    const deletedAt = body?.expectedUpdatedAt ?? toIsoTimestamp(state.deletedBillPayments.length + 1)
+
+    state.historyBill.payments.splice(paymentIndex, 1)
+    syncHistoryBill()
+    state.deletedBillPayments = [
+      {
+        ...archivedPayment,
+        deleted_at: deletedAt,
+        deletedAt,
+        canRestore: true,
+        canPermanentDelete: true,
+      },
+      ...state.deletedBillPayments,
+    ]
+    state.lastArchiveRequest = {
+      paymentId: String(paymentId),
+      teamId: String(body?.teamId ?? ''),
+      expectedUpdatedAt: body?.expectedUpdatedAt ?? null,
+    }
+
+    return {
+      bill: buildBillPayload(state.historyBill),
+    }
+  }
+
+  function restoreHistoryPayment(paymentId, body = {}) {
+    const paymentIndex = state.deletedBillPayments.findIndex(
+      (payment) => String(payment.id) === String(paymentId)
+    )
+
+    if (paymentIndex === -1) {
+      return null
+    }
+
+    const restoredPayment = cloneBill(state.deletedBillPayments[paymentIndex])
+
+    state.deletedBillPayments.splice(paymentIndex, 1)
+    state.historyBill.payments.unshift({
+      ...restoredPayment,
+      deleted_at: null,
+      deletedAt: null,
+      canRestore: false,
+      canPermanentDelete: false,
+    })
+    syncHistoryBill()
+    state.lastRestoreRequest = {
+      action: 'restore',
+      paymentId: String(paymentId),
+      teamId: String(body?.teamId ?? ''),
+      expectedUpdatedAt: body?.expectedUpdatedAt ?? null,
+    }
+
+    return {
+      payment: restoredPayment,
+      bill: buildBillPayload(state.historyBill),
+    }
+  }
+
+  function permanentDeleteHistoryPayment(paymentId, body = {}) {
+    const paymentIndex = state.deletedBillPayments.findIndex(
+      (payment) => String(payment.id) === String(paymentId)
+    )
+
+    if (paymentIndex === -1) {
+      return null
+    }
+
+    const permanentDeletedPayment = cloneBill(state.deletedBillPayments[paymentIndex])
+
+    state.deletedBillPayments.splice(paymentIndex, 1)
+    state.lastPermanentDeleteRequest = {
+      action: 'permanent-delete',
+      paymentId: String(paymentId),
+      teamId: String(body?.teamId ?? ''),
+    }
+
+    return {
+      payment: permanentDeletedPayment,
+      bill: buildBillPayload(state.historyBill),
+    }
+  }
+
   function buildAttendanceRows() {
     return state.attendanceRows.map(cloneBill)
   }
@@ -215,6 +335,9 @@ function buildPayrollFixture() {
     state,
     createPayment,
     buildBillPayload,
+    archiveHistoryPayment,
+    restoreHistoryPayment,
+    permanentDeleteHistoryPayment,
     buildAttendanceRows,
     buildDeletedBillPayments,
   }
@@ -232,7 +355,18 @@ function createPayrollMockApi() {
           summary: {
             month: '2026-04',
             attendanceCount: 2,
-            dailyGroups: [],
+            dailyGroups: [
+              {
+                dateKey: paymentDate,
+                title: formatCalendarLabel(paymentDate),
+                description: '1 record',
+                records: [fixture.state.attendanceRows[1]],
+                recapableCount: 1,
+                recordCount: 1,
+                billedCount: 0,
+                unbilledCount: 1,
+              },
+            ],
             workerGroups: [
               {
                 workerId: fixture.state.payableBill.workerId,
@@ -247,6 +381,20 @@ function createPayrollMockApi() {
               },
             ],
           },
+        }
+      }
+
+      if (resource === 'attendance' && method === 'GET') {
+        const date = String(url.searchParams.get('date') ?? '').trim()
+        const projectId = String(url.searchParams.get('projectId') ?? '').trim()
+
+        return {
+          success: true,
+          attendances: fixture.state.attendanceRows.filter(
+            (row) =>
+              String(row.attendance_date ?? '') === date &&
+              String(row.project_id ?? '') === projectId
+          ),
         }
       }
 
@@ -293,6 +441,33 @@ function createPayrollMockApi() {
           payment: cloneBill(payment),
           bill: fixture.buildBillPayload(fixture.state.payableBill),
         }
+      }
+
+      if (resource === 'bill-payments' && method === 'DELETE' && body?.action !== 'permanent-delete') {
+        const result = fixture.archiveHistoryPayment(
+          String(body?.paymentId ?? body?.payment_id ?? ''),
+          body
+        )
+
+        return result ? { success: true, ...result } : { success: false, error: 'Payment not found' }
+      }
+
+      if (resource === 'bill-payments' && method === 'DELETE' && body?.action === 'permanent-delete') {
+        const result = fixture.permanentDeleteHistoryPayment(
+          String(body?.paymentId ?? body?.payment_id ?? ''),
+          body
+        )
+
+        return result ? { success: true, ...result } : { success: false, error: 'Payment not found' }
+      }
+
+      if (resource === 'bill-payments' && method === 'PATCH' && body?.action === 'restore') {
+        const result = fixture.restoreHistoryPayment(
+          String(body?.paymentId ?? body?.payment_id ?? ''),
+          body
+        )
+
+        return result ? { success: true, ...result } : { success: false, error: 'Payment not found' }
       }
 
       return undefined
@@ -353,8 +528,36 @@ test.describe('payroll surfaces', () => {
   })
 
   test('opens worker detail page with info, recap, and history tabs', async ({ page }) => {
+    const mockApi = createPayrollMockApi()
+    mockApi.reportDelivery = async ({ body }) => {
+      mockApi.state.lastReportDeliveryRequest = body
+
+      return {
+        success: true,
+        deliveryMode: 'document',
+        telegramStatus: 200,
+        telegramResponse: {
+          ok: true,
+          result: {
+            message_id: 20005,
+          },
+        },
+        fileName: 'kwitansi-tagihan-salary-bill-e2e-history-salary-payment-history-1-20260424.pdf',
+        pdfError: null,
+      }
+    }
+
     await openApp(page, '/payroll?tab=worker', {
-      mockApi: createPayrollMockApi(),
+      mockApi,
+      telegram: {
+        user: {
+          id: 20005,
+          first_name: 'Mini',
+          last_name: 'Payroll',
+          username: 'mini_payroll_user',
+        },
+        startParam: '',
+      },
     })
 
     await expect(page.getByRole('heading', { name: 'Catatan Absensi' })).toBeVisible({
@@ -385,8 +588,79 @@ test.describe('payroll surfaces', () => {
     await page.getByRole('button', { name: 'Riwayat' }).click()
     await expect(page.getByText('Bayar termin awal')).toBeVisible()
     await expect(page.getByText('Pembayaran terhapus')).toBeVisible()
+    const sendReceiptButton = page.getByRole('button', { name: 'Kirim' }).first()
+    await expect(sendReceiptButton).toBeVisible()
+    await sendReceiptButton.click()
+    await expect(page.getByRole('button', { name: 'Arsipkan pembayaran' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Pulihkan pembayaran' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Hapus permanen pembayaran' })).toBeVisible()
+    expect(mockApi.state.lastReportDeliveryRequest).toMatchObject({
+      deliveryKind: 'payment_receipt',
+      paymentType: 'bill',
+      payment: {
+        id: 'salary-payment-history-1',
+        billId: 'salary-bill-e2e-history',
+      },
+      parentRecord: {
+        id: 'salary-bill-e2e-history',
+      },
+    })
+
+    await page.getByRole('button', { name: 'Arsipkan pembayaran' }).click()
+
+    await expect(page.getByRole('button', { name: 'Arsipkan pembayaran' })).toHaveCount(0, {
+      timeout: 30000,
+    })
+    expect(mockApi.state.lastArchiveRequest).toMatchObject({
+      paymentId: 'salary-payment-history-1',
+      teamId: 'e2e-team',
+    })
 
     await page.getByRole('button', { name: 'Kembali' }).click()
     await expect(page).toHaveURL(/\/payroll\?tab=worker$/)
+  })
+
+  test('opens daily attendance edit sheet with the same date and project', async ({ page }) => {
+    const mockApi = createPayrollMockApi()
+
+    await openApp(page, '/payroll?tab=daily&month=2026-04', {
+      mockApi,
+    })
+
+    await expect(page.getByRole('heading', { name: 'Catatan Absensi' })).toBeVisible({
+      timeout: 15000,
+    })
+
+    const dailyGroupButton = page
+      .getByRole('button')
+      .filter({ hasText: formatCalendarLabel(paymentDate) })
+      .first()
+
+    await expect(dailyGroupButton).toBeVisible({ timeout: 30000 })
+    await dailyGroupButton.click()
+    await expect(page.getByRole('button', { name: 'Edit Absensi' })).toBeVisible({
+      timeout: 30000,
+    })
+
+    await page.getByRole('button', { name: 'Edit Absensi' }).click()
+
+    await expect(page.getByRole('button', { name: 'Edit' }).first()).toBeVisible({
+      timeout: 30000,
+    })
+    await page.getByRole('button', { name: 'Edit' }).first().click()
+
+    await expect(page).toHaveURL(
+      new RegExp(`/attendance/new\\?date=${paymentDate}&projectId=project-e2e-1$`)
+    )
+    await expect(page.getByRole('heading', { name: 'Absensi Harian' })).toBeVisible({
+      timeout: 30000,
+    })
+    await expect(page.locator('input[name="date"]')).toHaveValue(paymentDate)
+    await expect(page.getByText('Proyek E2E', { exact: true })).toBeVisible({
+      timeout: 30000,
+    })
+
+    await page.getByRole('button', { name: 'Kembali' }).click()
+    await expect(page).toHaveURL(/\/payroll\?tab=daily&month=2026-04$/)
   })
 })

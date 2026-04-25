@@ -1,4 +1,8 @@
 import useAuthStore from '../store/useAuthStore'
+import {
+  createLocalDevSupabaseSession,
+  isDevAuthBypassEnabled,
+} from './dev-auth-bypass'
 import { supabase } from './supabase'
 
 const DEFAULT_AUTH_TIMEOUT_MS = 10000
@@ -14,16 +18,34 @@ function toError(error, fallbackMessage) {
 
 async function readCurrentSession() {
   if (!supabase) {
+    if (isDevAuthBypassEnabled()) {
+      return createLocalDevSupabaseSession()
+    }
+
     throw new Error('Client Supabase belum dikonfigurasi.')
   }
 
   const { data, error } = await supabase.auth.getSession()
 
   if (error) {
+    if (isDevAuthBypassEnabled()) {
+      return createLocalDevSupabaseSession()
+    }
+
     throw error
   }
 
-  return data?.session ?? null
+  const currentSession = data?.session ?? null
+
+  if (currentSession?.access_token) {
+    return currentSession
+  }
+
+  if (isDevAuthBypassEnabled()) {
+    return createLocalDevSupabaseSession()
+  }
+
+  return null
 }
 
 function waitForAuthStoreReady({ timeoutMs = DEFAULT_AUTH_TIMEOUT_MS } = {}) {

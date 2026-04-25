@@ -1,5 +1,11 @@
 const DEV_AUTH_BYPASS_QUERY_KEYS = ['devAuthBypass', 'tgDevBypass', 'mockTelegram']
 const DEV_AUTH_BYPASS_STORAGE_KEY = 'banplex.dev-auth-bypass'
+const DEV_AUTH_USER_ID = '20002'
+const DEV_AUTH_TEAM_ID = 'dev-team'
+const DEV_AUTH_TEAM_NAME = 'Local Dev Team'
+const DEV_AUTH_TEAM_SLUG = 'local-dev'
+const DEV_AUTH_ACCESS_TOKEN = 'dev-local-access-token'
+const DEV_AUTH_REFRESH_TOKEN = 'dev-local-refresh-token'
 const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on'])
 const FALSE_VALUES = new Set(['0', 'false', 'no', 'off'])
 
@@ -86,7 +92,59 @@ function isDevAuthBypassEnabled() {
     return queryPreference
   }
 
-  return readStoredPreference() === true
+  const storedPreference = readStoredPreference()
+
+  if (storedPreference !== null) {
+    return storedPreference
+  }
+
+  return true
 }
 
-export { isDevAuthBypassEnabled }
+function createLocalDevAuthBootstrap() {
+  return {
+    user: {
+      id: 'dev-profile',
+      telegram_user_id: DEV_AUTH_USER_ID,
+      name: 'Local Dev',
+    },
+    memberships: [
+      {
+        id: 'dev-membership',
+        team_id: DEV_AUTH_TEAM_ID,
+        telegram_user_id: DEV_AUTH_USER_ID,
+        role: 'Owner',
+        is_default: true,
+        status: 'active',
+        approved_at: null,
+        team_name: DEV_AUTH_TEAM_NAME,
+        team_slug: DEV_AUTH_TEAM_SLUG,
+        team_is_active: true,
+      },
+    ],
+    currentTeamId: DEV_AUTH_TEAM_ID,
+    role: 'Owner',
+    isRegistered: true,
+  }
+}
+
+function createLocalDevSupabaseSession() {
+  return {
+    access_token: DEV_AUTH_ACCESS_TOKEN,
+    refresh_token: DEV_AUTH_REFRESH_TOKEN,
+    expires_at: null,
+    expires_in: null,
+    token_type: 'bearer',
+    user: {
+      id: 'dev-auth-user',
+      email: 'telegram-20002@banplex.local',
+      role: 'authenticated',
+    },
+  }
+}
+
+export {
+  createLocalDevAuthBootstrap,
+  createLocalDevSupabaseSession,
+  isDevAuthBypassEnabled,
+}

@@ -215,6 +215,6 @@ npm run backfill:sync-assets -- --input ./firestore-legacy-export --env-file ./.
 
 - `file_assets` disintesis dari URL attachment/logo legacy.
 - `worker_wage_rates` dipecah dari object `projectWages`.
-- `expense_line_items` dipecah dari array `items`.
+- `expense_line_items` dipecah dari array `items`; field legacy `price` dan `total` dipetakan ke `unit_price` dan `line_total`.
 - `bill_payments` dan `loan_payments` diekstrak dari subcollection `payments`.
 - `load.mjs` sengaja memisahkan backfill domain data dari bridge identity Telegram/auth.

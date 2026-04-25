@@ -1,7 +1,7 @@
 # AI Execution Guardrails
 
 Freeze date: `2026-04-19`
-Runtime reconciliation: `2026-04-23`
+Runtime reconciliation: `2026-04-25`
 
 ## 1. Global rules for AI implementation
 
@@ -12,7 +12,7 @@ Runtime reconciliation: `2026-04-23`
 5. Satu task implementasi harus sempit, terverifikasi, dan menyebut domain source of truth secara eksplisit.
 6. Jika task menyentuh domain settlement, delete tree, atau stock, validasi manual review wajib disebutkan.
 7. AI tidak boleh menggabungkan `Riwayat` dan `Recycle Bin` sebagai satu konsep.
-8. `Halaman Absensi` existing harus diperlakukan sebagai surface input absensi harian; `Catatan Absensi` adalah halaman baru untuk histori, filter, dan rekap; payroll payable yang masuk `Jurnal` adalah `Tagihan Upah` per worker.
+8. `Halaman Absensi` existing harus diperlakukan sebagai surface input absensi harian; `Catatan Absensi` adalah halaman baru untuk histori, filter, dan rekap; payroll payable dikelola lewat payroll/payment surfaces dan tidak menjadi row `Jurnal` / `Riwayat`.
 9. `Payment Receipt PDF` hanya output turunan dari `Pembayaran`, bukan source of truth.
 10. Dokumen barang diperlakukan sebagai inbound-stock contract untuk core release; stock-out otomatis dari dokumen barang adalah asumsi yang salah, dan stock-out manual yang aktif saat ini hanya boundary terbatas di `Stok Barang`.
 11. Route-level code splitting frontend sudah aktif di `src/App.jsx`; jangan menulis brief yang mengembalikan page utama ke static import atau menganggap lazy route belum menjadi baseline runtime.
@@ -173,7 +173,7 @@ Jika task menyentuh domain inti, output wajib menyebut:
 | `Pembayaran` | runtime create path sudah API-owned; task baru tidak boleh mengembalikan direct Supabase insert; `Payment Receipt PDF` tetap turunan, bukan source of truth |
 | `Halaman Absensi` | surface input absensi harian existing; jangan disamakan dengan `Catatan Absensi` |
 | `Catatan Absensi` | halaman baru untuk histori absensi, filter per bulan, filter per worker, dan aksi rekap; jangan dipaksa menjadi row ledger finance |
-| `Tagihan Upah` | payroll payable hasil rekap per worker boleh tampil di `Jurnal`/`Riwayat`, tetapi koreksi setelah payment history sangat sensitif |
+| `Tagihan Upah` | payroll payable hasil rekap per worker dikelola lewat payroll/payment surfaces; koreksi setelah payment history sangat sensitif dan row list `Jurnal`/`Riwayat` umum tetap mengecualikannya |
 | `Attachment` | orphan asset, role matrix, dan relation tree |
 | `Reports` | agregasi client-side bisa drift dari truth relasional |
 | `Stok Barang` | negative stock, manual stock-out terbatas yang sudah aktif, dan risiko adjustment liar |

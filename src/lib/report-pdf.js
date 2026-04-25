@@ -160,6 +160,24 @@ const BUSINESS_REPORT_THEMES = {
     sectionBorder: [253, 230, 138],
     kindLabel: 'KAS',
   },
+  applicant_statement: {
+    accent: [79, 70, 229],
+    accentSoft: [238, 242, 255],
+    accentBorder: [199, 210, 254],
+    accentMuted: [129, 140, 248],
+    sectionFill: [238, 242, 255],
+    sectionBorder: [199, 210, 254],
+    kindLabel: 'PELAMAR',
+  },
+  beneficiary_statement: {
+    accent: [15, 118, 110],
+    accentSoft: [236, 253, 251],
+    accentBorder: [153, 246, 228],
+    accentMuted: [45, 212, 191],
+    sectionFill: [236, 253, 251],
+    sectionBorder: [153, 246, 228],
+    kindLabel: 'PENERIMA',
+  },
   party_statement: {
     accent: [13, 148, 136],
     accentSoft: [240, 253, 250],
@@ -595,7 +613,14 @@ function normalizeBusinessPdfSettings(pdfSettings = {}) {
 function normalizeBusinessReportKind(value) {
   const normalizedValue = normalizeText(value, 'executive_finance')
 
-  return ['executive_finance', 'project_pl', 'cash_flow', 'party_statement'].includes(normalizedValue)
+  return [
+    'executive_finance',
+    'project_pl',
+    'cash_flow',
+    'applicant_statement',
+    'beneficiary_statement',
+    'party_statement',
+  ].includes(normalizedValue)
     ? normalizedValue
     : 'executive_finance'
 }
@@ -608,6 +633,20 @@ function getBusinessReportTheme(reportKind) {
 
 function getBusinessReportKindLabel(reportKind) {
   return getBusinessReportTheme(reportKind).kindLabel
+}
+
+export function shouldRenderBusinessReportKindBadge(reportKind) {
+  const normalizedKind = normalizeBusinessReportKind(reportKind)
+
+  return (
+    normalizedKind !== 'party_statement' &&
+    normalizedKind !== 'beneficiary_statement' &&
+    normalizedKind !== 'applicant_statement'
+  )
+}
+
+export function shouldRenderBusinessReportHeaderKpis(reportKind) {
+  return normalizeBusinessReportKind(reportKind) !== 'party_statement'
 }
 
 function humanizeBusinessLabel(value, fallback = '-') {
@@ -732,6 +771,24 @@ function getPartyStatementFileNamePrefix(partyType) {
   return 'statement-pihak'
 }
 
+function getApplicantStatementFileNamePrefix() {
+  return 'pelamar-status'
+}
+
+function getBeneficiaryStatementFileNamePrefix() {
+  return 'penerima-instansi'
+}
+
+function buildApplicantStatementRowsBody(rows = []) {
+  return rows.map((row) => [
+    normalizeText(row?.name, '-'),
+    normalizeText(row?.position, '-'),
+    normalizeText(row?.nik, '-'),
+    normalizeText(row?.email, '-'),
+    normalizeText(row?.no_telepon, '-'),
+  ])
+}
+
 function buildPartyStatementRowsBody(rows = []) {
   return rows.map((row) => [
     formatPdfDateTime(row?.transactionDate),
@@ -740,6 +797,48 @@ function buildPartyStatementRowsBody(rows = []) {
     row?.entryType === 'debit' ? formatCurrency(row?.amount) : '-',
     row?.entryType === 'credit' ? formatCurrency(row?.amount) : '-',
     formatCurrency(row?.balance),
+  ])
+}
+
+function normalizeBeneficiaryStatusLabel(value) {
+  const normalizedValue = String(value ?? '').trim().toLowerCase()
+
+  if (normalizedValue === 'active') {
+    return 'Aktif'
+  }
+
+  if (normalizedValue === 'pending') {
+    return 'Pending'
+  }
+
+  if (normalizedValue === 'inactive') {
+    return 'Nonaktif'
+  }
+
+  return normalizeText(value, '-')
+}
+
+function normalizeBeneficiaryDataStatusLabel(value) {
+  const normalizedValue = String(value ?? '').trim().toLowerCase()
+
+  if (normalizedValue === 'valid') {
+    return 'Valid'
+  }
+
+  if (normalizedValue === 'requires verification' || normalizedValue === 'requires_verification') {
+    return 'Perlu Verifikasi'
+  }
+
+  return normalizeText(value, '-')
+}
+
+function buildBeneficiaryStatementRowsBody(rows = []) {
+  return rows.map((row) => [
+    normalizeText(row?.name, '-'),
+    normalizeText(row?.nik, '-'),
+    normalizeText(row?.jenjang, '-'),
+    normalizeBeneficiaryStatusLabel(row?.status),
+    normalizeBeneficiaryDataStatusLabel(row?.data_status),
   ])
 }
 
@@ -771,6 +870,33 @@ function buildBusinessReportKpis(reportData = {}) {
       { label: 'Cash Out', value: formatCurrency(summary?.total_outflow) },
       { label: 'Net Cash Flow', value: formatCurrency(summary?.total_net_cash_flow) },
       { label: 'Mutasi', value: normalizeText(summary?.total_mutation, '0') },
+    ]
+  }
+
+  if (reportKind === 'applicant_statement') {
+    return [
+      { label: 'Total', value: normalizeText(summary?.total_applicants ?? summary?.total, '0') },
+      { label: 'Email', value: normalizeText(summary?.with_email_applicants ?? summary?.with_email, '0') },
+      { label: 'Telepon', value: normalizeText(summary?.with_phone_applicants ?? summary?.with_phone, '0') },
+      {
+        label: 'Berkas',
+        value: normalizeText(summary?.with_documents_applicants ?? summary?.with_documents, '0'),
+      },
+    ]
+  }
+
+  if (reportKind === 'beneficiary_statement') {
+    return [
+      { label: 'Total', value: normalizeText(summary?.total_beneficiaries ?? summary?.total, '0') },
+      { label: 'Valid', value: normalizeText(summary?.valid_beneficiaries ?? summary?.valid, '0') },
+      {
+        label: 'Perlu Cek',
+        value: normalizeText(summary?.needs_review_beneficiaries ?? summary?.needsReview, '0'),
+      },
+      {
+        label: 'Jenjang',
+        value: normalizeText(summary?.unique_jenjang_count ?? summary?.jenjang_count, '0'),
+      },
     ]
   }
 
@@ -903,6 +1029,8 @@ function normalizeBusinessReportData(reportData = {}) {
   const partyProfile = reportData?.partyProfile ?? reportData?.party_profile ?? null
   const partyType = normalizeText(reportData?.partyType ?? reportData?.party_type, null)
   const partyId = normalizeText(reportData?.partyId ?? reportData?.party_id, null)
+  const groupLabel = normalizeText(reportData?.groupLabel ?? reportData?.group_label, null)
+  const groupValue = normalizeText(reportData?.groupValue ?? reportData?.group_value, null)
   const projectSummaries = Array.isArray(reportData?.projectSummaries)
     ? reportData.projectSummaries
     : []
@@ -914,6 +1042,8 @@ function normalizeBusinessReportData(reportData = {}) {
     executive_finance: 'LAPORAN KEUANGAN EKSEKUTIF',
     project_pl: 'LAPORAN LABA RUGI PROYEK',
     cash_flow: 'LAPORAN ARUS KAS',
+    applicant_statement: 'LAPORAN PELAMAR PER STATUS',
+    beneficiary_statement: 'LAPORAN PENERIMA PER INSTANSI',
     party_statement:
       partyType === 'supplier'
         ? 'LAPORAN HUTANG SUPPLIER'
@@ -935,6 +1065,8 @@ function normalizeBusinessReportData(reportData = {}) {
     partyProfile,
     partyType,
     partyId,
+    groupLabel,
+    groupValue,
     projectSummaries,
     projectDetail,
     cashMutations,
@@ -1070,6 +1202,16 @@ function buildBusinessHeaderLayout({
   const headerTop = 16
   const logoBox = headerLogo ? 12 : 0
   const titleStartX = headerLogo ? margin + logoBox + 4 : margin
+  const secondaryLine =
+    reportData?.reportKind === 'party_statement' && reportData?.partyProfile?.name
+      ? `Pihak: ${normalizeText(reportData.partyProfile.name, '-')}`
+      : reportData?.groupLabel && reportData?.groupValue
+        ? `${normalizeText(reportData.groupLabel, 'Grup')}: ${normalizeText(reportData.groupValue, '-')}`
+        : null
+  const secondaryLineWidth = Math.max(68, Math.floor((pageWidth - margin * 2) * 0.48))
+  const secondaryLines = secondaryLine
+    ? [].concat(doc.splitTextToSize(secondaryLine, secondaryLineWidth))
+    : null
 
   doc.setFillColor(...settings.headerColor)
   doc.rect(0, 0, pageWidth, 4, 'F')
@@ -1090,20 +1232,22 @@ function buildBusinessHeaderLayout({
     doc.setTextColor(...SYS_COLORS.mutedText)
     doc.text(reportTitle, titleStartX, headerTop + 8)
 
-    if (reportData?.reportKind === 'party_statement' && reportData?.partyProfile?.name) {
+    if (secondaryLines) {
       doc.setFontSize(8)
-      doc.text(`Pihak: ${normalizeText(reportData.partyProfile.name, '-')}`, titleStartX, headerTop + 13)
+      doc.text(secondaryLines, titleStartX, headerTop + 13)
     }
 
-    const kindBadgeLabel = getBusinessReportKindLabel(reportData?.reportKind)
-    const badgeWidth = Math.max(22, doc.getTextWidth(kindBadgeLabel) + 6)
-    doc.setFillColor(...theme.accentSoft)
-    doc.setDrawColor(...theme.accentBorder)
-    doc.roundedRect(titleStartX, headerTop + 10.2, badgeWidth, 5.2, 2.2, 2.2, 'FD')
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(7.4)
-    doc.setTextColor(...theme.accent)
-    doc.text(kindBadgeLabel, titleStartX + 2.8, headerTop + 13.8)
+    if (shouldRenderBusinessReportKindBadge(reportData?.reportKind)) {
+      const kindBadgeLabel = getBusinessReportKindLabel(reportData?.reportKind)
+      const badgeWidth = Math.max(22, doc.getTextWidth(kindBadgeLabel) + 6)
+      doc.setFillColor(...theme.accentSoft)
+      doc.setDrawColor(...theme.accentBorder)
+      doc.roundedRect(titleStartX, headerTop + 10.2, badgeWidth, 5.2, 2.2, 2.2, 'FD')
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(7.4)
+      doc.setTextColor(...theme.accent)
+      doc.text(kindBadgeLabel, titleStartX + 2.8, headerTop + 13.8)
+    }
 
     doc.setFontSize(8)
     doc.setTextColor(...SYS_COLORS.onSurface)
@@ -1120,7 +1264,7 @@ function buildBusinessHeaderLayout({
       doc.text(`Telepon: ${settings.phone}`, pageWidth - margin, headerTop + 20, { align: 'right' })
     }
 
-    return (logoSize?.height ?? 14) + (reportData?.reportKind === 'party_statement' ? 16 : 12)
+    return (logoSize?.height ?? 14) + (secondaryLines ? 16 + Math.max(0, secondaryLines.length - 1) * 4 : 12)
   }
 
   if (headerLogo) {
@@ -1326,6 +1470,14 @@ export async function generateBusinessReportPdf(reportData = {}, pdfSettings = {
       ? `laporan-${getPartyStatementFileNamePrefix(normalizedReportData.partyType)}-${slugify(
           normalizedReportData.partyProfile?.name ?? normalizedReportData.partyId ?? 'pihak'
         )}-${toAppDateKey(generatedAt) || 'tanggal'}.pdf`
+      : normalizedReportData.reportKind === 'applicant_statement'
+        ? `laporan-${getApplicantStatementFileNamePrefix()}-${slugify(
+            normalizedReportData.groupValue ?? normalizedReportData.groupLabel ?? 'status'
+          )}-${toAppDateKey(generatedAt) || 'tanggal'}.pdf`
+      : normalizedReportData.reportKind === 'beneficiary_statement'
+        ? `laporan-${getBeneficiaryStatementFileNamePrefix()}-${slugify(
+            normalizedReportData.groupValue ?? normalizedReportData.groupLabel ?? 'instansi'
+          )}-${toAppDateKey(generatedAt) || 'tanggal'}.pdf`
       : `laporan-${slugify(normalizedReportData.reportKind)}-${slugify(companyName)}-${toAppDateKey(generatedAt) || 'tanggal'}.pdf`
   const pageWidth = doc.internal.pageSize.getWidth()
   const margin = 18
@@ -1383,7 +1535,9 @@ export async function generateBusinessReportPdf(reportData = {}, pdfSettings = {
 
   let startY = margin + headerExtraSpace
 
-  startY = renderBusinessMetricCards(doc, buildBusinessReportKpis(normalizedReportData), margin, startY, theme)
+  if (shouldRenderBusinessReportHeaderKpis(normalizedReportData.reportKind)) {
+    startY = renderBusinessMetricCards(doc, buildBusinessReportKpis(normalizedReportData), margin, startY, theme)
+  }
 
   if (normalizedReportData.reportKind === 'executive_finance') {
     startY = addBusinessSectionTitle(doc, 'RINGKASAN PROYEK', margin, startY, theme)
@@ -1486,6 +1640,70 @@ export async function generateBusinessReportPdf(reportData = {}, pdfSettings = {
         3: { cellWidth: 38 },
       },
       emptyText: 'Tidak ada mutasi kas di periode ini.',
+    })
+  } else if (normalizedReportData.reportKind === 'beneficiary_statement') {
+    startY = addBusinessSectionTitle(doc, 'RINGKASAN PENERIMA', margin, startY, theme)
+    startY = renderBusinessMetricCards(
+      doc,
+      buildBusinessReportKpis(normalizedReportData),
+      margin,
+      startY,
+      theme
+    )
+
+    startY = addBusinessSectionTitle(doc, 'DAFTAR PENERIMA', margin, startY, theme)
+    startY = renderBusinessReportTable({
+      doc,
+      startY,
+      head: [['NAMA', 'NIK', 'JENJANG', 'STATUS', 'DATA']],
+      body: buildBeneficiaryStatementRowsBody(normalizedReportData.rows),
+      margin,
+      headStyles: {
+        fillColor: theme.accentSoft,
+        textColor: theme.accent,
+        lineColor: theme.accentBorder,
+        fontSize: 7.2,
+      },
+      columnStyles: {
+        0: { cellWidth: 56 },
+        1: { cellWidth: 30 },
+        2: { cellWidth: 24 },
+        3: { cellWidth: 30 },
+        4: { cellWidth: 30 },
+      },
+      emptyText: 'Tidak ada penerima pada instansi ini.',
+    })
+  } else if (normalizedReportData.reportKind === 'applicant_statement') {
+    startY = addBusinessSectionTitle(doc, 'RINGKASAN PELAMAR', margin, startY, theme)
+    startY = renderBusinessMetricCards(
+      doc,
+      buildBusinessReportKpis(normalizedReportData),
+      margin,
+      startY,
+      theme
+    )
+
+    startY = addBusinessSectionTitle(doc, 'DAFTAR PELAMAR', margin, startY, theme)
+    startY = renderBusinessReportTable({
+      doc,
+      startY,
+      head: [['NAMA', 'POSISI', 'NIK', 'EMAIL', 'TELEPON']],
+      body: buildApplicantStatementRowsBody(normalizedReportData.rows),
+      margin,
+      headStyles: {
+        fillColor: theme.accentSoft,
+        textColor: theme.accent,
+        lineColor: theme.accentBorder,
+        fontSize: 7.2,
+      },
+      columnStyles: {
+        0: { cellWidth: 38 },
+        1: { cellWidth: 38 },
+        2: { cellWidth: 28 },
+        3: { cellWidth: 38 },
+        4: { cellWidth: 32 },
+      },
+      emptyText: 'Tidak ada pelamar pada status ini.',
     })
   } else if (normalizedReportData.reportKind === 'party_statement') {
     startY = addBusinessSectionTitle(doc, 'RINGKASAN PIUTANG', margin, startY, theme)

@@ -27,8 +27,8 @@ import {
   canOpenTransactionPayment,
   formatCurrency,
   formatTransactionTimestamp,
-  isPaidBillTransaction,
   isPayrollBillTransaction,
+  getTransactionLedgerVisibilityOptions,
   getTransactionContextLabel,
   getTransactionEditRoute,
   getTransactionLedgerFilterOptions,
@@ -37,6 +37,7 @@ import {
   getTransactionSettlementBadgeLabel,
   getTransactionTitle,
   getTransactionCreatorLabel,
+  matchesTransactionLedgerFilter,
   shouldHideTransactionAmount,
 } from '../lib/transaction-presentation'
 import {
@@ -56,6 +57,7 @@ import useIncomeStore from '../store/useIncomeStore'
 import useTransactionStore from '../store/useTransactionStore'
 
 const filters = getTransactionLedgerFilterOptions({ includePayrollBills: false })
+const workspaceLedgerVisibilityOptions = getTransactionLedgerVisibilityOptions('workspace')
 const filterValueSet = new Set(filters.map((item) => item.value))
 const ledgerPageSize = 20
 const ledgerListStateStorageKey = 'banplex:transactions-list-state'
@@ -153,11 +155,20 @@ function TransactionsPage() {
     () => readLedgerListState(currentTeamId),
     [currentTeamId]
   )
+  const restoredLedgerFilter = filterValueSet.has(restoredLedgerState?.filter)
+    ? restoredLedgerState.filter
+    : 'all'
   const restoredLedgerTransactions = useMemo(() => {
     return Array.isArray(restoredLedgerState?.transactions)
-      ? restoredLedgerState.transactions.filter((transaction) => !isPaidBillTransaction(transaction))
+      ? restoredLedgerState.transactions.filter((transaction) =>
+          matchesTransactionLedgerFilter(
+            transaction,
+            restoredLedgerFilter,
+            workspaceLedgerVisibilityOptions
+          )
+        )
       : []
-  }, [restoredLedgerState?.transactions])
+  }, [restoredLedgerFilter, restoredLedgerState?.transactions])
   const initialLedgerBootstrapRef = useRef(false)
   const skipInitialReloadRef = useRef(true)
   const savedScrollPositionRef = useRef(Number(restoredLedgerState?.scrollY ?? 0))
@@ -177,7 +188,7 @@ function TransactionsPage() {
   )
   const clearIncomeError = useIncomeStore((state) => state.clearError)
   const [filter, setFilter] = useState(
-    filterValueSet.has(restoredLedgerState?.filter) ? restoredLedgerState.filter : 'all'
+    restoredLedgerFilter
   )
   const [searchTerm, setSearchTerm] = useState(restoredLedgerState?.searchTerm ?? '')
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(
@@ -258,7 +269,13 @@ function TransactionsPage() {
 
     return shouldUseWarmSeed
       ? workspaceTransactions
-          .filter((transaction) => !isPaidBillTransaction(transaction))
+          .filter((transaction) =>
+            matchesTransactionLedgerFilter(
+              transaction,
+              filter,
+              workspaceLedgerVisibilityOptions
+            )
+          )
           .slice(0, ledgerPageSize)
       : []
   }, [
@@ -368,7 +385,9 @@ function TransactionsPage() {
           return
         }
 
-        const nextTransactions = result.workspaceTransactions ?? []
+        const nextTransactions = (result.workspaceTransactions ?? []).filter((transaction) =>
+          matchesTransactionLedgerFilter(transaction, filter, workspaceLedgerVisibilityOptions)
+        )
 
         setTransactions((currentTransactions) =>
           append ? [...currentTransactions, ...nextTransactions] : nextTransactions

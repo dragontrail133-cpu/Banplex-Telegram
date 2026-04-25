@@ -1,10 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarRange, History, Info, Loader2, ReceiptText } from 'lucide-react'
+import {
+  CalendarRange,
+  History,
+  Info,
+  Loader2,
+  ReceiptText,
+  Send,
+  RotateCcw,
+  Trash2,
+} from 'lucide-react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import BrandLoader from '../components/ui/BrandLoader'
 import {
   AppCardDashed,
   AppCardStrong,
+  AppButton,
   AppToggleGroup,
   PageHeader,
   PageShell,
@@ -14,7 +24,11 @@ import {
   fetchAttendanceHistoryFromApi,
   fetchBillByIdFromApi,
   fetchDeletedBillPaymentsFromApi,
+  deleteBillPaymentFromApi,
+  permanentDeleteBillPaymentFromApi,
+  restoreBillPaymentFromApi,
 } from '../lib/records-api'
+import { sendPaymentReceiptPdfToTelegramDm } from '../lib/report-delivery-api'
 import {
   formatCurrency,
   hasMeaningfulText,
@@ -22,6 +36,8 @@ import {
   getPayrollBillGroupHistoryRows,
   getPayrollBillGroupSummary,
 } from '../lib/transaction-presentation'
+import useMutationToast from '../hooks/useMutationToast'
+import useTelegram from '../hooks/useTelegram'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
 import useToastStore from '../store/useToastStore'
@@ -161,11 +177,15 @@ function PayrollWorkerDetailPage() {
   const location = useLocation()
   const { workerId: routeWorkerKey = '' } = useParams()
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
+  const currentRole = useAuthStore((state) => state.role)
   const projects = useMasterStore((state) => state.projects)
   const workers = useMasterStore((state) => state.workers)
   const workerWageRates = useMasterStore((state) => state.workerWageRates)
   const fetchMasters = useMasterStore((state) => state.fetchMasters)
   const showToast = useToastStore((state) => state.showToast)
+  const { begin, fail, succeed } = useMutationToast()
+  const { user: telegramUser } = useTelegram()
+  const isTelegramMiniWeb = telegramUser != null
   const [activeTab, setActiveTab] = useState('info')
   const [attendanceRows, setAttendanceRows] = useState([])
   const [billDetailsById, setBillDetailsById] = useState({})
@@ -173,6 +193,9 @@ function PayrollWorkerDetailPage() {
   const [isLoadingRows, setIsLoadingRows] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [loadError, setLoadError] = useState(null)
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
+  const [isReceiptDelivering, setIsReceiptDelivering] = useState(false)
+  const isReadOnly = currentRole === 'Viewer' || currentRole === 'Payroll'
 
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search])
   const selectedMonth = normalizeText(
@@ -378,7 +401,7 @@ function PayrollWorkerDetailPage() {
     return () => {
       isActive = false
     }
-  }, [currentTeamId, orderedAttendanceRows, selectedBillIds, showToast])
+  }, [currentTeamId, historyRefreshKey, orderedAttendanceRows, selectedBillIds, showToast])
 
   const selectedBills = useMemo(() => {
     return selectedBillIds
@@ -497,6 +520,120 @@ function PayrollWorkerDetailPage() {
 
   const handleBack = () => {
     navigate(returnTo)
+  }
+
+  const handleSendReceipt = async (entry) => {
+    if (!isTelegramMiniWeb || isReceiptDelivering || !entry?.payment) {
+      return
+    }
+
+    setIsReceiptDelivering(true)
+    begin({
+      title: 'Mengirim kwitansi',
+      message: 'Mohon tunggu sampai kwitansi terkirim ke DM Telegram.',
+    })
+
+    try {
+      const result = await sendPaymentReceiptPdfToTelegramDm({
+        paymentType: 'bill',
+        payment: entry.payment,
+        parentRecord: entry.bill ?? entry.payment ?? {},
+        generatedAt: new Date().toISOString(),
+      })
+
+      succeed({
+        title: result?.pdfError ? 'Kwitansi terkirim sebagian' : 'Kwitansi terkirim',
+        message: result?.pdfError
+          ? 'File PDF gagal dikirim, tetapi pesan Telegram berhasil diterima.'
+          : 'Kwitansi PDF berhasil dikirim ke DM Telegram.',
+      })
+    } catch (error) {
+      fail({
+        title: 'Kwitansi gagal dikirim',
+        message: error instanceof Error ? error.message : 'Gagal mengirim kwitansi.',
+      })
+    } finally {
+      setIsReceiptDelivering(false)
+    }
+  }
+
+  const handleArchivePayment = async (entry) => {
+    if (isReadOnly || !currentTeamId || !entry?.payment?.id) {
+      return
+    }
+
+    begin({
+      title: 'Mengarsipkan pembayaran',
+      message: 'Mohon tunggu sampai riwayat pembayaran diperbarui.',
+    })
+
+    try {
+      await deleteBillPaymentFromApi(entry.payment.id, currentTeamId)
+      setHistoryRefreshKey((currentValue) => currentValue + 1)
+      succeed({
+        title: 'Pembayaran diarsipkan',
+        message: 'Pembayaran tagihan berhasil dihapus.',
+      })
+    } catch (error) {
+      fail({
+        title: 'Pembayaran tagihan gagal diarsipkan',
+        message: error instanceof Error ? error.message : 'Gagal mengarsipkan pembayaran.',
+      })
+    }
+  }
+
+  const handleRestorePayment = async (entry) => {
+    if (isReadOnly || !currentTeamId || !entry?.payment?.id) {
+      return
+    }
+
+    begin({
+      title: 'Memulihkan pembayaran',
+      message: 'Mohon tunggu sampai riwayat pembayaran diperbarui.',
+    })
+
+    try {
+      await restoreBillPaymentFromApi(
+        entry.payment.id,
+        currentTeamId,
+        entry.payment.updatedAt ?? entry.payment.updated_at ?? null
+      )
+      setHistoryRefreshKey((currentValue) => currentValue + 1)
+      succeed({
+        title: 'Pembayaran tagihan dipulihkan',
+        message: 'Riwayat pembayaran berhasil dipulihkan.',
+      })
+    } catch (error) {
+      fail({
+        title: 'Pembayaran tagihan gagal dipulihkan',
+        message: error instanceof Error ? error.message : 'Gagal memulihkan pembayaran.',
+      })
+    }
+  }
+
+  const handlePermanentDeletePayment = async (entry) => {
+    if (isReadOnly || !currentTeamId || !entry?.payment?.id) {
+      return
+    }
+
+    begin({
+      title: 'Menghapus permanen pembayaran',
+      message: 'Mohon tunggu sampai riwayat pembayaran diperbarui.',
+    })
+
+    try {
+      await permanentDeleteBillPaymentFromApi(entry.payment.id, currentTeamId)
+      setHistoryRefreshKey((currentValue) => currentValue + 1)
+      succeed({
+        title: 'Pembayaran tagihan dihapus permanen',
+        message: 'Riwayat pembayaran berhasil dihapus permanen.',
+      })
+    } catch (error) {
+      fail({
+        title: 'Pembayaran tagihan gagal dihapus permanen',
+        message: error instanceof Error ? error.message : 'Gagal menghapus permanen pembayaran.',
+      })
+    }
   }
 
   const renderInfoTab = () => (
@@ -709,6 +846,56 @@ function PayrollWorkerDetailPage() {
                     Jatuh tempo {formatAppDateLabel(entry.bill.dueDate)}
                   </p>
                 ) : null}
+                {isReadOnly || !isTelegramMiniWeb ? null : (
+                  <div className="mt-2 flex flex-wrap justify-end gap-1">
+                    <AppButton
+                      aria-label={isReceiptDelivering ? 'Mengirim' : 'Kirim'}
+                      iconOnly
+                      disabled={isReceiptDelivering}
+                      leadingIcon={
+                        <Send
+                          className={`h-4 w-4 ${isReceiptDelivering ? 'animate-pulse' : ''}`}
+                        />
+                      }
+                      onClick={() => void handleSendReceipt(entry)}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    />
+                    {entry.isDeleted ? (
+                      <>
+                        <AppButton
+                          aria-label="Pulihkan pembayaran"
+                          iconOnly
+                          leadingIcon={<RotateCcw className="h-4 w-4" />}
+                          onClick={() => handleRestorePayment(entry)}
+                          size="sm"
+                          type="button"
+                          variant="secondary"
+                        />
+                        <AppButton
+                          aria-label="Hapus permanen pembayaran"
+                          iconOnly
+                          leadingIcon={<Trash2 className="h-4 w-4" />}
+                          onClick={() => handlePermanentDeletePayment(entry)}
+                          size="sm"
+                          type="button"
+                          variant="danger"
+                        />
+                      </>
+                    ) : (
+                      <AppButton
+                        aria-label="Arsipkan pembayaran"
+                        iconOnly
+                        leadingIcon={<Trash2 className="h-4 w-4" />}
+                        onClick={() => handleArchivePayment(entry)}
+                        size="sm"
+                        type="button"
+                        variant="danger"
+                      />
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </AppCardStrong>

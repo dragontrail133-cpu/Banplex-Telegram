@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  Boxes,
   AlertCircle,
   ArrowDownLeft,
   ArrowUpRight,
@@ -13,7 +14,6 @@ import {
   Trash2,
   TrendingUp,
   User,
-  UsersRound,
   Wallet,
 } from 'lucide-react'
 import ActionCard from '../components/ui/ActionCard'
@@ -88,9 +88,9 @@ const dashboardActions = [
     iconClassName: 'bg-[var(--app-brand-accent-muted)] text-[var(--app-brand-accent)]',
   },
   {
-    label: 'Tim',
-    to: '/more/team-invite',
-    icon: UsersRound,
+    label: 'Stok Barang',
+    to: '/stock',
+    icon: Boxes,
     iconClassName: 'bg-[var(--app-surface-low-color)] text-[var(--app-text-color)]',
   },
 ]
@@ -420,11 +420,12 @@ function Dashboard() {
           <button
             className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[20px] bg-[var(--app-surface-low-color)] text-[var(--app-brand-accent)] transition active:scale-[0.98] disabled:opacity-60"
             disabled={!hasWorkspace || isLoading}
+            aria-busy={isLoading}
             onClick={() => void refreshAllData()}
             type="button"
             aria-label="Refresh dashboard"
           >
-            <RefreshCw className={`h-5 w-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-5 w-5 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
         </div>
 

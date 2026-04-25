@@ -7,6 +7,10 @@ import {
   normalizeLoanLateInterestBasis,
   normalizeLoanLatePenaltyType,
 } from '../src/lib/loan-business.js'
+import {
+  getTransactionLedgerVisibilityOptions,
+  matchesTransactionLedgerFilter,
+} from '../src/lib/transaction-presentation.js'
 import { nowMs } from '../src/lib/timing.js'
 
 function getEnv(name, fallback = '') {
@@ -805,51 +809,19 @@ function normalizeBillSummaryRow(row) {
 }
 
 function mapWorkspaceProjectIncomeRow(row) {
-  const billPaidAmount = toNumber(row?.bill_paid_amount)
-  const billAmount = toNumber(row?.bill_amount)
-  const hasBillSummary =
-    Number.isFinite(billAmount) ||
-    Number.isFinite(billPaidAmount) ||
-    normalizeText(row?.bill_status, null) !== null
-  const bill = hasBillSummary
-    ? {
-        id: row?.bill_id ?? null,
-        billIds: Array.isArray(row?.bill_ids) ? row.bill_ids : [],
-        billType: row?.bill_type ?? 'fee',
-        description: row?.bill_description ?? null,
-        amount: Number.isFinite(billAmount) ? billAmount : 0,
-        paidAmount: Number.isFinite(billPaidAmount) ? billPaidAmount : 0,
-        remainingAmount: Math.max(
-          (Number.isFinite(billAmount) ? billAmount : 0) -
-            (Number.isFinite(billPaidAmount) ? billPaidAmount : 0),
-          0
-        ),
-        dueDate: row?.bill_due_date ?? null,
-        status: normalizeText(row?.bill_status, 'unpaid'),
-        paidAt: row?.bill_paid_at ?? null,
-        supplierName:
-          row?.bill_supplier_name_snapshot ?? row?.bill_worker_name_snapshot ?? 'Fee termin',
-        projectName: row?.bill_project_name_snapshot ?? row?.project_name_snapshot ?? '-',
-      }
-    : null
+  const feeBillPaidAmount = toNumber(row?.fee_bill_paid_amount)
 
   return {
     ...mapProjectIncomeRow(row),
     sort_at: row?.sort_at ?? row?.updated_at ?? row?.created_at ?? null,
-    bill_paid_at: row?.bill_paid_at ?? null,
-    bill,
-    bill_count: Number(row?.bill_count ?? (bill ? 1 : 0)),
-    ledger_summary: bill
-      ? {
-          label: 'Fee bill',
-          status: bill.status,
-          remainingAmount: bill.remainingAmount,
-        }
-      : null,
+    bill_paid_at: null,
+    bill: null,
+    bill_count: 0,
+    ledger_summary: null,
     sourceType: 'project-income',
     canView: true,
-    canEdit: billPaidAmount <= 0,
-    canDelete: billPaidAmount <= 0,
+    canEdit: feeBillPaidAmount <= 0,
+    canDelete: feeBillPaidAmount <= 0,
     detailRoute: `/transactions/${row.id}`,
     editRoute: `/edit/project-income/${row.id}`,
   }
@@ -1762,22 +1734,6 @@ function compareWorkspaceViewRows(left, right) {
   return String(right?.id ?? '').localeCompare(String(left?.id ?? ''))
 }
 
-function getAggregatedProjectIncomeBillStatus(totalAmount, paidAmount, billCount) {
-  if (billCount <= 0) {
-    return null
-  }
-
-  if (totalAmount > 0 && paidAmount >= totalAmount) {
-    return 'paid'
-  }
-
-  if (paidAmount > 0) {
-    return 'partial'
-  }
-
-  return 'unpaid'
-}
-
 export function aggregateProjectIncomeViewRows(rows = []) {
   const aggregatedRows = []
   const projectIncomeGroups = new Map()
@@ -1804,31 +1760,29 @@ export function aggregateProjectIncomeViewRows(rows = []) {
       projectIncomeGroups.set(groupKey, {
         ...row,
         sort_at: row?.sort_at ?? null,
-        bill_id: row?.bill_id ?? null,
-        bill_type: hasBill ? row?.bill_type ?? 'fee' : row?.bill_type ?? null,
-        bill_status: hasBill ? row?.bill_status ?? 'unpaid' : row?.bill_status ?? null,
-        bill_amount: hasBill ? billAmount : row?.bill_amount ?? null,
-        bill_paid_amount: hasBill ? billPaidAmount : row?.bill_paid_amount ?? null,
-        bill_remaining_amount: hasBill
-          ? Math.max((Number.isFinite(billAmount) ? billAmount : 0) - (Number.isFinite(billPaidAmount) ? billPaidAmount : 0), 0)
-          : row?.bill_remaining_amount ?? null,
-        bill_due_date: row?.bill_due_date ?? null,
-        bill_paid_at: row?.bill_paid_at ?? null,
-        bill_description: row?.bill_description ?? null,
-        bill_project_name_snapshot: row?.bill_project_name_snapshot ?? null,
-        bill_supplier_name_snapshot: row?.bill_supplier_name_snapshot ?? null,
-        bill_worker_name_snapshot: row?.bill_worker_name_snapshot ?? null,
-        bill_ids: hasBill ? [row.bill_id] : [],
-        bill_count: hasBill ? 1 : 0,
+        bill_id: null,
+        bill_type: null,
+        bill_status: null,
+        bill_amount: null,
+        bill_paid_amount: null,
+        bill_remaining_amount: null,
+        bill_due_date: null,
+        bill_paid_at: null,
+        bill_description: null,
+        bill_project_name_snapshot: null,
+        bill_supplier_name_snapshot: null,
+        bill_worker_name_snapshot: null,
+        bill_ids: [],
+        bill_count: 0,
+        fee_bill_ids: hasBill ? [row.bill_id] : [],
+        fee_bill_count: hasBill ? 1 : 0,
+        fee_bill_amount: hasBill ? billAmount : 0,
+        fee_bill_paid_amount: hasBill ? billPaidAmount : 0,
         search_text: normalizeText(row?.search_text, ''),
       })
       continue
     }
 
-    const existingBillAmount = toNumber(existingGroup.bill_amount)
-    const existingBillPaidAmount = toNumber(existingGroup.bill_paid_amount)
-    const nextBillAmount = Number.isFinite(billAmount) ? billAmount : 0
-    const nextBillPaidAmount = Number.isFinite(billPaidAmount) ? billPaidAmount : 0
     const nextSearchParts = new Set(
       [existingGroup.search_text, normalizeText(row?.search_text, '')].filter(Boolean)
     )
@@ -1836,51 +1790,20 @@ export function aggregateProjectIncomeViewRows(rows = []) {
       getWorkspaceViewSortValue(row) > getWorkspaceViewSortValue(existingGroup)
         ? row?.sort_at ?? existingGroup.sort_at ?? null
         : existingGroup.sort_at ?? row?.sort_at ?? null
-    const nextDueDateCandidates = [
-      normalizeText(existingGroup.bill_due_date, null),
-      normalizeText(row?.bill_due_date, null),
-    ].filter(Boolean).sort()
-    const nextPaidAtCandidates = [
-      normalizeText(existingGroup.bill_paid_at, null),
-      normalizeText(row?.bill_paid_at, null),
-    ].filter(Boolean).sort()
-    const nextBillCount = existingGroup.bill_count + (hasBill ? 1 : 0)
-    const totalBillAmount = (Number.isFinite(existingBillAmount) ? existingBillAmount : 0) + nextBillAmount
-    const totalBillPaidAmount =
-      (Number.isFinite(existingBillPaidAmount) ? existingBillPaidAmount : 0) + nextBillPaidAmount
+    const nextFeeBillCount = existingGroup.fee_bill_count + (hasBill ? 1 : 0)
+    const nextFeeBillAmount = existingGroup.fee_bill_amount + (hasBill ? billAmount : 0)
+    const nextFeeBillPaidAmount =
+      existingGroup.fee_bill_paid_amount + (hasBill ? billPaidAmount : 0)
 
     projectIncomeGroups.set(groupKey, {
       ...existingGroup,
       sort_at: nextSortAt,
-      bill_id: nextBillCount <= 1 ? existingGroup.bill_id ?? row?.bill_id ?? null : null,
-      bill_type: nextBillCount > 0 ? 'fee' : null,
-      bill_status: getAggregatedProjectIncomeBillStatus(
-        totalBillAmount,
-        totalBillPaidAmount,
-        nextBillCount
-      ),
-      bill_amount: nextBillCount > 0 ? totalBillAmount : null,
-      bill_paid_amount: nextBillCount > 0 ? totalBillPaidAmount : null,
-      bill_remaining_amount:
-        nextBillCount > 0 ? Math.max(totalBillAmount - totalBillPaidAmount, 0) : null,
-      bill_due_date: nextDueDateCandidates[0] ?? null,
-      bill_paid_at: nextPaidAtCandidates.at(-1) ?? null,
-      bill_description:
-        nextBillCount <= 1
-          ? normalizeText(existingGroup.bill_description ?? row?.bill_description, null)
-          : `Fee termin (${nextBillCount} tagihan)`,
-      bill_project_name_snapshot:
-        existingGroup.bill_project_name_snapshot ?? row?.bill_project_name_snapshot ?? null,
-      bill_supplier_name_snapshot: nextBillCount <= 1
-        ? existingGroup.bill_supplier_name_snapshot ?? row?.bill_supplier_name_snapshot ?? null
-        : null,
-      bill_worker_name_snapshot: nextBillCount <= 1
-        ? existingGroup.bill_worker_name_snapshot ?? row?.bill_worker_name_snapshot ?? null
-        : `${nextBillCount} fee staff`,
-      bill_ids: hasBill
-        ? [...existingGroup.bill_ids, row.bill_id]
-        : existingGroup.bill_ids,
-      bill_count: nextBillCount,
+      fee_bill_ids: hasBill
+        ? [...existingGroup.fee_bill_ids, row.bill_id]
+        : existingGroup.fee_bill_ids,
+      fee_bill_count: nextFeeBillCount,
+      fee_bill_amount: nextFeeBillAmount,
+      fee_bill_paid_amount: nextFeeBillPaidAmount,
       search_text: [...nextSearchParts].join(' '),
     })
   }
@@ -1925,6 +1848,7 @@ function buildTransactionViewQuery(
     filter = 'all',
     fetchAll = false,
     transactionId = null,
+    ignoreLedgerVisibility = false,
   } = {}
 ) {
   const normalizedLimit = Number.isFinite(Number(limit))
@@ -1939,10 +1863,12 @@ function buildTransactionViewQuery(
 
   let query = adminClient.from(viewName).select(selectColumns).eq('team_id', teamId)
 
-  query =
-    viewName === 'vw_history_transactions'
-      ? applyHistoryTransactionViewFilter(query, filter)
-      : applyWorkspaceTransactionViewFilter(query, filter)
+  if (!ignoreLedgerVisibility) {
+    query =
+      viewName === 'vw_history_transactions'
+        ? applyHistoryTransactionViewFilter(query, filter)
+        : applyWorkspaceTransactionViewFilter(query, filter)
+  }
 
   if (transactionId) {
     query = query.eq('id', normalizeText(transactionId))
@@ -1999,6 +1925,7 @@ async function loadTransactionViewRows(
       filter,
       fetchAll: shouldAggregateProjectIncome ? true : fetchAll,
       transactionId,
+      ignoreLedgerVisibility: Boolean(transactionId),
     }
   )
   const queryStartedAt = nowMs()
@@ -2012,18 +1939,27 @@ async function loadTransactionViewRows(
   const normalizedRows = shouldAggregateProjectIncome
     ? aggregateProjectIncomeViewRows(data ?? [])
     : data ?? []
+  const visibilityOptions = getTransactionLedgerVisibilityOptions(
+    viewName === 'vw_history_transactions' ? 'history' : 'workspace'
+  )
+  const visibleRows =
+    transactionId != null
+      ? normalizedRows
+      : normalizedRows.filter((row) =>
+          matchesTransactionLedgerFilter(row, filter, visibilityOptions)
+        )
 
   let creatorMetadata = new Map()
   let creatorMetadataMs = 0
 
   if (includeCreatorMetadata) {
     const creatorMetadataStartedAt = nowMs()
-    creatorMetadata = await loadWorkspaceTransactionCreatorMetadata(adminClient, teamId, normalizedRows)
+    creatorMetadata = await loadWorkspaceTransactionCreatorMetadata(adminClient, teamId, visibleRows)
     creatorMetadataMs = nowMs() - creatorMetadataStartedAt
   }
 
   const mapStartedAt = nowMs()
-  const mappedRows = normalizedRows
+  const mappedRows = visibleRows
     .map((row) => {
       const mappedRow = mapWorkspaceTransactionViewRow(row)
 

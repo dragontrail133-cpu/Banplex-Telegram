@@ -174,7 +174,7 @@ function getPartyStatementPartyLabel(partyType, summary) {
 
 function ProjectReport() {
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false)
-  const { tg } = useTelegram()
+  const { user: telegramUser } = useTelegram()
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
   const reportKind = useReportStore((state) => state.reportKind)
   const reportPeriod = useReportStore((state) => state.reportPeriod)
@@ -311,7 +311,8 @@ function ProjectReport() {
     () => projectSummaries.find((summary) => String(summary.project_id ?? '').trim() === String(selectedProjectId ?? '').trim()) ?? null,
     [projectSummaries, selectedProjectId]
   )
-  const isTelegramMiniWeb = tg != null
+  const isTelegramMiniWeb = telegramUser != null
+  const showPdfDownloadButton = !isTelegramMiniWeb
   const isPartyStatement = selectedPartyType != null
   const hasSelectedProject = reportKind !== 'project_pl' || Boolean(selectedProjectId)
   const hasSelectedParty = !isPartyStatement || Boolean(selectedPartyId)
@@ -323,6 +324,10 @@ function ProjectReport() {
     !isReportLoading &&
     hasSelectedProject &&
     hasSelectedParty
+  const sendPdfButtonLabel = isPdfDelivering ? 'Mengirim' : 'Kirim'
+  const actionGridClassName = showPdfDownloadButton
+    ? 'grid w-full grid-cols-2 gap-2 sm:w-auto sm:min-w-[320px]'
+    : 'grid w-full grid-cols-1 gap-2 sm:w-auto sm:min-w-[320px]'
   const filterSheetDescription =
     reportKind === 'project_pl'
       ? 'Atur periode dan Unit Kerja yang ingin ditampilkan.'
@@ -412,7 +417,7 @@ function ProjectReport() {
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-[var(--app-hint-color)]">{selectedKindOption.description}</p>
-          <div className="grid w-full grid-cols-2 gap-2 sm:w-auto sm:min-w-[320px]">
+          <div className={actionGridClassName}>
             <AppButton
               variant="secondary"
               fullWidth
@@ -422,27 +427,29 @@ function ProjectReport() {
             >
               Filter
             </AppButton>
-            <AppButton
-              fullWidth
-              disabled={!canDownloadPdf}
-              leadingIcon={<FileDown className={`h-4 w-4 ${isPdfGenerating ? 'animate-bounce' : ''}`} />}
-              onClick={handleDownloadPdf}
-              type="button"
-            >
-              {isPdfGenerating ? 'Membuat PDF...' : 'Unduh PDF'}
-            </AppButton>
+            {showPdfDownloadButton ? (
+              <AppButton
+                fullWidth
+                disabled={!canDownloadPdf}
+                leadingIcon={<FileDown className={`h-4 w-4 ${isPdfGenerating ? 'animate-bounce' : ''}`} />}
+                onClick={handleDownloadPdf}
+                type="button"
+              >
+                {isPdfGenerating ? 'Membuat PDF...' : 'Unduh PDF'}
+              </AppButton>
+            ) : null}
           </div>
         </div>
         {isTelegramMiniWeb ? (
           <AppButton
-            variant="secondary"
+            variant="primary"
             fullWidth
             disabled={!canSendPdfToDm}
             leadingIcon={<Send className={`h-4 w-4 ${isPdfDelivering ? 'animate-pulse' : ''}`} />}
             onClick={handleSendPdfToDm}
             type="button"
           >
-            {isPdfDelivering ? 'Mengirim ke DM...' : 'Kirim ke DM'}
+            {sendPdfButtonLabel}
           </AppButton>
         ) : null}
       </AppCardStrong>

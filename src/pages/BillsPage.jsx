@@ -14,11 +14,12 @@ import {
 } from '../components/ui/AppPrimitives'
 import {
   formatCurrency,
+  getBillGroupPaymentTarget,
   getBillSummaryAmount,
   getBillSummarySubtitle,
   getBillSummaryTitle,
   getTransactionPaymentRoute,
-  groupBillsByWorker,
+  groupBillsForBillList,
 } from '../lib/transaction-presentation'
 import useAuthStore from '../store/useAuthStore'
 import useBillStore from '../store/useBillStore'
@@ -100,12 +101,12 @@ function BillRowButton({ bill, onOpenBill }) {
   )
 }
 
-function PayrollBillGroupCard({ group, onOpenDetail }) {
+function BillGroupCard({ group, onOpenGroup }) {
   return (
     <AppCardStrong className="px-4 py-4">
       <button
         className="flex w-full items-center gap-3 text-left"
-        onClick={() => onOpenDetail(group.groupKey)}
+        onClick={() => onOpenGroup(group)}
         type="button"
       >
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--app-surface-low-color)] text-[var(--app-text-color)]">
@@ -188,25 +189,59 @@ function BillsPage({ embedded = false } = {}) {
 
   const sortedBills = useMemo(() => {
     return [...bills].sort((left, right) => {
-      const rightTimestamp = new Date(String(right.dueDate ?? right.created_at ?? '')).getTime()
-      const leftTimestamp = new Date(String(left.dueDate ?? left.created_at ?? '')).getTime()
+      const rightTimestamp = new Date(
+        String(right.dueDate ?? right.created_at ?? right.updated_at ?? '')
+      ).getTime()
+      const leftTimestamp = new Date(
+        String(left.dueDate ?? left.created_at ?? left.updated_at ?? '')
+      ).getTime()
 
-      return leftTimestamp - rightTimestamp
+      if (leftTimestamp !== rightTimestamp) {
+        return leftTimestamp - rightTimestamp
+      }
+
+      const rightCreatedAt = new Date(String(right.created_at ?? right.updated_at ?? '')).getTime()
+      const leftCreatedAt = new Date(String(left.created_at ?? left.updated_at ?? '')).getTime()
+
+      if (leftCreatedAt !== rightCreatedAt) {
+        return leftCreatedAt - rightCreatedAt
+      }
+
+      return String(left.id ?? '').localeCompare(String(right.id ?? ''))
     })
   }, [bills])
 
   const displayBills = useMemo(() => {
-    return groupBillsByWorker(sortedBills)
+    return groupBillsForBillList(sortedBills)
   }, [sortedBills])
 
-  const handleOpenWorkerDetail = useCallback(
-    (groupKey) => {
-      if (!groupKey) {
+  const handleOpenBillGroup = useCallback(
+    (group) => {
+      if (!group?.groupKey) {
         return
       }
 
       persistTagihanListState()
-      navigate(`/pembayaran?group=${encodeURIComponent(groupKey)}`, {
+
+      if (group.kind === 'staff-group') {
+        const paymentTarget = getBillGroupPaymentTarget(group)
+        const paymentRoute = getTransactionPaymentRoute(paymentTarget)
+
+        if (!paymentRoute) {
+          return
+        }
+
+        navigate(paymentRoute, {
+          state: {
+            transaction: paymentTarget,
+            returnTo: embedded ? '/transactions?tab=tagihan' : '/pembayaran',
+            returnToOnSuccess: true,
+          },
+        })
+        return
+      }
+
+      navigate(`/pembayaran?group=${encodeURIComponent(group.groupKey)}`, {
         state: {
           returnTo: embedded ? '/transactions?tab=tagihan' : '/pembayaran',
         },
@@ -297,12 +332,12 @@ function BillsPage({ embedded = false } = {}) {
       ) : (
         <div className="space-y-3">
           {displayBills.map((item) => {
-            if (item.kind === 'worker-group') {
+            if (item.kind === 'worker-group' || item.kind === 'staff-group') {
               return (
-                <PayrollBillGroupCard
+                <BillGroupCard
                   key={item.groupKey}
                   group={item}
-                  onOpenDetail={handleOpenWorkerDetail}
+                  onOpenGroup={handleOpenBillGroup}
                 />
               )
             }

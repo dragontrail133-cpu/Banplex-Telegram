@@ -1486,6 +1486,158 @@ function normalizeStockTransactionRow(row) {
   }
 }
 
+const stockStatusFilters = new Set(['all', 'normal', 'low', 'empty'])
+const stockSortOptions = new Set(['priority', 'name_asc', 'stock_asc', 'stock_desc', 'updated_desc'])
+const stockDirectionFilters = new Set(['all', 'in', 'out'])
+
+function normalizePaginationOptions({ limit, offset } = {}, { defaultLimit = 25, maxLimit = 50 } = {}) {
+  const parsedLimit = Number(limit)
+  const parsedOffset = Number(offset)
+
+  return {
+    limit: Number.isFinite(parsedLimit)
+      ? Math.min(Math.max(Math.trunc(parsedLimit), 1), maxLimit)
+      : defaultLimit,
+    offset: Number.isFinite(parsedOffset) ? Math.max(Math.trunc(parsedOffset), 0) : 0,
+  }
+}
+
+function normalizeStockStatusFilter(value) {
+  const normalizedValue = normalizeText(value, 'all').toLowerCase()
+
+  return stockStatusFilters.has(normalizedValue) ? normalizedValue : 'all'
+}
+
+function normalizeStockSortOption(value) {
+  const normalizedValue = normalizeText(value, 'priority').toLowerCase()
+
+  return stockSortOptions.has(normalizedValue) ? normalizedValue : 'priority'
+}
+
+function normalizeStockDirectionFilter(value) {
+  const normalizedValue = normalizeText(value, 'all').toLowerCase()
+
+  return stockDirectionFilters.has(normalizedValue) ? normalizedValue : 'all'
+}
+
+function getStockStateFromMaterial(material) {
+  const currentStock = toNumber(material?.current_stock)
+  const reorderPoint = toNumber(material?.reorder_point)
+
+  if (currentStock <= 0) {
+    return 'empty'
+  }
+
+  if (reorderPoint > 0 && currentStock <= reorderPoint) {
+    return 'low'
+  }
+
+  return 'normal'
+}
+
+function getMaterialSearchText(material) {
+  return [
+    material?.name,
+    material?.material_name,
+    material?.unit,
+    getStockStateFromMaterial(material),
+  ]
+    .map((value) => normalizeText(value, '').toLowerCase())
+    .filter(Boolean)
+    .join(' ')
+}
+
+function getMovementSearchText(transaction) {
+  return [
+    transaction?.material_name,
+    transaction?.material_unit,
+    transaction?.project_name,
+    transaction?.source_type,
+    transaction?.direction,
+    transaction?.notes,
+  ]
+    .map((value) => normalizeText(value, '').toLowerCase())
+    .filter(Boolean)
+    .join(' ')
+}
+
+function buildStockSummary(materials = []) {
+  return materials.reduce(
+    (accumulator, material) => {
+      const state = getStockStateFromMaterial(material)
+      accumulator.total += 1
+      accumulator[state] += 1
+      return accumulator
+    },
+    {
+      total: 0,
+      normal: 0,
+      low: 0,
+      empty: 0,
+    }
+  )
+}
+
+function compareStockMaterials(sort) {
+  const stateRank = {
+    empty: 0,
+    low: 1,
+    normal: 2,
+  }
+
+  return (left, right) => {
+    if (sort === 'name_asc') {
+      return normalizeText(left?.name, '').localeCompare(normalizeText(right?.name, ''), 'id', {
+        sensitivity: 'base',
+      })
+    }
+
+    if (sort === 'stock_asc') {
+      return toNumber(left?.current_stock) - toNumber(right?.current_stock)
+    }
+
+    if (sort === 'stock_desc') {
+      return toNumber(right?.current_stock) - toNumber(left?.current_stock)
+    }
+
+    if (sort === 'updated_desc') {
+      const leftTime = new Date(left?.updated_at ?? 0).getTime()
+      const rightTime = new Date(right?.updated_at ?? 0).getTime()
+
+      return rightTime - leftTime
+    }
+
+    const leftState = getStockStateFromMaterial(left)
+    const rightState = getStockStateFromMaterial(right)
+
+    if (stateRank[leftState] !== stateRank[rightState]) {
+      return stateRank[leftState] - stateRank[rightState]
+    }
+
+    const stockComparison = toNumber(left?.current_stock) - toNumber(right?.current_stock)
+
+    if (stockComparison !== 0) {
+      return stockComparison
+    }
+
+    return normalizeText(left?.name, '').localeCompare(normalizeText(right?.name, ''), 'id', {
+      sensitivity: 'base',
+    })
+  }
+}
+
+function buildPage(rows, { limit, offset }) {
+  return {
+    rows: rows.slice(offset, offset + limit),
+    page: {
+      limit,
+      offset,
+      total: rows.length,
+      hasMore: offset + limit < rows.length,
+    },
+  }
+}
+
 function normalizeProjectOptionRow(row) {
   const projectName = normalizeText(row?.project_name ?? row?.name, row?.id ?? null)
 
@@ -2009,6 +2161,7 @@ async function loadUnpaidBills(adminClient, teamId) {
     .in('status', ['unpaid', 'partial'])
     .eq('team_id', normalizedTeamId)
     .order('due_date', { ascending: true })
+    .order('created_at', { ascending: true })
 
   if (error) {
     throw error
@@ -2125,46 +2278,114 @@ async function loadExpenseAttachments(adminClient, expenseId, { includeDeleted =
   return (data ?? []).map(normalizeExpenseAttachmentRow)
 }
 
-async function loadStockOverview(adminClient, teamId, limit = 8) {
+async function loadStockOverview(adminClient, teamId, options = {}) {
   const normalizedTeamId = normalizeText(teamId, null)
 
   if (!normalizedTeamId) {
     throw createHttpError(400, 'Team ID wajib diisi.')
   }
 
-  const normalizedLimit = Number.isFinite(Number(limit))
-    ? Math.min(Math.max(Math.trunc(Number(limit)), 1), 20)
-    : 8
+  const normalizedOptions =
+    typeof options === 'number'
+      ? { limit: options }
+      : options ?? {}
+  const { limit, offset } = normalizePaginationOptions(normalizedOptions, {
+    defaultLimit: 25,
+    maxLimit: 50,
+  })
+  const status = normalizeStockStatusFilter(normalizedOptions.status)
+  const sort = normalizeStockSortOption(normalizedOptions.sort)
+  const search = normalizeText(normalizedOptions.search, '').toLowerCase()
 
-  const [materialsResult, stockTransactionsResult] = await Promise.all([
-    adminClient
-      .from('materials')
-      .select(stockMaterialColumns)
-      .eq('team_id', normalizedTeamId)
-      .is('deleted_at', null)
-      .eq('is_active', true)
-      .order('material_name', { ascending: true }),
-    adminClient
-      .from('stock_transactions')
-      .select(stockTransactionColumns)
-      .eq('team_id', normalizedTeamId)
-      .is('deleted_at', null)
-      .order('transaction_date', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(normalizedLimit),
-  ])
+  const materialsResult = await adminClient
+    .from('materials')
+    .select(stockMaterialColumns)
+    .eq('team_id', normalizedTeamId)
+    .is('deleted_at', null)
+    .eq('is_active', true)
+    .order('material_name', { ascending: true })
 
   if (materialsResult.error) {
     throw materialsResult.error
   }
 
-  if (stockTransactionsResult.error) {
-    throw stockTransactionsResult.error
-  }
+  const materials = (materialsResult.data ?? []).map(normalizeStockMaterialRow)
+  const summary = buildStockSummary(materials)
+  const filteredMaterials = materials
+    .filter((material) => {
+      if (status !== 'all' && getStockStateFromMaterial(material) !== status) {
+        return false
+      }
+
+      if (!search) {
+        return true
+      }
+
+      return getMaterialSearchText(material).includes(search)
+    })
+    .sort(compareStockMaterials(sort))
+  const materialPage = buildPage(filteredMaterials, { limit, offset })
 
   return {
-    materials: (materialsResult.data ?? []).map(normalizeStockMaterialRow),
-    stockTransactions: (stockTransactionsResult.data ?? []).map(normalizeStockTransactionRow),
+    summary,
+    materials: materialPage.rows,
+    stockTransactions: [],
+    page: materialPage.page,
+  }
+}
+
+async function loadStockMovements(adminClient, teamId, options = {}) {
+  const normalizedTeamId = normalizeText(teamId, null)
+
+  if (!normalizedTeamId) {
+    throw createHttpError(400, 'Team ID wajib diisi.')
+  }
+
+  const { limit, offset } = normalizePaginationOptions(options, {
+    defaultLimit: 20,
+    maxLimit: 50,
+  })
+  const materialId = normalizeText(options?.materialId ?? options?.material_id, null)
+  const direction = normalizeStockDirectionFilter(options?.direction)
+  const search = normalizeText(options?.search, '').toLowerCase()
+
+  let query = adminClient
+    .from('stock_transactions')
+    .select(stockTransactionColumns)
+    .eq('team_id', normalizedTeamId)
+    .is('deleted_at', null)
+
+  if (materialId) {
+    query = query.eq('material_id', materialId)
+  }
+
+  if (direction !== 'all') {
+    query = query.eq('direction', direction)
+  }
+
+  const { data, error } = await query
+    .order('transaction_date', { ascending: false })
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw error
+  }
+
+  const stockTransactions = (data ?? [])
+    .map(normalizeStockTransactionRow)
+    .filter((transaction) => {
+      if (!search) {
+        return true
+      }
+
+      return getMovementSearchText(transaction).includes(search)
+    })
+
+  const movementPage = buildPage(stockTransactions, { limit, offset })
+
+  return {
+    stockTransactions: movementPage.rows,
+    page: movementPage.page,
   }
 }
 
@@ -5793,7 +6014,7 @@ export default async function handler(req, res) {
 
     if (
       method === 'GET' &&
-      ['attendance-history', 'stock-project-options', 'stock-overview'].includes(resource)
+      ['attendance-history', 'stock-project-options', 'stock-overview', 'stock-movements'].includes(resource)
     ) {
       const bearerToken = getBearerToken(req)
       const accessClient = createDatabaseClient(
@@ -5854,12 +6075,32 @@ export default async function handler(req, res) {
         })
       }
 
+      if (resource === 'stock-movements') {
+        const teamId = normalizeText(req.query?.teamId, null)
+        const effectiveTeamId = await assertSessionTeamAccess(accessClient, teamId)
+        const movements = await loadStockMovements(readClient, effectiveTeamId, {
+          limit: req.query?.limit,
+          offset: req.query?.offset,
+          search: req.query?.search,
+          direction: req.query?.direction,
+          materialId: req.query?.materialId,
+        })
+
+        return res.status(200).json({
+          success: true,
+          ...movements,
+        })
+      }
+
       const teamId = normalizeText(req.query?.teamId, null)
-      const limit = Number.isFinite(Number(req.query?.limit))
-        ? Number(req.query.limit)
-        : 8
       const effectiveTeamId = await assertSessionTeamAccess(accessClient, teamId)
-      const overview = await loadStockOverview(readClient, effectiveTeamId, limit)
+      const overview = await loadStockOverview(readClient, effectiveTeamId, {
+        limit: req.query?.limit,
+        offset: req.query?.offset,
+        search: req.query?.search,
+        status: req.query?.status,
+        sort: req.query?.sort,
+      })
 
       return res.status(200).json({
         success: true,
@@ -6102,13 +6343,33 @@ export default async function handler(req, res) {
       })
     }
 
+    if (resource === 'stock-movements' && method === 'GET') {
+      const teamId = normalizeText(req.query?.teamId, null)
+      const effectiveTeamId = await assertTeamAccess(adminClient, telegramUserId, teamId)
+      const movements = await loadStockMovements(adminClient, effectiveTeamId, {
+        limit: req.query?.limit,
+        offset: req.query?.offset,
+        search: req.query?.search,
+        direction: req.query?.direction,
+        materialId: req.query?.materialId,
+      })
+
+      return res.status(200).json({
+        success: true,
+        ...movements,
+      })
+    }
+
     if (resource === 'stock-overview' && method === 'GET') {
       const teamId = normalizeText(req.query?.teamId, null)
-      const limit = Number.isFinite(Number(req.query?.limit))
-        ? Number(req.query.limit)
-        : 8
       const effectiveTeamId = await assertTeamAccess(adminClient, telegramUserId, teamId)
-      const overview = await loadStockOverview(adminClient, effectiveTeamId, limit)
+      const overview = await loadStockOverview(adminClient, effectiveTeamId, {
+        limit: req.query?.limit,
+        offset: req.query?.offset,
+        search: req.query?.search,
+        status: req.query?.status,
+        sort: req.query?.sort,
+      })
 
       return res.status(200).json({
         success: true,

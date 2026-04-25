@@ -44,18 +44,76 @@ export async function fetchExpenseAttachmentsFromApi(expenseId, { includeDeleted
   return result.attachments ?? []
 }
 
-export async function fetchStockOverviewFromApi(teamId, { limit = 8 } = {}) {
+export async function fetchStockOverviewFromApi(
+  teamId,
+  {
+    limit = 25,
+    offset = 0,
+    search = '',
+    status = 'all',
+    sort = 'priority',
+  } = {}
+) {
   const result = await requestRecordsApi('GET', {
     resource: 'stock-overview',
     query: {
       teamId,
       limit,
+      offset,
+      search,
+      status,
+      sort,
     },
   })
 
   return {
+    summary: result.summary ?? {
+      total: 0,
+      normal: 0,
+      low: 0,
+      empty: 0,
+    },
     materials: result.materials ?? [],
     stockTransactions: result.stockTransactions ?? [],
+    page: result.page ?? {
+      limit,
+      offset,
+      total: result.materials?.length ?? 0,
+      hasMore: false,
+    },
+  }
+}
+
+export async function fetchStockMovementsFromApi(
+  teamId,
+  {
+    limit = 20,
+    offset = 0,
+    search = '',
+    direction = 'all',
+    materialId = '',
+  } = {}
+) {
+  const result = await requestRecordsApi('GET', {
+    resource: 'stock-movements',
+    query: {
+      teamId,
+      limit,
+      offset,
+      search,
+      direction,
+      materialId,
+    },
+  })
+
+  return {
+    stockTransactions: result.stockTransactions ?? [],
+    page: result.page ?? {
+      limit,
+      offset,
+      total: result.stockTransactions?.length ?? 0,
+      hasMore: false,
+    },
   }
 }
 

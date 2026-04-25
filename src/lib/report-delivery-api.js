@@ -16,7 +16,7 @@ async function requestReportDeliveryApi(body = {}) {
   const result = await response.json().catch(() => ({}))
 
   if (!response.ok || !result?.success) {
-    throw new Error(result?.error || 'Gagal mengirim laporan ke DM Telegram.')
+    throw new Error(result?.error || 'Gagal mengirim dokumen ke DM Telegram.')
   }
 
   return result
@@ -24,4 +24,11 @@ async function requestReportDeliveryApi(body = {}) {
 
 export async function sendBusinessReportPdfToTelegramDm(payload = {}) {
   return requestReportDeliveryApi(payload)
+}
+
+export async function sendPaymentReceiptPdfToTelegramDm(payload = {}) {
+  return requestReportDeliveryApi({
+    deliveryKind: 'payment_receipt',
+    ...payload,
+  })
 }

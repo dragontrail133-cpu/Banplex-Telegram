@@ -129,7 +129,10 @@ Tambahan wajib untuk stream multi-brief:
 ## Aturan Validasi
 Validasi harus proporsional terhadap scope:
 - Jika **docs-only**: cukup validasi ringan (misal cek path, konsistensi isi). Jangan build berat.
-- Jika menyentuh **UI/komponen**: jalankan validasi minimal yang relevan bila tersedia (misal `npm run lint`, dan `npm run build` jika perubahan berpotensi memengaruhi bundling/route/style global).
+- Jika menyentuh **UI/komponen**: jalankan validasi minimal yang relevan bila tersedia.
+  - Perubahan UI kecil yang hanya menyentuh copy, spacing, warna, ikon, atau susunan elemen di route yang sudah ada cukup dengan `npm run lint` dan, bila relevan, `npm run build`.
+  - Playwright tidak wajib untuk perubahan UI kecil selama tidak mengubah route, navigation, state/data flow, role gating, atau interaksi lintas-halaman.
+  - Jika perubahan UI menyentuh alur navigasi, form submit, fetch/mutation, atau behavior integration-critical, jalankan smoke Playwright yang relevan bila tersedia.
 - Jika menyentuh **logic/state**: jalankan test/lint/build yang paling dekat dengan area tersebut bila tersedia.
 - Jika task **integration-critical**: minimal validasi harus memastikan route, store, dan source data final konsisten. Untuk perubahan kode UI/store, default validasi adalah `npm run lint` dan `npm run build` bila memungkinkan.
 

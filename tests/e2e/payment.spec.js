@@ -63,6 +63,7 @@ function createPaymentsPageMockApi({
     lastArchiveRequest: null,
     lastRestoreRequest: null,
     lastPermanentDeleteRequest: null,
+    lastReportDeliveryRequest: null,
   }
 
   const baseBill = {
@@ -259,6 +260,97 @@ function createPaymentsPageMockApi({
   }
 }
 
+function makeFeeBill(overrides = {}) {
+  const createdAt = overrides.createdAt ?? '2026-04-18T09:00:00.000Z'
+
+  return {
+    id: overrides.id ?? 'bill-fee-oldest',
+    billId: overrides.billId ?? overrides.id ?? 'bill-fee-oldest',
+    bill_id: overrides.bill_id ?? overrides.billId ?? overrides.id ?? 'bill-fee-oldest',
+    team_id: overrides.team_id ?? 'e2e-team',
+    teamId: overrides.teamId ?? 'e2e-team',
+    bill_type: overrides.bill_type ?? 'fee',
+    billType: overrides.billType ?? 'fee',
+    description: overrides.description ?? 'Fee termin Proyek E2E - Staff A',
+    amount: overrides.amount ?? 100_000,
+    paid_amount: overrides.paid_amount ?? 0,
+    paidAmount: overrides.paidAmount ?? 0,
+    remaining_amount: overrides.remaining_amount ?? overrides.amount ?? 100_000,
+    remainingAmount: overrides.remainingAmount ?? overrides.remaining_amount ?? overrides.amount ?? 100_000,
+    due_date: overrides.due_date ?? '2026-04-20',
+    dueDate: overrides.dueDate ?? '2026-04-20',
+    status: overrides.status ?? 'unpaid',
+    paid_at: overrides.paid_at ?? null,
+    paidAt: overrides.paidAt ?? null,
+    project_income_id: overrides.project_income_id ?? 'income-fee-1',
+    projectIncomeId: overrides.projectIncomeId ?? 'income-fee-1',
+    staff_id: overrides.staff_id ?? 'staff-e2e-1',
+    staffId: overrides.staffId ?? 'staff-e2e-1',
+    worker_name_snapshot: overrides.worker_name_snapshot ?? 'Staff A',
+    workerName: overrides.workerName ?? 'Staff A',
+    project_name_snapshot: overrides.project_name_snapshot ?? 'Proyek E2E',
+    projectName: overrides.projectName ?? 'Proyek E2E',
+    supplier_name_snapshot: overrides.supplier_name_snapshot ?? null,
+    supplierName: overrides.supplierName ?? 'Staff A',
+    created_at: overrides.created_at ?? createdAt,
+    createdAt: overrides.createdAt ?? createdAt,
+    updated_at: overrides.updated_at ?? createdAt,
+    updatedAt: overrides.updatedAt ?? createdAt,
+  }
+}
+
+function createBillsPageMockApi({ bills = [] } = {}) {
+  const state = {
+    bills: bills.map(clonePayment),
+  }
+
+  const billById = new Map(
+    state.bills
+      .map((bill) => [String(bill?.id ?? ''), bill])
+      .filter(([billId]) => Boolean(billId))
+  )
+
+  return {
+    state,
+    notify: async () => ({ success: true }),
+    transactions: async ({ method, url }) => {
+      if (method === 'GET' && url.searchParams.get('view') === 'workspace') {
+        return {
+          success: true,
+          workspaceTransactions: [],
+          pageInfo: {
+            hasMore: false,
+            nextCursor: null,
+            totalCount: 0,
+          },
+        }
+      }
+
+      return undefined
+    },
+    records: async ({ method, resource, url }) => {
+      if (resource !== 'bills' || method !== 'GET') {
+        return undefined
+      }
+
+      const billId = url.searchParams.get('billId')
+
+      if (billId) {
+        return {
+          success: true,
+          bill: clonePayment(billById.get(String(billId)) ?? null),
+        }
+      }
+
+      return {
+        success: true,
+        bills: state.bills.map(clonePayment),
+      }
+    },
+    supabase: async () => [],
+  }
+}
+
 test.describe('payment surfaces', () => {
   test('archives an active payment row', async ({ page }) => {
     page.setDefaultNavigationTimeout(120_000)
@@ -385,6 +477,141 @@ test.describe('payment surfaces', () => {
       action: 'permanent-delete',
       paymentId: 'payment-trash-1',
       teamId: 'e2e-team',
+    })
+  })
+
+  test('returns from technical payment detail to the same payment form', async ({ page }) => {
+    page.setDefaultNavigationTimeout(120_000)
+    const mockApi = createPaymentsPageMockApi({
+      activePayments: [makeActivePayment()],
+    })
+
+    await openApp(page, '/payment/bill-e2e-1/technical', {
+      mockApi,
+    })
+
+    await expect(
+      page.getByRole('heading', { name: 'Detail Teknis Pembayaran Tagihan Upah' })
+    ).toBeVisible({
+      timeout: 30000,
+    })
+    await page.getByRole('button', { name: 'Kembali' }).click()
+
+    await expect(page).toHaveURL(new RegExp('/payment/bill-e2e-1$'))
+    await expect(page.getByRole('heading', { name: 'Pembayaran Tagihan Upah' })).toBeVisible({
+      timeout: 30000,
+    })
+  })
+
+  test('groups fee bills by staff and opens the oldest outstanding bill', async ({ page }) => {
+    page.setDefaultNavigationTimeout(120_000)
+    const mockApi = createBillsPageMockApi({
+      bills: [
+        makeFeeBill({
+          id: 'bill-fee-oldest',
+          description: 'Fee termin Proyek E2E - Staff A',
+          amount: 100_000,
+          paid_amount: 50_000,
+          remaining_amount: 50_000,
+          remainingAmount: 50_000,
+          status: 'partial',
+          due_date: '2026-04-20',
+          dueDate: '2026-04-20',
+          created_at: '2026-04-18T09:00:00.000Z',
+          createdAt: '2026-04-18T09:00:00.000Z',
+        }),
+        makeFeeBill({
+          id: 'bill-fee-newer',
+          description: 'Fee termin Proyek E2E - Staff A',
+          amount: 120_000,
+          paid_amount: 0,
+          paidAmount: 0,
+          remaining_amount: 120_000,
+          remainingAmount: 120_000,
+          status: 'unpaid',
+          due_date: '2026-04-22',
+          dueDate: '2026-04-22',
+          created_at: '2026-04-19T09:00:00.000Z',
+          createdAt: '2026-04-19T09:00:00.000Z',
+        }),
+      ],
+    })
+
+    await openApp(page, '/transactions?tab=tagihan', {
+      mockApi,
+    })
+
+    await expect(page.getByRole('button', { name: /Staff A/ })).toBeVisible({
+      timeout: 30000,
+    })
+
+    await page.getByRole('button', { name: /Staff A/ }).click()
+
+    await expect(page).toHaveURL(/\/payment\/bill-fee-oldest(?:\?.*)?$/)
+  })
+
+  test('sends a bill receipt to telegram dm from payment history', async ({ page }) => {
+    page.setDefaultNavigationTimeout(120_000)
+    const mockApi = createPaymentsPageMockApi({
+      activePayments: [makeActivePayment()],
+    })
+
+    mockApi.reportDelivery = async ({ body }) => {
+      mockApi.state.lastReportDeliveryRequest = body
+
+      return {
+        success: true,
+        deliveryMode: 'document',
+        telegramStatus: 200,
+        telegramResponse: {
+          ok: true,
+          result: {
+            message_id: 20005,
+          },
+        },
+        fileName: 'kwitansi-tagihan-bill-e2e-1-payment-live-1-20260424.pdf',
+        pdfError: null,
+      }
+    }
+
+    await openApp(page, '/pembayaran?group=worker-e2e-1', {
+      mockApi,
+      telegram: {
+        user: {
+          id: 20005,
+          first_name: 'Mini',
+          last_name: 'Pay',
+          username: 'mini_pay_user',
+        },
+        startParam: '',
+      },
+    })
+
+    await expect(page.getByRole('heading', { name: 'Budi E2E', exact: true })).toBeVisible({
+      timeout: 30000,
+    })
+    await page.getByRole('button', { name: 'Riwayat' }).click()
+    const sendReceiptButton = page.getByRole('button', { name: 'Kirim' }).first()
+
+    await expect(sendReceiptButton).toBeVisible({
+      timeout: 30000,
+    })
+
+    await sendReceiptButton.click()
+
+    await expect(page.getByRole('button', { name: 'Kirim' }).first()).toBeVisible({
+      timeout: 30000,
+    })
+    expect(mockApi.state.lastReportDeliveryRequest).toMatchObject({
+      deliveryKind: 'payment_receipt',
+      paymentType: 'bill',
+      payment: {
+        id: 'payment-live-1',
+        billId: 'bill-e2e-1',
+      },
+      parentRecord: {
+        id: 'bill-e2e-1',
+      },
     })
   })
 })

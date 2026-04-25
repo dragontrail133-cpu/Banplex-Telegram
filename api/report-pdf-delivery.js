@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { createBusinessReportPdf } from '../src/lib/report-pdf.js'
+import { createBusinessReportPdf, createPaymentReceiptPdf } from '../src/lib/report-pdf.js'
 
 function getEnv(name, fallback = '') {
   return String(globalThis.process?.env?.[name] ?? fallback).trim()
@@ -57,6 +57,26 @@ function normalizeText(value, fallback = null) {
   const normalizedValue = String(value ?? '').trim()
 
   return normalizedValue.length > 0 ? normalizedValue : fallback
+}
+
+function normalizePaymentType(value) {
+  const normalizedValue = String(value ?? '').trim().toLowerCase()
+
+  if (normalizedValue === 'loan' || normalizedValue.includes('loan')) {
+    return 'loan'
+  }
+
+  if (normalizedValue === 'bill' || normalizedValue.includes('bill')) {
+    return 'bill'
+  }
+
+  return null
+}
+
+function normalizeGeneratedAt(value) {
+  const parsedDate = value ? new Date(value) : new Date()
+
+  return Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate
 }
 
 function getBearerToken(req) {
@@ -263,6 +283,42 @@ async function sendTelegramDocumentNotification({
   }
 }
 
+function getPaymentReceiptKindLabel(paymentType) {
+  return paymentType === 'loan' ? 'pinjaman' : 'tagihan'
+}
+
+async function sendPaymentReceiptNotification({
+  telegramBotToken,
+  telegramChatId,
+  paymentType,
+  payment,
+  parentRecord,
+  generatedAt,
+}) {
+  const { doc, fileName } = createPaymentReceiptPdf({
+    paymentType,
+    payment,
+    parentRecord,
+    generatedAt,
+  })
+  const pdfBytes = new Uint8Array(doc.output('arraybuffer'))
+  const receiptKindLabel = getPaymentReceiptKindLabel(paymentType)
+
+  const telegramResult = await sendTelegramDocumentNotification({
+    telegramBotToken,
+    telegramChatId,
+    pdfBytes,
+    fileName,
+    caption: `Kwitansi pembayaran ${receiptKindLabel} berhasil dikirim ke DM.`,
+    fallbackMessage: `Kwitansi pembayaran ${receiptKindLabel} siap, tetapi pengiriman file ke Telegram gagal.`,
+  })
+
+  return {
+    ...telegramResult,
+    fileName,
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST')
@@ -296,11 +352,11 @@ export default async function handler(req, res) {
     )
     const body = await parseRequestBody(req)
     const reportData = body?.reportData ?? null
+    const payment = body?.payment ?? null
+    const paymentType = normalizePaymentType(
+      body?.paymentType ?? payment?.paymentType ?? payment?.payment_type ?? payment?.type
+    )
     const pdfSettings = body?.pdfSettings ?? {}
-
-    if (!reportData || typeof reportData !== 'object') {
-      throw createHttpError(400, 'reportData wajib dikirim untuk fallback DM.')
-    }
 
     const telegramUserId = await resolveTelegramUserId(authenticatedClient, authUser)
 
@@ -308,20 +364,51 @@ export default async function handler(req, res) {
       throw createHttpError(400, 'Telegram user belum terverifikasi untuk delivery DM.')
     }
 
-    const { doc, fileName } = await createBusinessReportPdf({
-      reportData,
-      pdfSettings,
-    })
-    const pdfBytes = new Uint8Array(doc.output('arraybuffer'))
-    const reportTitle = normalizeText(reportData?.title, 'Laporan bisnis')
+    if (reportData && typeof reportData === 'object') {
+      const { doc, fileName } = await createBusinessReportPdf({
+        reportData,
+        pdfSettings,
+      })
+      const pdfBytes = new Uint8Array(doc.output('arraybuffer'))
+      const reportTitle = normalizeText(reportData?.title, 'Laporan bisnis')
 
-    const telegramResult = await sendTelegramDocumentNotification({
+      const telegramResult = await sendTelegramDocumentNotification({
+        telegramBotToken,
+        telegramChatId: telegramUserId,
+        pdfBytes,
+        fileName,
+        caption: `Laporan ${reportTitle} berhasil dikirim ke DM.`,
+        fallbackMessage: `Laporan ${reportTitle} siap, tetapi pengiriman file ke Telegram gagal. Buka laporan di browser untuk unduh langsung.`,
+      })
+
+      return res.status(200).json({
+        success: true,
+        deliveryMode: telegramResult.deliveryMode,
+        telegramStatus: telegramResult.telegramStatus,
+        telegramResponse: telegramResult.telegramResponse,
+        fileName,
+        pdfError: telegramResult.pdfError ?? null,
+      })
+    }
+
+    if (!payment || typeof payment !== 'object') {
+      throw createHttpError(400, 'payment atau reportData wajib dikirim untuk delivery DM.')
+    }
+
+    if (!paymentType) {
+      throw createHttpError(400, 'paymentType wajib dikirim untuk kwitansi pembayaran.')
+    }
+
+    const generatedAt = normalizeGeneratedAt(
+      body?.generatedAt ?? payment?.generatedAt ?? payment?.generated_at
+    )
+    const telegramResult = await sendPaymentReceiptNotification({
       telegramBotToken,
       telegramChatId: telegramUserId,
-      pdfBytes,
-      fileName,
-      caption: `Laporan ${reportTitle} berhasil dikirim ke DM.`,
-      fallbackMessage: `Laporan ${reportTitle} siap, tetapi pengiriman file ke Telegram gagal. Buka laporan di browser untuk unduh langsung.`,
+      paymentType,
+      payment,
+      parentRecord: body?.parentRecord ?? payment?.parentRecord ?? {},
+      generatedAt,
     })
 
     return res.status(200).json({
@@ -329,7 +416,7 @@ export default async function handler(req, res) {
       deliveryMode: telegramResult.deliveryMode,
       telegramStatus: telegramResult.telegramStatus,
       telegramResponse: telegramResult.telegramResponse,
-      fileName,
+      fileName: telegramResult.fileName ?? null,
       pdfError: telegramResult.pdfError ?? null,
     })
   } catch (error) {

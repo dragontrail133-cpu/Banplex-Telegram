@@ -6,9 +6,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   Info,
+  Loader2,
 } from 'lucide-react'
-import BrandLoader from './BrandLoader'
-import { AppButton, AppCardStrong } from './AppPrimitives'
+import { AppButton } from './AppPrimitives'
 import useToastStore from '../../store/useToastStore'
 
 function joinClasses(...values) {
@@ -60,6 +60,27 @@ const bubbleToneClassNameMap = {
   neutral: 'app-tone-neutral',
 }
 
+function ToastGlyph({ icon: Icon, iconClassName, isLoading }) {
+  return (
+    <div
+      className={joinClasses(
+        'flex h-12 w-12 items-center justify-center rounded-full',
+        iconClassName
+      )}
+    >
+      {isLoading ? (
+        <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+      ) : (
+        createElement(Icon, {
+          className: 'h-5 w-5',
+          strokeWidth: 2.25,
+          'aria-hidden': true,
+        })
+      )}
+    </div>
+  )
+}
+
 function GlobalToast() {
   const toast = useToastStore((state) => state.toast)
   const hideToast = useToastStore((state) => state.hideToast)
@@ -104,9 +125,8 @@ function GlobalToast() {
             transition={{ duration: 0.2, ease: 'easeOut' }}
             className="pointer-events-auto w-full"
           >
-            <AppCardStrong
-              padded={false}
-              className="overflow-hidden"
+            <div
+              className="overflow-hidden rounded-[28px] bg-[var(--app-surface-strong-color)] shadow-[var(--app-toast-shadow)]"
               role={toastConfig.role}
               aria-live={toastConfig.ariaLive}
               aria-atomic="true"
@@ -114,28 +134,11 @@ function GlobalToast() {
               aria-describedby={toast.message ? dialogDescriptionId : undefined}
             >
               <div className="flex flex-col items-center gap-4 px-5 pt-5 pb-4 text-center">
-                <div className="flex items-center justify-center">
-                  {isLoading ? (
-                    <BrandLoader
-                      className="rounded-[22px] border border-[var(--app-outline-soft)] bg-[var(--app-surface-low-color)] shadow-[var(--app-card-shadow)]"
-                      context="global"
-                      size="compact"
-                    />
-                  ) : (
-                    <div
-                      className={joinClasses(
-                        'flex h-12 w-12 items-center justify-center rounded-[20px] border border-[var(--app-outline-soft)] shadow-[var(--app-card-shadow)]',
-                        iconClassName
-                      )}
-                    >
-                      {createElement(toastConfig.icon, {
-                        className: 'h-5 w-5',
-                        strokeWidth: 2.25,
-                        'aria-hidden': true,
-                      })}
-                    </div>
-                  )}
-                </div>
+                <ToastGlyph
+                  icon={toastConfig.icon}
+                  iconClassName={iconClassName}
+                  isLoading={isLoading}
+                />
 
                 <div className="space-y-1">
                   <p
@@ -156,7 +159,7 @@ function GlobalToast() {
               </div>
 
               {toast.dismissible === false || isLoading ? null : (
-                <div className="border-t border-[var(--app-border-color)] px-5 py-4">
+                <div className="px-5 pb-5">
                   <AppButton
                     fullWidth
                     className="rounded-[18px]"
@@ -169,7 +172,7 @@ function GlobalToast() {
                   </AppButton>
                 </div>
               )}
-            </AppCardStrong>
+            </div>
           </Motion.div>
         </AnimatePresence>
       </div>

@@ -211,6 +211,7 @@ function PaymentPage({ paymentType = 'bill', technicalView = false }) {
   const technicalRoute = isLoanPayment
     ? `/loan-payment/${id}/technical`
     : `/payment/${id}/technical`
+  const technicalBackRoute = isLoanPayment ? `/loan-payment/${id}` : `/payment/${id}`
   const technicalStatusLabel = isLoadingRecord
     ? 'Memuat...'
     : displayRecord
@@ -249,6 +250,18 @@ function PaymentPage({ paymentType = 'bill', technicalView = false }) {
     },
   ]
   const backRoute = returnTo ?? (isLoanPayment ? '/transactions?tab=aktif' : '/transactions?tab=tagihan')
+  const handleBack = () => {
+    navigate(backRoute)
+  }
+  const handleTechnicalBack = () => {
+    navigate(technicalBackRoute, {
+      replace: true,
+      state: {
+        ...(location.state ?? {}),
+        transaction: displayRecord ?? null,
+      },
+    })
+  }
 
   useEffect(() => {
     setRecord(initialRecord)
@@ -285,10 +298,6 @@ function PaymentPage({ paymentType = 'bill', technicalView = false }) {
   }, [reloadRecord])
 
   useEffect(() => () => clearError(), [clearError])
-
-  const handleBack = () => {
-    navigate(backRoute)
-  }
 
   const handleChange = (event) => {
     const { name, value } = event.target
@@ -377,7 +386,7 @@ function PaymentPage({ paymentType = 'bill', technicalView = false }) {
         <PageHeader
           eyebrow={technicalView ? 'Owner' : 'Pembayaran'}
           title={pageTitle}
-          backAction={handleBack}
+          backAction={technicalView ? handleTechnicalBack : handleBack}
         />
 
         <section className="grid min-h-[calc(100dvh-16rem)] place-items-center px-4 text-center">
@@ -404,7 +413,11 @@ function PaymentPage({ paymentType = 'bill', technicalView = false }) {
   if (technicalView) {
     return (
       <PageShell>
-        <PageHeader eyebrow="Owner" title={`Detail Teknis ${pageTitle}`} backAction={handleBack} />
+        <PageHeader
+          eyebrow="Owner"
+          title={`Detail Teknis ${pageTitle}`}
+          backAction={handleTechnicalBack}
+        />
 
         {detailError ? (
           <AppErrorState

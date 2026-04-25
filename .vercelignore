@@ -1,0 +1,32 @@
+# Dependencies / build artifacts
+node_modules/
+dist/
+.vite-build-check/
+
+# Local env (never deploy secrets)
+.env
+.env.*
+
+# VCS / Vercel metadata
+.git/
+.vercel/
+
+# Local tooling / IDE
+.codex/
+.gemini/
+.playwright-mcp/
+.pw-route-v1-results/
+playwright-report/
+test-results/
+.vscode/
+.idea/
+
+# Non-core project folders
+firestore-legacy-export/
+tests/
+scripts/
+Banplex-Greenfeield.git/
+docs/
+
+# Root-level docs (safe to exclude from deploy)
+/*.md

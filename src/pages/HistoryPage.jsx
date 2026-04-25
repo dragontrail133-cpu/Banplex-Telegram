@@ -27,8 +27,10 @@ import {
   formatTransactionTimestamp,
   getTransactionContextLabel,
   getTransactionLedgerFilterOptions,
+  getTransactionLedgerVisibilityOptions,
   getTransactionTitle,
   getTransactionCreatorLabel,
+  matchesTransactionLedgerFilter,
   shouldHideTransactionAmount,
 } from '../lib/transaction-presentation'
 import { logPerf, nowMs, roundMs } from '../lib/timing'
@@ -39,6 +41,7 @@ const filters = getTransactionLedgerFilterOptions({
   includeSuratJalan: false,
   includePayrollBills: false,
 })
+const historyLedgerVisibilityOptions = getTransactionLedgerVisibilityOptions('history')
 const filterValueSet = new Set(filters.map((item) => item.value))
 const historyPageSize = 20
 const historyListStateStorageKey = 'banplex:history-list-state'
@@ -110,7 +113,9 @@ export function HistoryWorkspace({ embedded = false, headerActionsTarget = null 
     () => readHistoryListState(currentTeamId),
     [currentTeamId]
   )
-  const restoredFilter = restoredHistoryState?.filter ?? 'all'
+  const restoredFilter = filterValueSet.has(restoredHistoryState?.filter)
+    ? restoredHistoryState.filter
+    : 'all'
   const shouldSkipInitialLoadRef = useRef(
     Boolean(restoredHistoryState?.hasLoaded ?? restoredHistoryState?.transactions?.length > 0)
   )
@@ -118,7 +123,7 @@ export function HistoryWorkspace({ embedded = false, headerActionsTarget = null 
   const historyMountedAtRef = useRef(nowMs())
   const historyFirstUsableLoggedRef = useRef(false)
   const [filter, setFilter] = useState(
-    filterValueSet.has(restoredFilter) ? restoredFilter : 'all'
+    restoredFilter
   )
   const [searchTerm, setSearchTerm] = useState(restoredHistoryState?.searchTerm ?? '')
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(
@@ -130,7 +135,17 @@ export function HistoryWorkspace({ embedded = false, headerActionsTarget = null 
     )
   )
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false)
-  const [transactions, setTransactions] = useState(restoredHistoryState?.transactions ?? [])
+  const [transactions, setTransactions] = useState(
+    Array.isArray(restoredHistoryState?.transactions)
+      ? restoredHistoryState.transactions.filter((transaction) =>
+          matchesTransactionLedgerFilter(
+            transaction,
+            restoredFilter,
+            historyLedgerVisibilityOptions
+          )
+        )
+      : []
+  )
   const [pageInfo, setPageInfo] = useState(
     restoredHistoryState?.pageInfo ?? {
       hasMore: false,
@@ -226,7 +241,13 @@ export function HistoryWorkspace({ embedded = false, headerActionsTarget = null 
           return
         }
 
-        const nextTransactions = result.historyTransactions ?? []
+        const nextTransactions = (result.historyTransactions ?? []).filter((transaction) =>
+          matchesTransactionLedgerFilter(
+            transaction,
+            filter,
+            historyLedgerVisibilityOptions
+          )
+        )
 
         setTransactions((currentTransactions) =>
           append ? [...currentTransactions, ...nextTransactions] : nextTransactions

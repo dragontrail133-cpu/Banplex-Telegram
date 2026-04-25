@@ -270,7 +270,11 @@ function App() {
       <Route path="/attendance/new" element={renderStandaloneLazyRoute(AttendancePage)} />
       <Route path="/more/payroll" element={<Navigate to="/payroll" replace />} />
       <Route path="/more/hrd" element={renderStandaloneLazyRoute(HrdPage)} />
+      <Route path="/more/hrd/new" element={renderStandaloneLazyRoute(HrdPage)} />
+      <Route path="/more/hrd/:applicantId/edit" element={renderStandaloneLazyRoute(HrdPage)} />
       <Route path="/more/beneficiaries" element={renderStandaloneLazyRoute(BeneficiariesPage)} />
+      <Route path="/more/beneficiaries/new" element={renderStandaloneLazyRoute(BeneficiariesPage)} />
+      <Route path="/more/beneficiaries/:beneficiaryId/edit" element={renderStandaloneLazyRoute(BeneficiariesPage)} />
       <Route path="/more/team-invite" element={renderStandaloneLazyRoute(TeamInvitePage)} />
       <Route path="/material-invoice/new" element={renderStandaloneLazyRoute(MaterialInvoicePage)} />
       <Route path="/edit/:type/:id" element={renderStandaloneLazyRoute(EditRecordPage)} />

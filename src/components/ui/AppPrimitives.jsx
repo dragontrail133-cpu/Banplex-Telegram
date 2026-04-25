@@ -678,29 +678,17 @@ function OverlayPanel({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: 0.12 }}
             className="app-backdrop absolute inset-0"
             onClick={onClose}
             role="presentation"
           />
 
           <Motion.div
-            initial={isBottomPlacement ? { y: '100%', opacity: 0.9 } : { scale: 0.96, opacity: 0 }}
+            initial={isBottomPlacement ? { y: 24, opacity: 0 } : { scale: 0.98, opacity: 0 }}
             animate={isBottomPlacement ? { y: 0, opacity: 1 } : { scale: 1, opacity: 1 }}
-            exit={isBottomPlacement ? { y: '100%', opacity: 0.9 } : { scale: 0.96, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-            drag={isBottomPlacement ? 'y' : false}
-            dragConstraints={isBottomPlacement ? { top: 0, bottom: 0 } : undefined}
-            dragElastic={isBottomPlacement ? 0.2 : undefined}
-            onDragEnd={
-              isBottomPlacement
-                ? (event, info) => {
-                    if (info.offset.y > 60) {
-                      onClose?.()
-                    }
-                  }
-                : undefined
-            }
+            exit={isBottomPlacement ? { y: 24, opacity: 0 } : { scale: 0.98, opacity: 0 }}
+            transition={{ duration: 0.16, ease: 'easeOut' }}
             className={joinClasses(
               'app-card-strong relative flex w-full flex-col overflow-hidden',
               maxHeightClassName,
@@ -747,7 +735,7 @@ function OverlayPanel({
             {footer ? (
               <div
                 className={joinClasses(
-                  'pointer-events-auto border-t border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 transition-[transform,opacity] duration-200 ease-out',
+                  'pointer-events-auto border-t border-[var(--app-border-color)] bg-[var(--app-surface-strong-color)] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 transition-[transform,opacity] duration-150 ease-out',
                   isKeyboardVisible ? 'pointer-events-none translate-y-[calc(100%+1rem)] opacity-0' : 'opacity-100'
                 )}
               >

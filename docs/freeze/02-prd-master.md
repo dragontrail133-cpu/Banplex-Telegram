@@ -1,12 +1,12 @@
 # PRD — Banplex Greenfield
 
 Freeze date: `2026-04-19`
-Runtime reconciliation: `2026-04-23`
+Runtime reconciliation: `2026-04-25`
 Status: `official concise master PRD`
 
 ## 1. Overview
 
-Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu mencatat operasi harian secara mobile-first. Produk ini berfokus pada `Dashboard` sebagai overview cepat dan `Jurnal` sebagai workspace aktif utama untuk finance dan settlement, sambil menjaga `Halaman Absensi` sebagai surface input absensi harian dan `Catatan Absensi` sebagai halaman payroll untuk histori, filter, dan rekap. `Telegram assistant` berperan sebagai helper read-only finance core di Telegram: ia membaca source of truth yang sudah ada, memahami campuran Indonesia/Sunda, menyediakan command step-by-step `/menu /tambah /buka /cari /status /riwayat /analytics` plus inline keyboard read-only, menyimpan hybrid transcript pendek untuk continuation, lalu memakai AI writer untuk merangkai balasan natural-language yang tetap tervalidasi backend sebelum dikirim. `Tagihan Upah` adalah derived payable payroll hasil rekap per worker yang boleh muncul di `Jurnal` dan `Riwayat`, sedangkan deleted recovery tetap berjalan lewat `Recycle Bin` yang terpisah.
+Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu mencatat operasi harian secara mobile-first. Produk ini berfokus pada `Dashboard` sebagai overview cepat dan `Jurnal` sebagai workspace aktif utama untuk finance dan settlement, sambil menjaga `Halaman Absensi` sebagai surface input absensi harian dan `Catatan Absensi` sebagai halaman payroll untuk histori, filter, dan rekap. `Telegram assistant` berperan sebagai helper read-only finance core di Telegram: ia membaca source of truth yang sudah ada, memahami campuran Indonesia/Sunda, menyediakan command step-by-step `/menu /tambah /buka /cari /status /riwayat /analytics` plus inline keyboard read-only, menyimpan hybrid transcript pendek untuk continuation, lalu memakai AI writer untuk merangkai balasan natural-language yang tetap tervalidasi backend sebelum dikirim. `Tagihan Upah` adalah derived payable payroll hasil rekap per worker yang dikelola melalui payroll/payment surfaces dan tidak muncul sebagai row `Jurnal`/`Riwayat`, sedangkan deleted recovery tetap berjalan lewat `Recycle Bin` yang terpisah.
 
 ## 2. Requirements
 
@@ -16,7 +16,7 @@ Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu menc
 | User | role utama: `Owner`, `Admin`, `Administrasi`, `Logistik`, `Payroll`, `Viewer` |
 | Workspace | semua data inti terikat ke `team_id` dan access control workspace |
 | Main workspace | `Jurnal` menjadi workspace aktif utama untuk finance/settlement; `Dashboard` hanya overview; `Halaman Absensi` dan `Catatan Absensi` tetap terpisah dari ledger |
-| Payroll surface | `Halaman Absensi` = input harian, `Catatan Absensi` = histori/filter/rekap, `Tagihan Upah` = derived payable payroll per worker |
+| Payroll surface | `Halaman Absensi` = input harian, `Catatan Absensi` = histori/filter/rekap, `Tagihan Upah` = derived payable payroll per worker yang diselesaikan melalui payroll/payment surfaces |
 | Telegram assistant | helper read-only finance core; mixed Indonesia/Sunda; command + inline read-only; hybrid transcript pendek; AI writer natural-language tervalidasi backend; tanpa mutasi atau free-form write action |
 | History semantics | `Riwayat` = completed/history surface; deleted recovery memakai `Recycle Bin` terpisah |
 | Data contract | domain inti memakai source of truth relasional final, bukan brief lama atau tabel legacy campuran |
@@ -38,7 +38,7 @@ Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu menc
 - `Pembayaran`.
 - `Halaman Absensi` sebagai workspace input absensi harian.
 - `Catatan Absensi` sebagai halaman histori absensi, filter, dan rekap payroll.
-- `Tagihan Upah` sebagai derived payable payroll per worker.
+- `Tagihan Upah` sebagai derived payable payroll per worker yang diselesaikan melalui payroll/payment surfaces.
 - `Referensi` sebagai master/reference core release yang menjadi fondasi semua form inti.
 - `Riwayat`.
 - `Recycle Bin`.
@@ -52,7 +52,7 @@ Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu menc
 3. User masuk ke `Jurnal` untuk melihat record aktif finance/settlement dan membuka detail.
 4. User create/edit record melalui routed form domain.
 5. Jika record punya kewajiban settlement, user bergerak ke `Tagihan` lalu `Pembayaran`.
-6. Untuk payroll, user menulis absensi harian di `Halaman Absensi`, membuka `Catatan Absensi` untuk histori/filter dan rekap, lalu menyelesaikan `Tagihan Upah` per worker di flow pembayaran.
+6. Untuk payroll, user menulis absensi harian di `Halaman Absensi`, membuka `Catatan Absensi` untuk histori/filter dan rekap, lalu menyelesaikan `Tagihan Upah` per worker di flow payroll/payment.
 7. Record completed ditelusuri dari `Riwayat`, sedangkan deleted recovery berjalan lewat `Recycle Bin`.
 
 ## 5. Architecture
@@ -84,8 +84,8 @@ Banplex Greenfield adalah `Telegram Mini Web` untuk operator tim yang perlu menc
 - `Halaman Absensi` existing bukan `Catatan Absensi`; ia khusus input absensi harian.
 - `Catatan Absensi` adalah halaman baru untuk histori, filter per bulan, filter per worker, dan aksi rekap.
 - Rekap payroll harus mendukung mode per hari multi-worker dan mode per worker date-range.
-- Worker adalah parent operasional payroll; `Tagihan Upah` adalah hasil rekap per worker.
-- `Tagihan Upah` boleh muncul di `Jurnal` dan `Riwayat`, dan row payroll di ledger harus terbaca per worker.
+- Worker adalah parent operasional payroll; `Tagihan Upah` adalah hasil rekap per worker yang diselesaikan melalui payroll/payment surfaces.
+- `Tagihan Upah` tidak muncul di `Jurnal` dan `Riwayat`; ledger row payroll di surface umum tetap mengecualikannya.
 - `Riwayat` adalah completed/history surface dan dipisah dari `Recycle Bin`.
 - Dashboard summary aktif dibaca dari `/api/transactions?view=summary`; `vw_transaction_summary` masih boleh hidup sebagai compatibility/report layer, tetapi bukan authority utama.
 - `transactions` adalah compatibility layer legacy, bukan target flow baru.

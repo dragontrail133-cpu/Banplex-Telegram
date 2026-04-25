@@ -1926,6 +1926,27 @@ function normalizeDocumentType(value, fallback = 'faktur') {
   return fallback
 }
 
+export function resolveExpenseLineItemAmounts(itemData = {}) {
+  const unitPrice =
+    pickNumber(itemData, 'unit_price', null) ??
+    pickNumber(itemData, 'price', null) ??
+    pickNumber(itemData, 'unitPrice', null) ??
+    0
+  const lineTotal =
+    pickNumber(itemData, 'lineTotal', null) ??
+    pickNumber(itemData, 'line_total', null) ??
+    pickNumber(itemData, 'subtotal', null) ??
+    pickNumber(itemData, 'total', null) ??
+    pickNumber(itemData, 'total_price', null) ??
+    pickNumber(itemData, 'totalPrice', null) ??
+    ((pickNumber(itemData, 'qty', null) ?? pickNumber(itemData, 'quantity', null) ?? 0) * unitPrice)
+
+  return {
+    unitPrice,
+    lineTotal,
+  }
+}
+
 function normalizeAttendanceStatus(value, fallback = 'full_day') {
   const normalized = normalizeLowerText(value, '')
 
@@ -2161,12 +2182,7 @@ function transformExpenseDoc(context, doc) {
       const materialId = resolveRelationId(context, teamPath, 'material_id', sourceMaterialId, {
         allowNameLookup: true,
       })
-      const lineTotal =
-        pickNumber(itemData, 'lineTotal', null) ??
-        pickNumber(itemData, 'line_total', null) ??
-        pickNumber(itemData, 'subtotal', null) ??
-        ((pickNumber(itemData, 'qty', null) ?? pickNumber(itemData, 'quantity', null) ?? 0) *
-          (pickNumber(itemData, 'unitPrice', null) ?? pickNumber(itemData, 'unit_price', null) ?? 0))
+      const { unitPrice, lineTotal } = resolveExpenseLineItemAmounts(itemData)
       const lineLegacyPath = `${doc.path}#items/${index}`
       const lineCanonicalId = getCanonicalId('expense_line_items', lineLegacyPath)
       const lineRow = compactObject({
@@ -2181,7 +2197,7 @@ function transformExpenseDoc(context, doc) {
           pickText(itemData, 'material_name', null) ??
           `Item ${index + 1}`,
         qty: pickNumber(itemData, 'qty', null) ?? pickNumber(itemData, 'quantity', null) ?? 0,
-        unit_price: pickNumber(itemData, 'unit_price', null) ?? pickNumber(itemData, 'unitPrice', null) ?? 0,
+        unit_price: unitPrice,
         line_total: lineTotal,
         sort_order: toInteger(pickField(itemData, 'sortOrder', null) ?? pickField(itemData, 'sort_order', null), index + 1),
         created_at: pickTimestamp(itemData, 'created_at', doc.createTime ?? null),

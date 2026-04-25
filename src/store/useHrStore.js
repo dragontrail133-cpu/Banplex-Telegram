@@ -17,6 +17,15 @@ const beneficiaryStatusOptions = [
   { value: 'inactive', label: 'Nonaktif' },
 ]
 
+const applicantSelectColumns =
+  'id, team_id, legacy_firebase_id, source_beneficiary_id, name, nama_lengkap, position, posisi_dilamar, email, no_telepon, jenis_kelamin, nik, no_kk, tempat_lahir, tanggal_lahir, pendidikan_terakhir, nama_institusi_pendidikan, jurusan, sumber_lowongan, status_aplikasi, pengalaman_kerja, skills, district, sub_district, village, hamlet, rt, rw, alamat_lengkap, alamat_domisili, notes, catatan_hrd, created_at, updated_at, deleted_at'
+
+const beneficiarySelectColumns =
+  'id, team_id, legacy_firebase_id, name, nama_penerima, nik, institution, nama_instansi, jenis_kelamin, jenjang, npsn_nspp, jarak_meter, status, data_status, tempat_lahir, tanggal_lahir, district, sub_district, village, hamlet, rt, rw, alamat_lengkap, notes, created_at, updated_at, deleted_at'
+
+const supabasePageSize = 1000
+const relationChunkSize = 200
+
 function normalizeText(value, fallback = null) {
   const normalizedValue = String(value ?? '').trim()
 
@@ -36,6 +45,40 @@ function toError(error, fallbackMessage) {
       : fallbackMessage
 
   return error instanceof Error ? error : new Error(message)
+}
+
+async function fetchAllSupabaseRows(createQuery) {
+  const rows = []
+  let from = 0
+
+  while (true) {
+    const { data, error } = await createQuery().range(from, from + supabasePageSize - 1)
+
+    if (error) {
+      throw error
+    }
+
+    const nextRows = data ?? []
+    rows.push(...nextRows)
+
+    if (nextRows.length < supabasePageSize) {
+      break
+    }
+
+    from += supabasePageSize
+  }
+
+  return rows
+}
+
+function chunkArray(values, size = relationChunkSize) {
+  const chunks = []
+
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size))
+  }
+
+  return chunks
 }
 
 function normalizeApplicantStatus(value) {
@@ -100,6 +143,26 @@ function normalizeApplicantRow(applicant) {
     catatan_hrd: notes,
     email: normalizeText(applicant?.email, null),
     no_telepon: normalizeText(applicant?.no_telepon, null),
+    jenis_kelamin: normalizeText(applicant?.jenis_kelamin, null),
+    nik: normalizeText(applicant?.nik, null),
+    no_kk: normalizeText(applicant?.no_kk, null),
+    tempat_lahir: normalizeText(applicant?.tempat_lahir, null),
+    tanggal_lahir: normalizeText(applicant?.tanggal_lahir, null),
+    pendidikan_terakhir: normalizeText(applicant?.pendidikan_terakhir, null),
+    nama_institusi_pendidikan: normalizeText(applicant?.nama_institusi_pendidikan, null),
+    jurusan: normalizeText(applicant?.jurusan, null),
+    sumber_lowongan: normalizeText(applicant?.sumber_lowongan, null),
+    pengalaman_kerja: normalizeText(applicant?.pengalaman_kerja, null),
+    skills: normalizeText(applicant?.skills, null),
+    district: normalizeText(applicant?.district, null),
+    sub_district: normalizeText(applicant?.sub_district, null),
+    village: normalizeText(applicant?.village, null),
+    hamlet: normalizeText(applicant?.hamlet, null),
+    rt: normalizeText(applicant?.rt, null),
+    rw: normalizeText(applicant?.rw, null),
+    alamat_lengkap: normalizeText(applicant?.alamat_lengkap, null),
+    alamat_domisili: normalizeText(applicant?.alamat_domisili, null),
+    source_beneficiary_id: normalizeText(applicant?.source_beneficiary_id, null),
     deleted_at: normalizeText(applicant?.deleted_at, null),
     documents,
     documentCount: documents.length,
@@ -117,6 +180,10 @@ function normalizeBeneficiaryRow(beneficiary) {
   const status = normalizeBeneficiaryStatus(
     beneficiary?.status ?? beneficiary?.data_status
   )
+  const dataStatus = normalizeText(
+    beneficiary?.data_status ?? beneficiary?.dataStatus,
+    status
+  )
 
   return {
     ...beneficiary,
@@ -126,7 +193,20 @@ function normalizeBeneficiaryRow(beneficiary) {
     institution,
     nama_instansi: institution,
     status,
-    data_status: status,
+    data_status: dataStatus,
+    jenis_kelamin: normalizeText(beneficiary?.jenis_kelamin, null),
+    jenjang: normalizeText(beneficiary?.jenjang, null),
+    npsn_nspp: normalizeText(beneficiary?.npsn_nspp, null),
+    jarak_meter: toNumber(beneficiary?.jarak_meter),
+    tempat_lahir: normalizeText(beneficiary?.tempat_lahir, null),
+    tanggal_lahir: normalizeText(beneficiary?.tanggal_lahir, null),
+    district: normalizeText(beneficiary?.district, null),
+    sub_district: normalizeText(beneficiary?.sub_district, null),
+    village: normalizeText(beneficiary?.village, null),
+    hamlet: normalizeText(beneficiary?.hamlet, null),
+    rt: normalizeText(beneficiary?.rt, null),
+    rw: normalizeText(beneficiary?.rw, null),
+    alamat_lengkap: normalizeText(beneficiary?.alamat_lengkap, null),
     notes: normalizeText(beneficiary?.notes, null),
     deleted_at: normalizeText(beneficiary?.deleted_at, null),
   }
@@ -166,39 +246,37 @@ async function loadApplicants() {
     throw new Error('Client Supabase belum dikonfigurasi.')
   }
 
-  const { data, error } = await supabase
-    .from('hrd_applicants')
-    .select(
-      'id, team_id, nama_lengkap, email, no_telepon, posisi_dilamar, status_aplikasi, catatan_hrd, created_at, updated_at, deleted_at'
-    )
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
-
-  if (error) {
-    throw error
-  }
-
-  const applicants = data ?? []
+  const applicants = await fetchAllSupabaseRows(() =>
+    supabase
+      .from('hrd_applicants')
+      .select(applicantSelectColumns)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+  )
   const applicantIds = applicants.map((applicant) => applicant.id)
 
   if (applicantIds.length === 0) {
     return []
   }
 
-  const { data: documents, error: documentsError } = await supabase
-    .from('hrd_applicant_documents')
-    .select(
-      'id, team_id, applicant_id, file_asset_id, document_type, created_at, updated_at, deleted_at, file_assets:file_asset_id ( id, bucket_name, storage_path, file_name, public_url, mime_type, file_size, uploaded_by, created_at, updated_at, deleted_at )'
-    )
-    .in('applicant_id', applicantIds)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
+  const documents = []
 
-  if (documentsError) {
-    throw documentsError
+  for (const applicantIdChunk of chunkArray(applicantIds)) {
+    const chunkDocuments = await fetchAllSupabaseRows(() =>
+      supabase
+        .from('hrd_applicant_documents')
+        .select(
+          'id, team_id, applicant_id, file_asset_id, document_type, created_at, updated_at, deleted_at, file_assets:file_asset_id ( id, bucket_name, storage_path, file_name, public_url, mime_type, file_size, uploaded_by, created_at, updated_at, deleted_at )'
+        )
+        .in('applicant_id', applicantIdChunk)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+    )
+
+    documents.push(...chunkDocuments)
   }
 
-  return mergeApplicantDocuments(applicants, documents ?? [])
+  return mergeApplicantDocuments(applicants, documents)
 }
 
 async function loadBeneficiaries() {
@@ -206,17 +284,13 @@ async function loadBeneficiaries() {
     throw new Error('Client Supabase belum dikonfigurasi.')
   }
 
-  const { data, error } = await supabase
-    .from('beneficiaries')
-    .select(
-      'id, team_id, nama_penerima, nik, nama_instansi, status, data_status, notes, created_at, updated_at, deleted_at'
-    )
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
-
-  if (error) {
-    throw error
-  }
+  const data = await fetchAllSupabaseRows(() =>
+    supabase
+      .from('beneficiaries')
+      .select(beneficiarySelectColumns)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+  )
 
   return (data ?? []).map(normalizeBeneficiaryRow)
 }
@@ -232,20 +306,18 @@ async function loadApplicantDocuments(applicantId) {
     return []
   }
 
-  const { data, error } = await supabase
-    .from('hrd_applicant_documents')
-    .select(
-      'id, team_id, applicant_id, file_asset_id, document_type, created_at, updated_at, deleted_at, file_assets:file_asset_id ( id, bucket_name, storage_path, file_name, public_url, mime_type, file_size, uploaded_by, created_at, updated_at, deleted_at )'
-    )
-    .eq('applicant_id', normalizedApplicantId)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
+  const data = await fetchAllSupabaseRows(() =>
+    supabase
+      .from('hrd_applicant_documents')
+      .select(
+        'id, team_id, applicant_id, file_asset_id, document_type, created_at, updated_at, deleted_at, file_assets:file_asset_id ( id, bucket_name, storage_path, file_name, public_url, mime_type, file_size, uploaded_by, created_at, updated_at, deleted_at )'
+      )
+      .eq('applicant_id', normalizedApplicantId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+  )
 
-  if (error) {
-    throw error
-  }
-
-  return (data ?? [])
+  return data
     .map(normalizeApplicantDocumentRow)
     .filter((document) => !document.deleted_at && !document.file_assets?.deleted_at)
 }
@@ -450,19 +522,38 @@ const useHrStore = create((set, get) => ({
         .from('hrd_applicants')
         .insert({
           team_id: teamId,
+          name: applicantName,
           nama_lengkap: applicantName,
+          position,
           posisi_dilamar: position,
           status_aplikasi: status,
+          notes,
           catatan_hrd: notes,
           email: normalizeText(applicantData.email, null),
           no_telepon: normalizeText(applicantData.no_telepon, null),
+          jenis_kelamin: normalizeText(applicantData.jenis_kelamin, null),
+          nik: normalizeText(applicantData.nik, null),
+          no_kk: normalizeText(applicantData.no_kk, null),
+          tempat_lahir: normalizeText(applicantData.tempat_lahir, null),
+          tanggal_lahir: normalizeText(applicantData.tanggal_lahir, null),
+          pendidikan_terakhir: normalizeText(applicantData.pendidikan_terakhir, null),
+          nama_institusi_pendidikan: normalizeText(applicantData.nama_institusi_pendidikan, null),
+          jurusan: normalizeText(applicantData.jurusan, null),
           sumber_lowongan: normalizeText(applicantData.sumber_lowongan, null),
+          pengalaman_kerja: normalizeText(applicantData.pengalaman_kerja, null),
+          skills: normalizeText(applicantData.skills, null),
+          district: normalizeText(applicantData.district, null),
+          sub_district: normalizeText(applicantData.sub_district, null),
+          village: normalizeText(applicantData.village, null),
+          hamlet: normalizeText(applicantData.hamlet, null),
+          rt: normalizeText(applicantData.rt, null),
+          rw: normalizeText(applicantData.rw, null),
+          alamat_lengkap: normalizeText(applicantData.alamat_lengkap, null),
+          alamat_domisili: normalizeText(applicantData.alamat_domisili, null),
           source_beneficiary_id: normalizeText(applicantData.source_beneficiary_id, null),
           updated_at: new Date().toISOString(),
         })
-        .select(
-          'id, team_id, nama_lengkap, email, no_telepon, posisi_dilamar, status_aplikasi, catatan_hrd, created_at, updated_at, deleted_at'
-        )
+        .select(applicantSelectColumns)
         .single()
 
       if (error) {
@@ -572,6 +663,7 @@ const useHrStore = create((set, get) => ({
         if (!value) {
           throw new Error('Nama pelamar wajib diisi.')
         }
+        payload.name = value
         payload.nama_lengkap = value
       }
 
@@ -580,6 +672,7 @@ const useHrStore = create((set, get) => ({
         if (!value) {
           throw new Error('Posisi pelamar wajib diisi.')
         }
+        payload.position = value
         payload.posisi_dilamar = value
       }
 
@@ -588,7 +681,9 @@ const useHrStore = create((set, get) => ({
       }
 
       if (patch.notes !== undefined || patch.catatan_hrd !== undefined) {
-        payload.catatan_hrd = normalizeText(patch.notes ?? patch.catatan_hrd, null)
+        const notes = normalizeText(patch.notes ?? patch.catatan_hrd, null)
+        payload.notes = notes
+        payload.catatan_hrd = notes
       }
 
       if (patch.email !== undefined) {
@@ -599,6 +694,82 @@ const useHrStore = create((set, get) => ({
         payload.no_telepon = normalizeText(patch.no_telepon, null)
       }
 
+      if (patch.jenis_kelamin !== undefined) {
+        payload.jenis_kelamin = normalizeText(patch.jenis_kelamin, null)
+      }
+
+      if (patch.nik !== undefined) {
+        payload.nik = normalizeText(patch.nik, null)
+      }
+
+      if (patch.no_kk !== undefined) {
+        payload.no_kk = normalizeText(patch.no_kk, null)
+      }
+
+      if (patch.tempat_lahir !== undefined) {
+        payload.tempat_lahir = normalizeText(patch.tempat_lahir, null)
+      }
+
+      if (patch.tanggal_lahir !== undefined) {
+        payload.tanggal_lahir = normalizeText(patch.tanggal_lahir, null)
+      }
+
+      if (patch.pendidikan_terakhir !== undefined) {
+        payload.pendidikan_terakhir = normalizeText(patch.pendidikan_terakhir, null)
+      }
+
+      if (patch.nama_institusi_pendidikan !== undefined) {
+        payload.nama_institusi_pendidikan = normalizeText(patch.nama_institusi_pendidikan, null)
+      }
+
+      if (patch.jurusan !== undefined) {
+        payload.jurusan = normalizeText(patch.jurusan, null)
+      }
+
+      if (patch.sumber_lowongan !== undefined) {
+        payload.sumber_lowongan = normalizeText(patch.sumber_lowongan, null)
+      }
+
+      if (patch.pengalaman_kerja !== undefined) {
+        payload.pengalaman_kerja = normalizeText(patch.pengalaman_kerja, null)
+      }
+
+      if (patch.skills !== undefined) {
+        payload.skills = normalizeText(patch.skills, null)
+      }
+
+      if (patch.district !== undefined) {
+        payload.district = normalizeText(patch.district, null)
+      }
+
+      if (patch.sub_district !== undefined) {
+        payload.sub_district = normalizeText(patch.sub_district, null)
+      }
+
+      if (patch.village !== undefined) {
+        payload.village = normalizeText(patch.village, null)
+      }
+
+      if (patch.hamlet !== undefined) {
+        payload.hamlet = normalizeText(patch.hamlet, null)
+      }
+
+      if (patch.rt !== undefined) {
+        payload.rt = normalizeText(patch.rt, null)
+      }
+
+      if (patch.rw !== undefined) {
+        payload.rw = normalizeText(patch.rw, null)
+      }
+
+      if (patch.alamat_lengkap !== undefined) {
+        payload.alamat_lengkap = normalizeText(patch.alamat_lengkap, null)
+      }
+
+      if (patch.alamat_domisili !== undefined) {
+        payload.alamat_domisili = normalizeText(patch.alamat_domisili, null)
+      }
+
       payload.updated_at = new Date().toISOString()
 
       const { data, error } = await supabase
@@ -606,9 +777,7 @@ const useHrStore = create((set, get) => ({
         .update(payload)
         .eq('id', normalizedApplicantId)
         .is('deleted_at', null)
-        .select(
-          'id, team_id, nama_lengkap, email, no_telepon, posisi_dilamar, status_aplikasi, catatan_hrd, created_at, updated_at, deleted_at'
-        )
+        .select(applicantSelectColumns)
         .single()
 
       if (error) {
@@ -876,6 +1045,10 @@ const useHrStore = create((set, get) => ({
         null
       )
       const status = normalizeBeneficiaryStatus(beneficiaryData.status)
+      const dataStatus = normalizeText(
+        beneficiaryData.data_status ?? beneficiaryData.dataStatus,
+        status
+      )
       const notes = normalizeText(beneficiaryData.notes, null)
 
       if (!teamId) {
@@ -890,17 +1063,30 @@ const useHrStore = create((set, get) => ({
         .from('beneficiaries')
         .insert({
           team_id: teamId,
+          name,
           nama_penerima: name,
           nik,
+          institution,
           nama_instansi: institution,
+          jenis_kelamin: normalizeText(beneficiaryData.jenis_kelamin, null),
+          jenjang: normalizeText(beneficiaryData.jenjang, null),
+          npsn_nspp: normalizeText(beneficiaryData.npsn_nspp, null),
+          jarak_meter: toNumber(beneficiaryData.jarak_meter),
           status,
-          data_status: status,
+          data_status: dataStatus,
+          tempat_lahir: normalizeText(beneficiaryData.tempat_lahir, null),
+          tanggal_lahir: normalizeText(beneficiaryData.tanggal_lahir, null),
+          district: normalizeText(beneficiaryData.district, null),
+          sub_district: normalizeText(beneficiaryData.sub_district, null),
+          village: normalizeText(beneficiaryData.village, null),
+          hamlet: normalizeText(beneficiaryData.hamlet, null),
+          rt: normalizeText(beneficiaryData.rt, null),
+          rw: normalizeText(beneficiaryData.rw, null),
+          alamat_lengkap: normalizeText(beneficiaryData.alamat_lengkap, null),
           notes,
           updated_at: new Date().toISOString(),
         })
-        .select(
-          'id, team_id, nama_penerima, nik, nama_instansi, status, data_status, notes, created_at, updated_at, deleted_at'
-        )
+        .select(beneficiarySelectColumns)
         .single()
 
       if (error) {
@@ -951,6 +1137,7 @@ const useHrStore = create((set, get) => ({
         if (!value) {
           throw new Error('Nama penerima manfaat wajib diisi.')
         }
+        payload.name = value
         payload.nama_penerima = value
       }
 
@@ -959,16 +1146,73 @@ const useHrStore = create((set, get) => ({
       }
 
       if (patch.institution !== undefined || patch.nama_instansi !== undefined) {
-        payload.nama_instansi = normalizeText(
+        const institution = normalizeText(
           patch.institution ?? patch.nama_instansi,
           null
         )
+        payload.institution = institution
+        payload.nama_instansi = institution
       }
 
-      if (patch.status !== undefined || patch.data_status !== undefined) {
-        const status = normalizeBeneficiaryStatus(patch.status ?? patch.data_status)
+      if (patch.status !== undefined) {
+        const status = normalizeBeneficiaryStatus(patch.status)
         payload.status = status
-        payload.data_status = status
+      }
+
+      if (patch.data_status !== undefined || patch.dataStatus !== undefined) {
+        payload.data_status = normalizeText(patch.data_status ?? patch.dataStatus, null)
+      }
+
+      if (patch.jenis_kelamin !== undefined) {
+        payload.jenis_kelamin = normalizeText(patch.jenis_kelamin, null)
+      }
+
+      if (patch.jenjang !== undefined) {
+        payload.jenjang = normalizeText(patch.jenjang, null)
+      }
+
+      if (patch.npsn_nspp !== undefined) {
+        payload.npsn_nspp = normalizeText(patch.npsn_nspp, null)
+      }
+
+      if (patch.jarak_meter !== undefined) {
+        payload.jarak_meter = toNumber(patch.jarak_meter)
+      }
+
+      if (patch.tempat_lahir !== undefined) {
+        payload.tempat_lahir = normalizeText(patch.tempat_lahir, null)
+      }
+
+      if (patch.tanggal_lahir !== undefined) {
+        payload.tanggal_lahir = normalizeText(patch.tanggal_lahir, null)
+      }
+
+      if (patch.district !== undefined) {
+        payload.district = normalizeText(patch.district, null)
+      }
+
+      if (patch.sub_district !== undefined) {
+        payload.sub_district = normalizeText(patch.sub_district, null)
+      }
+
+      if (patch.village !== undefined) {
+        payload.village = normalizeText(patch.village, null)
+      }
+
+      if (patch.hamlet !== undefined) {
+        payload.hamlet = normalizeText(patch.hamlet, null)
+      }
+
+      if (patch.rt !== undefined) {
+        payload.rt = normalizeText(patch.rt, null)
+      }
+
+      if (patch.rw !== undefined) {
+        payload.rw = normalizeText(patch.rw, null)
+      }
+
+      if (patch.alamat_lengkap !== undefined) {
+        payload.alamat_lengkap = normalizeText(patch.alamat_lengkap, null)
       }
 
       if (patch.notes !== undefined) {
@@ -982,9 +1226,7 @@ const useHrStore = create((set, get) => ({
         .update(payload)
         .eq('id', normalizedBeneficiaryId)
         .is('deleted_at', null)
-        .select(
-          'id, team_id, nama_penerima, nik, nama_instansi, status, data_status, notes, created_at, updated_at, deleted_at'
-        )
+        .select(beneficiarySelectColumns)
         .single()
 
       if (error) {

@@ -1,6 +1,9 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
-import { isDevAuthBypassEnabled } from '../lib/dev-auth-bypass'
+import {
+  createLocalDevAuthBootstrap,
+  isDevAuthBypassEnabled,
+} from '../lib/dev-auth-bypass'
 import { allRoles, normalizeRole } from '../lib/rbac'
 
 function normalizeText(value, fallback = null) {
@@ -177,12 +180,31 @@ const useAuthStore = create((set, get) => ({
     activeTelegramAuthKey = authKey
     activeTelegramAuthPromise = (async () => {
       try {
-        if (!supabase) {
-          throw new Error('Client Supabase belum dikonfigurasi.')
-        }
-
         if (!normalizedInitData && !shouldUseDevBypass) {
           throw new Error('Aplikasi ini hanya bisa diakses dari Telegram Mini App.')
+        }
+
+        if (shouldUseDevBypass && !normalizedInitData) {
+          const localBootstrap = createLocalDevAuthBootstrap()
+
+          set({
+            user: localBootstrap.user,
+            memberships: localBootstrap.memberships,
+            currentTeamId: localBootstrap.currentTeamId,
+            role: localBootstrap.role,
+            isRegistered: localBootstrap.isRegistered,
+            isLoading: false,
+            error: null,
+          })
+
+          return {
+            memberships: localBootstrap.memberships,
+            role: localBootstrap.role,
+          }
+        }
+
+        if (!supabase) {
+          throw new Error('Client Supabase belum dikonfigurasi.')
         }
 
         const response = await fetch('/api/auth', {

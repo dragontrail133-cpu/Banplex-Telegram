@@ -115,10 +115,10 @@ function FormLayout({
 
   return (
     <motion.div
-      initial={{ y: '100%', opacity: 0.8 }}
-      animate={{ y: 0, opacity: 1 }}
-      exit={{ y: '100%', opacity: 0.8 }}
-      transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+      initial={{ y: '100%' }}
+      animate={{ y: 0 }}
+      exit={{ y: '100%' }}
+      transition={{ duration: 0.16, ease: 'easeOut' }}
       className="fixed inset-0 z-[100] overflow-y-auto bg-[var(--app-surface-strong-color)]"
     >
       <AppViewportSafeArea className="min-h-full sm:mx-auto sm:max-w-md">

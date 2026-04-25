@@ -173,7 +173,6 @@ function MaterialInvoiceDetailPanel({
                     ) : null}
                     <div className="mt-2 flex flex-wrap gap-2">
                       <span className="app-chip">Harga {formatCurrency(item.unit_price ?? 0)}</span>
-                      <span className="app-chip">Subtotal {formatCurrency(itemTotal)}</span>
                     </div>
                   </div>
                   <p className="shrink-0 text-sm font-semibold text-[var(--app-text-color)]">

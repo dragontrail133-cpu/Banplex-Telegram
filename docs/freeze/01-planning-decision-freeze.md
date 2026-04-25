@@ -1,7 +1,7 @@
 # Planning Decision Freeze
 
 Freeze date: `2026-04-19`
-Runtime reconciliation: `2026-04-23`
+Runtime reconciliation: `2026-04-25`
 Product baseline: `Banplex Greenfield`
 
 ## 1. Product posture final
@@ -15,7 +15,7 @@ Postur final produk:
 - `Jurnal` adalah workspace aktif utama untuk record finansial, settlement, dan derived payable yang memang masuk ledger,
 - `Halaman Absensi` existing adalah workspace input absensi harian,
 - `Catatan Absensi` adalah halaman operasional payroll untuk histori, filter, dan rekap; ia bukan row utama ledger finance,
-- `Tagihan Upah` adalah derived payable payroll yang boleh muncul di `Jurnal` dan `Riwayat`,
+- `Tagihan Upah` adalah derived payable payroll hasil rekap per worker yang dikelola lewat payroll/payment surfaces dan tidak muncul sebagai row `Jurnal`/`Riwayat`,
 - `Riwayat` adalah completed/history surface,
 - `Recycle Bin` adalah deleted/recovery surface terpisah,
 - `Tim` adalah capability support/admin yang tetap masuk release core,
@@ -60,7 +60,7 @@ Direction final arsitektur informasi:
 - `Dokumen Barang` = keluarga dokumen untuk `Faktur Barang` dan `Surat Jalan Barang`.
 - `Halaman Absensi` = workspace input absensi harian.
 - `Catatan Absensi` = halaman histori absensi, filter bulanan, filter worker, dan aksi rekap payroll.
-- `Tagihan Upah` = derived payable payroll yang boleh muncul di `Jurnal` dan `Riwayat`.
+- `Tagihan Upah` = derived payable payroll hasil rekap per worker yang dikelola lewat payroll/payment surfaces dan tidak muncul sebagai row `Jurnal`/`Riwayat`.
 - `Riwayat` = completed/history surface.
 - `Recycle Bin` = deleted/recovery surface terpisah.
 - `Tim` = invite, membership, dan role management.
@@ -107,12 +107,11 @@ Canonical domain aktif di `Jurnal`:
 - `Faktur Barang`
 - `Surat Jalan Barang`
 - `Dana Masuk / Pinjaman`
-- `Tagihan Upah`
 - `Pembayaran` sebagai settlement event kas nyata
 
 `Halaman Absensi` dan `Catatan Absensi` tidak menjadi row utama di `Jurnal`.
 
-`Tagihan` dan `Tagihan Upah` tampil sebagai child atau derived responsibility, bukan authoring surface yang menggantikan parent domain. `Tagihan Upah` boleh tampil sebagai row payroll payable di `Jurnal` dan `Riwayat`, dan dalam konteks payroll ia harus terbaca per worker.
+`Tagihan` dan `Tagihan Upah` tampil sebagai child atau derived responsibility, bukan authoring surface yang menggantikan parent domain. `Tagihan Upah` diselesaikan di payroll/payment surfaces dan tidak tampil sebagai row `Jurnal`/`Riwayat`.
 
 ## 7. Detail page contract
 
@@ -206,8 +205,8 @@ Aturan create/edit final:
 - Rekap payroll harus mendukung dua mode: per hari untuk banyak worker, dan per worker untuk rentang tanggal tertentu.
 - Dalam konteks payroll operasional, worker adalah parent utama grouping; absensi harian adalah child record di bawah worker.
 - `Tagihan Upah` dibentuk dari rekap child absensi per worker yang masih `unbilled`.
-- `Tagihan Upah` adalah derived payable payroll yang boleh muncul di `Jurnal` dan `Riwayat`.
-- Saat `Tagihan Upah` masuk ke `Jurnal`, row payroll harus tampil per worker, bukan bundle generik tanpa parent worker.
+- `Tagihan Upah` adalah derived payroll settlement hasil rekap per worker yang dikelola lewat payroll/payment surfaces, bukan row `Jurnal`/`Riwayat`.
+- Saat `Tagihan Upah` dibuka di surface payroll, row worker harus tetap terbaca per worker, bukan bundle generik tanpa parent worker.
 - Setelah absensi masuk ke `Tagihan Upah`, record absensi menjadi `read-only`.
 - Koreksi absensi billed tidak dilakukan dengan edit diam-diam.
 - Jika `Tagihan Upah` belum punya payment history, koreksi dilakukan dengan `batalkan rekap gaji`.
@@ -282,7 +281,7 @@ Di luar gate inti:
 | posisi `Tagihan` | derived payable workspace, bukan authoring parent |
 | posisi `Halaman Absensi` | workspace input absensi harian existing |
 | posisi `Catatan Absensi` | halaman baru untuk histori, filter, dan rekap payroll; bukan row utama `Jurnal` finance |
-| posisi `Tagihan Upah` | derived payable payroll hasil rekap per worker yang boleh tampil di `Jurnal` dan `Riwayat` |
+| posisi `Tagihan Upah` | derived payable payroll hasil rekap per worker yang dikelola lewat payroll/payment surfaces dan tidak tampil sebagai row `Jurnal` / `Riwayat` |
 | semantik `Riwayat` | completed/history surface, bukan `Recycle Bin` |
 | semantik `Recycle Bin` | deleted/recovery surface terpisah |
 | relasi `Pengeluaran` vs `Tagihan` | child settlement hanya muncul saat kewajiban pembayaran masih hidup |

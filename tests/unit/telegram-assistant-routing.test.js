@@ -38,7 +38,6 @@ import {
   buildSettlementBucketReply,
   buildStatusReply,
   getTelegramMessageIdFromResponse,
-  processAssistantCommand,
   sendAssistantHybridSummaryReply,
   shouldProcessTelegramMessage,
   stripAssistantSummaryMessageState,
@@ -99,11 +98,10 @@ test('assistant command parser recognizes supported slash commands', () => {
   })
 
   assert.equal(buildAssistantCommandRawText('tambah'), '/tambah')
-  assert.equal(buildAssistantCommandRawText('riwayat'), '/riwayat')
-  assert.equal(
-    buildAssistantCommandInput('analytics', 'pengeluaran minggu ini'),
-    'ringkas pengeluaran minggu ini'
-  )
+  assert.equal(buildAssistantCommandRawText('menu'), '/menu')
+  assert.equal(buildAssistantCommandRawText('riwayat'), '')
+  assert.equal(buildAssistantCommandInput('analytics', 'pengeluaran minggu ini'), '')
+  assert.equal(buildAssistantCommandInput('cari', 'tagihan dindin'), '')
 })
 
 test('assistant menu resolver maps reply keyboard text back to existing commands', () => {
@@ -112,10 +110,7 @@ test('assistant menu resolver maps reply keyboard text back to existing commands
       menu: 'Menu',
       add: 'Tambah',
       open: 'Buka',
-      search: 'Cari',
       status: 'Status',
-      history: 'Riwayat',
-      analytics: 'Analytics',
     }),
     'menu'
   )
@@ -125,10 +120,7 @@ test('assistant menu resolver maps reply keyboard text back to existing commands
       menu: 'Menu',
       add: 'Tambah',
       open: 'Muka',
-      search: 'Cari',
       status: 'Status',
-      history: 'Riwayat',
-      analytics: 'Analytics',
     }),
     'buka'
   )
@@ -138,10 +130,7 @@ test('assistant menu resolver maps reply keyboard text back to existing commands
       menu: 'Menu',
       add: 'Tambah',
       open: 'Buka',
-      search: 'Cari',
       status: 'Status',
-      history: 'Riwayat',
-      analytics: 'Analytics',
     }),
     'status'
   )
@@ -155,24 +144,33 @@ test('assistant group reply keyboard labels are accepted by message gate', () =>
       },
       session: null,
       botUsername: 'banplex_bot',
-      messageText: 'Analytics',
+      messageText: 'Status',
       menuLabels: {
         menu: 'Menu',
         add: 'Tambah',
         open: 'Buka',
-        search: 'Cari',
         status: 'Status',
-        history: 'Riwayat',
-        analytics: 'Analytics',
       },
     }),
     true
+  )
+  assert.equal(
+    resolveAssistantMenuCommandFromText('Analytics', {
+      menu: 'Menu',
+      add: 'Tambah',
+      open: 'Buka',
+      status: 'Status',
+    }),
+    null
   )
 })
 
 test('assistant command parser ignores unsupported or foreign bot commands', () => {
   assert.equal(extractAssistantCommand('/status@other_bot tagihan', 'banplex_bot'), null)
   assert.equal(extractAssistantCommand('/hapus tagihan', 'banplex_bot'), null)
+  assert.equal(extractAssistantCommand('/riwayat tagihan', 'banplex_bot'), null)
+  assert.equal(extractAssistantCommand('/cari tagihan', 'banplex_bot'), null)
+  assert.equal(extractAssistantCommand('/analytics pengeluaran', 'banplex_bot'), null)
 })
 
 test('assistant start command parser carries DM handoff tokens', () => {
@@ -190,15 +188,27 @@ test('assistant start command parser carries DM handoff tokens', () => {
 })
 
 test('assistant callback routing maps quick action and clarification callbacks', () => {
-  assert.deepEqual(resolveAssistantCallbackAction('ta:cmd:riwayat'), {
+  assert.deepEqual(resolveAssistantCallbackAction('ta:cmd:menu'), {
     type: 'message',
-    messageText: '/riwayat',
+    messageText: '/menu',
     requiresSession: false,
   })
 
   assert.deepEqual(resolveAssistantCallbackAction('ta:cmd:tambah'), {
     type: 'message',
     messageText: '/tambah',
+    requiresSession: false,
+  })
+
+  assert.deepEqual(resolveAssistantCallbackAction('ta:cmd:buka'), {
+    type: 'message',
+    messageText: '/buka',
+    requiresSession: false,
+  })
+
+  assert.deepEqual(resolveAssistantCallbackAction('ta:cmd:status'), {
+    type: 'message',
+    messageText: '/status',
     requiresSession: false,
   })
 
@@ -222,6 +232,9 @@ test('assistant callback routing maps quick action and clarification callbacks',
   })
 
   assert.equal(resolveAssistantCallbackAction('ta:cmd:hapus'), null)
+  assert.equal(resolveAssistantCallbackAction('ta:cmd:riwayat'), null)
+  assert.equal(resolveAssistantCallbackAction('ta:cmd:cari'), null)
+  assert.equal(resolveAssistantCallbackAction('ta:cmd:analytics'), null)
 })
 
 test('assistant settlement summary reply uses inline callbacks only', () => {
@@ -231,17 +244,19 @@ test('assistant settlement summary reply uses inline callbacks only', () => {
       source_type: 'bill',
       bill_type: 'Tagihan',
       bill_amount: 120000,
+      bill_paid_amount: 120000,
       bill_remaining_amount: 0,
       bill_description: 'Tagihan A',
       description: 'Tagihan A',
       sort_at: '2026-04-24',
     },
     {
-      bill_status: 'paid',
       source_type: 'loan-disbursement',
-      bill_type: 'Pinjaman',
-      bill_amount: 250000,
-      bill_remaining_amount: 0,
+      status: 'partial',
+      principal_amount: 200000,
+      repayment_amount: 250000,
+      paid_amount: 100000,
+      remaining_amount: 150000,
       creditor_name_snapshot: 'Kreditur A',
       description: 'Pinjaman A',
       sort_at: '2026-04-24',
@@ -250,6 +265,7 @@ test('assistant settlement summary reply uses inline callbacks only', () => {
 
   const bucketReply = buildSettlementBucketReply('id', sampleRows, 'status')
   const detailReply = buildSettlementBucketDetailReply('id', sampleRows, 'status', 'paid')
+  const partialReply = buildSettlementBucketDetailReply('id', sampleRows, 'status', 'partial')
   const statusReply = buildStatusReply(sampleRows, { language: 'id', search: {} })
 
   assert.equal(bucketReply.parseMode, 'HTML')
@@ -260,6 +276,8 @@ test('assistant settlement summary reply uses inline callbacks only', () => {
   assert.equal(statusReply.text.startsWith('<blockquote>'), true)
   assert.equal(bucketReply.text.includes('SUMMARY SEMUA DATA'), true)
   assert.equal(detailReply.text.includes('SUMMARY LUNAS'), true)
+  assert.equal(partialReply.text.includes('SUMMARY DICICIL'), true)
+  assert.equal(partialReply.text.includes('Pinjaman dicicil'), true)
   assert.equal(bucketReply.buttonRows[0][0].callbackData, 'ta:sb:status:paid')
   assert.equal(bucketReply.buttonRows.at(-1)[0].callbackData, 'ta:cmd:menu')
   assert.equal(bucketReply.buttonRows.flat().every((button) => !button.path && !button.url), true)
@@ -268,6 +286,8 @@ test('assistant settlement summary reply uses inline callbacks only', () => {
   assert.equal(detailReply.buttonRows.flat().every((button) => !button.path && !button.url), true)
   assert.equal(detailReply.appendQuickActions, false)
   assert.equal(detailReply.text.includes('<i>Pilih bucket lain atau Menu.</i>'), true)
+  assert.equal(statusReply.facts.loanCount, 1)
+  assert.equal(statusReply.facts.loanRemainingAmount, 150000)
 })
 
 test('assistant settlement summary escapes dynamic html fields', () => {
@@ -301,72 +321,6 @@ test('assistant analytics follow-up rows stay callback-only', () => {
   assert.equal(flattenedButtons.at(-1).callbackData, 'ta:cmd:menu')
   assert.equal(flattenedButtons.every((button) => !button.path && !button.url), true)
   assert.equal(flattenedButtons.some((button) => button.callbackData?.startsWith('ta:aw:')), true)
-})
-
-test('assistant analytics slash command replies with loading fallback and cleanup', async () => {
-  const originalFetch = globalThis.fetch
-  const { calls, fetch } = createTelegramApiFetchMock()
-  globalThis.fetch = fetch
-
-  const adminClient = {
-    from: () => ({
-      upsert: async () => ({
-        error: null,
-      }),
-    }),
-  }
-
-  try {
-    const result = await processAssistantCommand({
-      adminClient,
-      botToken: 'test-token',
-      chatId: '123456',
-      replyToMessageId: 11,
-      telegramUserId: '999',
-      chatType: 'private',
-      rawText: '/analytics',
-      command: {
-        command: 'analytics',
-        args: '',
-      },
-      session: {
-        team_id: 'team-1',
-        state: 'idle',
-        pending_payload: {
-          summary_message_id: 41,
-          transient_message_ids: [42, 43],
-        },
-      },
-      memberships: [
-        {
-          team_id: 'team-1',
-          team_name: 'Workspace A',
-          is_default: true,
-          team_is_active: true,
-          role: 'member',
-        },
-      ],
-    })
-
-    assert.equal(result.processed, true)
-    assert.equal(result.messageId, 202)
-    assert.equal(calls[0].endpoint, 'sendChatAction')
-    assert.deepEqual(calls[0].body, {
-      chat_id: '123456',
-      action: 'typing',
-    })
-    assert.equal(calls[1].endpoint, 'sendMessage')
-    assert.equal(calls[1].body.text, 'Bot sedang memproses analytics...')
-    assert.equal(calls[1].body.reply_to_message_id, 11)
-    assert.equal(calls[2].endpoint, 'editMessageText')
-    assert.equal(calls[2].body.message_id, 202)
-    assert.equal(Boolean(calls[2].body.reply_markup?.inline_keyboard?.length), true)
-    assert.equal(calls.some((call) => call.endpoint === 'deleteMessage' && call.body.message_id === 41), true)
-    assert.equal(calls.some((call) => call.endpoint === 'deleteMessage' && call.body.message_id === 42), true)
-    assert.equal(calls.some((call) => call.endpoint === 'deleteMessage' && call.body.message_id === 43), true)
-  } finally {
-    globalThis.fetch = originalFetch
-  }
 })
 
 test('assistant summary helper sends loading before final edit', async () => {
@@ -645,9 +599,8 @@ test('assistant main menu reply markup is persistent and resizeable', () => {
   const replyMarkup = buildAssistantMainMenuReplyMarkup('id')
 
   assert.deepEqual(replyMarkup.keyboard, [
-    [{ text: 'Tambah' }, { text: 'Buka' }, { text: 'Cari' }],
-    [{ text: 'Status' }, { text: 'Riwayat' }, { text: 'Analytics' }],
-    [{ text: 'Menu' }],
+    [{ text: 'Tambah' }, { text: 'Buka' }],
+    [{ text: 'Status' }, { text: 'Menu' }],
   ])
   assert.equal(replyMarkup.resize_keyboard, true)
   assert.equal(replyMarkup.is_persistent, true)

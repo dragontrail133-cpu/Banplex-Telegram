@@ -4,6 +4,8 @@ import test from 'node:test'
 import {
   hasMeaningfulText,
   getTransactionSettlementBadgeLabel,
+  getTransactionLedgerFilterOptions,
+  matchesTransactionLedgerFilter,
   shouldHideTransactionAmount,
 } from '../../src/lib/transaction-presentation.js'
 
@@ -95,4 +97,101 @@ test('transaction amount hides for surat jalan documents', () => {
     }),
     false
   )
+})
+
+test('transaction ledger visibility excludes payroll bills and surat jalan in the right surfaces', () => {
+  assert.equal(
+    matchesTransactionLedgerFilter(
+      {
+        source_type: 'bill',
+        bill_type: 'gaji',
+        bill_status: 'unpaid',
+      },
+      'all',
+      {
+        includePaidBills: false,
+        includePayrollBills: false,
+        includeSuratJalan: true,
+      }
+    ),
+    false
+  )
+
+  assert.equal(
+    matchesTransactionLedgerFilter(
+      {
+        source_type: 'bill',
+        bill_type: 'operasional',
+        bill_status: 'paid',
+      },
+      'all',
+      {
+        includePaidBills: false,
+        includePayrollBills: true,
+        includeSuratJalan: true,
+      }
+    ),
+    false
+  )
+
+  assert.equal(
+    matchesTransactionLedgerFilter(
+      {
+        source_type: 'expense',
+        expense_type: 'material',
+        document_type: 'faktur',
+      },
+      'material-invoice',
+      {
+        includePaidBills: false,
+        includePayrollBills: false,
+        includeSuratJalan: true,
+      }
+    ),
+    true
+  )
+
+  assert.equal(
+    matchesTransactionLedgerFilter(
+      {
+        source_type: 'expense',
+        expense_type: 'material',
+        document_type: 'surat_jalan',
+      },
+      'material-invoice',
+      {
+        includePaidBills: false,
+        includePayrollBills: false,
+        includeSuratJalan: true,
+      }
+    ),
+    false
+  )
+
+  assert.equal(
+    matchesTransactionLedgerFilter(
+      {
+        source_type: 'expense',
+        expense_type: 'material',
+        document_type: 'surat_jalan',
+      },
+      'surat-jalan',
+      {
+        includePaidBills: false,
+        includePayrollBills: false,
+        includeSuratJalan: false,
+      }
+    ),
+    false
+  )
+})
+
+test('ledger filter options can hide payroll and delivery-order filters', () => {
+  const options = getTransactionLedgerFilterOptions({
+    includePayrollBills: false,
+    includeSuratJalan: false,
+  })
+
+  assert.equal(options.some((item) => item.value === 'bill'), false)
+  assert.equal(options.some((item) => item.value === 'surat-jalan'), false)
 })

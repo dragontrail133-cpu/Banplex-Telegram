@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDownLeft, ArrowLeft, ArrowUpRight, Check, Download, Eye, PencilLine, Trash2, X } from 'lucide-react'
+import { ArrowDownLeft, ArrowLeft, ArrowUpRight, Check, Eye, PencilLine, Send, Trash2, X } from 'lucide-react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   AppButton,
@@ -7,6 +7,7 @@ import {
   AppCardDashed,
   AppCardStrong,
   AppInput,
+  AppViewportSafeArea,
   PageShell,
   PageHeader,
   AppTechnicalGrid,
@@ -14,7 +15,7 @@ import {
 import MaterialInvoiceDetailPanel from '../components/MaterialInvoiceDetailPanel'
 import TransactionDeleteDialog from '../components/TransactionDeleteDialog'
 import { formatAppDateLabel } from '../lib/date-time'
-import { savePaymentReceiptPdf } from '../lib/report-pdf'
+import { sendPaymentReceiptPdfToTelegramDm } from '../lib/report-delivery-api'
 import {
   canEditTransaction,
   formatCurrency,
@@ -38,6 +39,7 @@ import {
   fetchWorkspaceTransactionByIdFromApi,
 } from '../lib/transactions-api'
 import { fetchMaterialInvoiceByIdFromApi } from '../lib/records-api'
+import useTelegram from '../hooks/useTelegram'
 import useAuthStore from '../store/useAuthStore'
 import useBillStore from '../store/useBillStore'
 import useDashboardStore from '../store/useDashboardStore'
@@ -161,6 +163,14 @@ function getDetailSurface(location) {
   return String(searchSurface ?? '').trim().toLowerCase()
 }
 
+function PageViewportShell({ children }) {
+  return (
+    <AppViewportSafeArea as="main" className="min-h-screen sm:mx-auto sm:max-w-md">
+      {children}
+    </AppViewportSafeArea>
+  )
+}
+
 function TransactionDetailPage({ technicalView = false }) {
   const navigate = useNavigate()
   const location = useLocation()
@@ -191,6 +201,8 @@ function TransactionDetailPage({ technicalView = false }) {
     (state) => state.softDeleteAttendanceRecord
   )
   const { begin, fail, succeed } = useMutationToast()
+  const { user: telegramUser } = useTelegram()
+  const isTelegramMiniWeb = telegramUser != null
   const initialTransaction = location.state?.transaction ?? null
   const isOwner = currentRole === 'Owner'
   const [transaction, setTransaction] = useState(initialTransaction)
@@ -216,6 +228,7 @@ function TransactionDetailPage({ technicalView = false }) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [deleteDialogHistoryRoute, setDeleteDialogHistoryRoute] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isReceiptDelivering, setIsReceiptDelivering] = useState(false)
   const detailSurface = useMemo(() => getDetailSurface(location), [location])
   const isHistorySurface = detailSurface === 'riwayat' || detailSurface === 'history'
   const isPaymentSurface = detailSurface === 'pembayaran' || detailSurface === 'payment'
@@ -225,6 +238,25 @@ function TransactionDetailPage({ technicalView = false }) {
     : isPaymentSurface
       ? '/pembayaran'
       : '/transactions'
+  const detailRoutePath = `/transactions/${transactionId}`
+  const detailRouteSearch = detailSurface ? `?surface=${detailSurface}` : ''
+  const detailRoute = `${detailRoutePath}${detailRouteSearch}`
+  const technicalRoute = `${detailRoutePath}/technical${detailRouteSearch}`
+
+  const handleBack = () => {
+    navigate(backRoute)
+  }
+
+  const handleTechnicalBack = () => {
+    navigate(detailRoute, {
+      replace: true,
+      state: {
+        ...(location.state ?? {}),
+        transaction: transaction ?? initialTransaction ?? null,
+        detailSurface,
+      },
+    })
+  }
 
   useEffect(() => {
     setActiveDetailTab(isHistorySurface ? 'history' : 'info')
@@ -537,71 +569,75 @@ function TransactionDetailPage({ technicalView = false }) {
 
   if (!transaction && isLoadingRecord) {
     return (
-      <PageShell>
-        <PageHeader
-          eyebrow={isHistorySurface ? 'Riwayat' : isPaymentSurface ? 'Pembayaran' : 'Jurnal'}
-          title={
-            isHistorySurface
-              ? 'Detail Riwayat'
-              : isPaymentSurface
-                ? 'Detail Pembayaran'
-                : 'Detail Jurnal'
-          }
-          action={
-            <AppButton
-              onClick={() => navigate(backRoute)}
-              size="sm"
-              type="button"
-              variant="secondary"
-              leadingIcon={<ArrowLeft className="h-4 w-4" />}
-            >
-              Kembali
-            </AppButton>
-          }
-        />
-        <AppCardDashed className="px-4 py-5 text-sm text-[var(--app-hint-color)]">
-          Memuat detail transaksi...
-        </AppCardDashed>
-      </PageShell>
+      <PageViewportShell>
+        <PageShell>
+          <PageHeader
+            eyebrow={isHistorySurface ? 'Riwayat' : isPaymentSurface ? 'Pembayaran' : 'Jurnal'}
+            title={
+              isHistorySurface
+                ? 'Detail Riwayat'
+                : isPaymentSurface
+                  ? 'Detail Pembayaran'
+                  : 'Detail Jurnal'
+            }
+            action={
+              <AppButton
+                onClick={technicalView ? handleTechnicalBack : handleBack}
+                size="sm"
+                type="button"
+                variant="secondary"
+                leadingIcon={<ArrowLeft className="h-4 w-4" />}
+              >
+                Kembali
+              </AppButton>
+            }
+          />
+          <AppCardDashed className="px-4 py-5 text-sm text-[var(--app-hint-color)]">
+            Memuat detail transaksi...
+          </AppCardDashed>
+        </PageShell>
+      </PageViewportShell>
     )
   }
 
   if (!transaction) {
     return (
-      <PageShell>
-        <PageHeader
-          eyebrow={isHistorySurface ? 'Riwayat' : isPaymentSurface ? 'Pembayaran' : 'Jurnal'}
-          title={
-            isHistorySurface
-              ? 'Detail Riwayat'
-              : isPaymentSurface
-                ? 'Detail Pembayaran'
-                : 'Detail Jurnal'
-          }
-          action={
-            <AppButton
-              onClick={() => navigate(backRoute)}
-              size="sm"
-              type="button"
-              variant="secondary"
-              leadingIcon={<ArrowLeft className="h-4 w-4" />}
-            >
-              Kembali
-            </AppButton>
-          }
-        />
-        <AppCardDashed className="px-4 py-5">
-          <p className="text-sm font-semibold text-[var(--app-text-color)]">
-            Data transaksi belum tersedia.
-          </p>
-          <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">
-            {recordError ??
-              `Buka ulang dari halaman ${
-                isHistorySurface ? 'riwayat' : isPaymentSurface ? 'pembayaran' : 'transaksi'
-              } untuk memuat data terbaru.`}
-          </p>
-        </AppCardDashed>
-      </PageShell>
+      <PageViewportShell>
+        <PageShell>
+          <PageHeader
+            eyebrow={isHistorySurface ? 'Riwayat' : isPaymentSurface ? 'Pembayaran' : 'Jurnal'}
+            title={
+              isHistorySurface
+                ? 'Detail Riwayat'
+                : isPaymentSurface
+                  ? 'Detail Pembayaran'
+                  : 'Detail Jurnal'
+            }
+            action={
+              <AppButton
+                onClick={technicalView ? handleTechnicalBack : handleBack}
+                size="sm"
+                type="button"
+                variant="secondary"
+                leadingIcon={<ArrowLeft className="h-4 w-4" />}
+              >
+                Kembali
+              </AppButton>
+            }
+          />
+          <AppCardDashed className="px-4 py-5">
+            <p className="text-sm font-semibold text-[var(--app-text-color)]">
+              Data transaksi belum tersedia.
+            </p>
+            <p className="mt-2 text-sm leading-6 text-[var(--app-hint-color)]">
+              {recordError ??
+                `Buka ulang dari halaman ${
+                  isHistorySurface ? 'riwayat' : isPaymentSurface ? 'pembayaran' : 'transaksi'
+                } untuk memuat data terbaru.`}
+            </p>
+          </AppCardDashed>
+        </PageShell>
+      </PageViewportShell>
     )
   }
 
@@ -718,9 +754,6 @@ function TransactionDetailPage({ technicalView = false }) {
   const resolvedDetailTab = availableDetailTabs.some((tab) => tab.value === activeDetailTab)
     ? activeDetailTab
     : 'info'
-  const technicalRoute = `/transactions/${transactionId}/technical${
-    detailSurface ? `?surface=${detailSurface}` : ''
-  }`
   const technicalDetailStatus = isLoadingRecord
     ? 'Memuat...'
     : transaction
@@ -759,23 +792,40 @@ function TransactionDetailPage({ technicalView = false }) {
     },
   ]
 
-  const handleDownloadPaymentReceipt = (payment) => {
-    if (!payment) {
+  const handleSendPaymentReceipt = async (payment) => {
+    if (!isTelegramMiniWeb || isReceiptDelivering || !payment) {
       return
     }
 
+    setIsReceiptDelivering(true)
+    begin({
+      title: 'Mengirim kwitansi',
+      message: 'Mohon tunggu sampai kwitansi terkirim ke DM Telegram.',
+    })
+
     try {
-      savePaymentReceiptPdf({
+      const result = await sendPaymentReceiptPdfToTelegramDm({
         paymentType: isLoanDisbursement ? 'loan' : 'bill',
-        payment: {
-          ...payment,
-          referenceId: payment.billId ?? payment.loanId ?? payment.id,
-        },
-        parentRecord: isLoanDisbursement ? (loanDetail ?? loanSnapshot ?? transaction) : (billDetail ?? billSnapshot ?? transaction),
-        generatedAt: new Date(),
+        payment,
+        parentRecord: isLoanDisbursement
+          ? (loanDetail ?? loanSnapshot ?? transaction)
+          : (billDetail ?? billSnapshot ?? transaction),
+        generatedAt: new Date().toISOString(),
+      })
+
+      succeed({
+        title: result?.pdfError ? 'Kwitansi terkirim sebagian' : 'Kwitansi terkirim',
+        message: result?.pdfError
+          ? 'File PDF gagal dikirim, tetapi pesan Telegram berhasil diterima.'
+          : 'Kwitansi PDF berhasil dikirim ke DM Telegram.',
       })
     } catch (error) {
-      setRecordError(error instanceof Error ? error.message : 'Gagal membuat kwitansi pembayaran.')
+      fail({
+        title: 'Kwitansi gagal dikirim',
+        message: error instanceof Error ? error.message : 'Gagal mengirim kwitansi.',
+      })
+    } finally {
+      setIsReceiptDelivering(false)
     }
   }
 
@@ -935,47 +985,61 @@ function TransactionDetailPage({ technicalView = false }) {
     window.open(fileAsset.public_url, '_blank', 'noopener,noreferrer')
   }
 
+  const handleOpenTechnical = () => {
+    navigate(technicalRoute, {
+      state: {
+        ...(location.state ?? {}),
+        transaction: transaction ?? initialTransaction ?? null,
+        detailSurface,
+        surface: detailSurface,
+      },
+    })
+  }
+
   if (technicalView) {
     return (
-      <PageShell>
-        <PageHeader
-          eyebrow="Owner"
-          title={`Detail Teknis ${detailTitle}`}
-          backAction={() => navigate(backRoute)}
-        />
+      <PageViewportShell>
+        <PageShell>
+          <PageHeader
+            eyebrow="Owner"
+            title={`Detail Teknis ${detailTitle}`}
+            backAction={handleTechnicalBack}
+          />
 
-        {recordError ? (
-          <AppCardDashed className="text-sm leading-6 text-[var(--app-hint-color)]">
-            {recordError}
-          </AppCardDashed>
-        ) : null}
+          {recordError ? (
+            <AppCardDashed className="text-sm leading-6 text-[var(--app-hint-color)]">
+              {recordError}
+            </AppCardDashed>
+          ) : null}
 
-        <AppCardStrong className="space-y-4">
-          <AppTechnicalGrid items={technicalRows} />
-        </AppCardStrong>
-      </PageShell>
+          <AppCardStrong className="space-y-4">
+            <AppTechnicalGrid items={technicalRows} />
+          </AppCardStrong>
+        </PageShell>
+      </PageViewportShell>
     )
   }
 
   return (
-    <PageShell>
-      <PageHeader
-        eyebrow={technicalView ? 'Owner' : detailEyebrow}
-        title={technicalView ? `Detail Teknis ${detailTitle}` : detailHeaderTitle}
-        backAction={() => navigate(backRoute)}
-        action={
-          !technicalView && isOwner ? (
-            <AppButton
-              onClick={() => navigate(technicalRoute)}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Detail Teknis
-            </AppButton>
-          ) : null
-        }
-      />
+    <PageViewportShell>
+      <PageShell>
+        <PageHeader
+          eyebrow={technicalView ? 'Owner' : detailEyebrow}
+          title={technicalView ? `Detail Teknis ${detailTitle}` : detailHeaderTitle}
+          backAction={handleBack}
+          action={
+            !technicalView && isOwner ? (
+              <AppButton
+                onClick={handleOpenTechnical}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Detail Teknis
+              </AppButton>
+            ) : null
+          }
+        />
 
       {recordError ? (
         <AppCardDashed>
@@ -1148,13 +1212,6 @@ function TransactionDetailPage({ technicalView = false }) {
         </AppButton>
       ) : null}
 
-      <AppCard className="space-y-2 bg-[var(--app-surface-strong-color)]">
-        <p className="app-meta">Keterangan</p>
-        <p className="text-sm leading-6 text-[var(--app-text-color)]">
-          {getTransactionTitle(transaction)}
-        </p>
-      </AppCard>
-
       {loanSnapshot ? (
         <AppCard className="space-y-3 bg-[var(--app-surface-strong-color)]">
           <div className="flex items-center justify-between gap-3">
@@ -1277,15 +1334,22 @@ function TransactionDetailPage({ technicalView = false }) {
                       </div>
 
                       <div className="flex shrink-0 items-center gap-2">
-                        <AppButton
-                          aria-label="Unduh kwitansi"
-                          iconOnly
-                          onClick={() => handleDownloadPaymentReceipt(payment)}
-                          size="sm"
-                          type="button"
-                          variant="secondary"
-                          leadingIcon={<Download className="h-4 w-4" />}
-                        />
+                        {canManagePaymentHistory && isTelegramMiniWeb ? (
+                          <AppButton
+                            aria-label={isReceiptDelivering ? 'Mengirim' : 'Kirim'}
+                            iconOnly
+                            disabled={isReceiptDelivering}
+                            onClick={() => void handleSendPaymentReceipt(payment)}
+                            size="sm"
+                            type="button"
+                            variant="secondary"
+                            leadingIcon={
+                              <Send
+                                className={`h-4 w-4 ${isReceiptDelivering ? 'animate-pulse' : ''}`}
+                              />
+                            }
+                          />
+                        ) : null}
                         {canManagePaymentHistory ? (
                           <AppButton
                             aria-label={isLoanHistory ? 'Hapus pembayaran pinjaman' : 'Hapus pembayaran tagihan'}
@@ -1516,7 +1580,8 @@ function TransactionDetailPage({ technicalView = false }) {
             : 'Transaksi akan dipindahkan ke arsip dan dapat dipulihkan dari halaman recycle bin.'
         }
       />
-    </PageShell>
+      </PageShell>
+    </PageViewportShell>
   )
 }
 

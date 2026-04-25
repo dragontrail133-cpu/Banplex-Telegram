@@ -98,25 +98,17 @@ function QuickActionsSheet({ isOpen, onClose, onNavigate }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: 0.12 }}
             className="absolute inset-0 app-backdrop"
             onClick={onClose}
             role="presentation"
           />
 
           <Motion.div
-            initial={{ y: '100%', opacity: 0.9 }}
-            animate={{ y: '0%', opacity: 1 }}
-            exit={{ y: '100%', opacity: 0.9 }}
-            transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-            drag="y"
-            dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={0.2}
-            onDragEnd={(event, info) => {
-              if (info.offset.y > 60) {
-                onClose()
-              }
-            }}
+            initial={{ y: 24, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 24, opacity: 0 }}
+            transition={{ duration: 0.16, ease: 'easeOut' }}
             className="relative w-full max-w-md overflow-hidden rounded-[32px] border border-[var(--app-outline-soft)] bg-[var(--app-surface-strong-color)] shadow-telegram"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
@@ -308,8 +300,8 @@ function BottomNav() {
                 {({ isActive }) => (
                   <>
                     <Motion.div
-                      animate={{ scale: isActive ? 1.12 : 1 }}
-                      transition={{ type: 'spring', stiffness: 420, damping: 26 }}
+                      animate={{ scale: isActive ? 1.08 : 1 }}
+                      transition={{ duration: 0.12, ease: 'easeOut' }}
                     >
                       <Icon className="h-5 w-5" aria-hidden="true" strokeWidth={1.9} />
                     </Motion.div>

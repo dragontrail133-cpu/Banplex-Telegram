@@ -76,6 +76,74 @@ test('assistant writer accepts safe natural rewrite', async () => {
   }
 })
 
+test('assistant writer accepts settlement summary rewrite with loan totals', async () => {
+  const originalFetch = globalThis.fetch
+
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () =>
+      JSON.stringify({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    text: 'Tagihan lunas 1 item, pinjaman dicicil 1 item.',
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+  })
+
+  try {
+    const replyText = await rewriteAssistantReply({
+      plan: {
+        intent: 'status',
+        language: 'id',
+      },
+      reply: {
+        text: 'Tagihan lunas 1 item, pinjaman dicicil 1 item.',
+        buttons: [],
+        facts: {
+          rowCount: 2,
+          billCount: 1,
+          loanCount: 1,
+          billRemainingAmount: 0,
+          loanRemainingAmount: 150000,
+          summaryItems: ['Tagihan lunas 1 item', 'Pinjaman dicicil 1 item.'],
+          presentation: 'html_summary',
+          tone: 'santai_operasional',
+        },
+      },
+      workspaceName: 'Banplex',
+      session: {
+        pending_payload: {
+          context_summary: 'status ringkasan',
+          last_turn: {
+            user_text: 'status',
+          },
+        },
+      },
+      providerConfigs: [
+        {
+          provider: 'gemini',
+          apiKey: 'test-key',
+          model: 'test-model',
+        },
+      ],
+    })
+
+    assert.equal(replyText, 'Tagihan lunas 1 item, pinjaman dicicil 1 item.')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('assistant writer preserves clarification rewrite', async () => {
   const originalFetch = globalThis.fetch
 

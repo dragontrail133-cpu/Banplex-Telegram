@@ -204,6 +204,7 @@ function EditRecordPage({ technicalView = false }) {
   }
   const resolvedTitle = formatValue(titleMap[normalizedType] ?? type)
   const technicalRoute = `/edit/${normalizedType}/${id}/technical`
+  const technicalBackRoute = `/edit/${normalizedType}/${id}`
   const backRoute = resolveFormBackRoute('editRecord', {
     locationState: location.state,
     type: normalizedType,
@@ -219,6 +220,16 @@ function EditRecordPage({ technicalView = false }) {
 
   const handleBack = () => {
     navigate(backRoute, { replace: true })
+  }
+  const handleTechnicalBack = () => {
+    navigate(technicalBackRoute, {
+      replace: true,
+      state: {
+        ...(location.state ?? {}),
+        item: resolvedItem ?? null,
+        record: resolvedItem ?? null,
+      },
+    })
   }
 
   const handleFormSuccess = async () => {
@@ -643,7 +654,7 @@ function EditRecordPage({ technicalView = false }) {
               ? `Detail Teknis ${resolvedTitle}`
               : `${isCreateMode ? 'Tambah' : 'Edit'} ${resolvedTitle}`
           }
-          backAction={handleBack}
+          backAction={technicalView ? handleTechnicalBack : handleBack}
         />
 
         <section className="grid min-h-[calc(100dvh-16rem)] place-items-center px-4 text-center">
@@ -677,12 +688,16 @@ function EditRecordPage({ technicalView = false }) {
               ? `Detail Teknis ${resolvedTitle}`
               : `${isCreateMode ? 'Tambah' : 'Edit'} ${resolvedTitle}`
           }
-          backAction={handleBack}
+          backAction={technicalView ? handleTechnicalBack : handleBack}
         />
 
         <AppErrorState
           action={
-            <AppButton onClick={handleBack} type="button" variant="secondary">
+            <AppButton
+              onClick={technicalView ? handleTechnicalBack : handleBack}
+              type="button"
+              variant="secondary"
+            >
               Kembali
             </AppButton>
           }
@@ -699,7 +714,11 @@ function EditRecordPage({ technicalView = false }) {
   if (technicalView) {
     return (
       <PageShell>
-        <PageHeader eyebrow="Owner" title={`Detail Teknis ${resolvedTitle}`} backAction={handleBack} />
+        <PageHeader
+          eyebrow="Owner"
+          title={`Detail Teknis ${resolvedTitle}`}
+          backAction={handleTechnicalBack}
+        />
 
         {recordError ? (
           <AppCardDashed className="text-sm leading-6 text-[var(--app-hint-color)]">

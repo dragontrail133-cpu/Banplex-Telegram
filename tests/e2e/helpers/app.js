@@ -262,6 +262,33 @@ async function openApp(page, path = '/', options = {}) {
     await fulfillJson(route, { success: true })
   })
 
+  await page.route('**/api/report-pdf-delivery', async (route) => {
+    const request = route.request()
+    let requestBody = null
+
+    try {
+      requestBody = request.postDataJSON()
+    } catch {
+      requestBody = request.postData()
+    }
+
+    const responseBody = await mockApi.reportDelivery?.({
+      route,
+      url: new URL(request.url()),
+      method: request.method(),
+      headers: request.headers(),
+      body: requestBody,
+      telegramUser,
+    })
+
+    if (responseBody !== undefined) {
+      await fulfillJson(route, responseBody)
+      return
+    }
+
+    await fulfillJson(route, { success: true })
+  })
+
   await page.route('**/storage/v1/**', async (route) => {
     const request = route.request()
     const requestUrl = new URL(request.url())
@@ -501,6 +528,12 @@ async function openApp(page, path = '/', options = {}) {
     page.getByRole('heading', { name: 'Sedang memuat workspace', exact: true })
   ).toBeHidden({
     timeout: 25000,
+  })
+
+  await expect(
+    page.getByRole('heading', { name: 'Sedang memuat halaman', exact: true })
+  ).toBeHidden({
+    timeout: 120000,
   })
 }
 

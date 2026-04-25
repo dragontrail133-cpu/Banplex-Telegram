@@ -7,6 +7,7 @@ import {
   ChevronRight,
   FileText,
   ReceiptText,
+  Send,
   RotateCcw,
   Trash2,
 } from 'lucide-react'
@@ -22,6 +23,7 @@ import {
 } from '../components/ui/AppPrimitives'
 import { formatAppDateLabel } from '../lib/date-time'
 import useMutationToast from '../hooks/useMutationToast'
+import useTelegram from '../hooks/useTelegram'
 import {
   formatCurrency,
   getBillSummaryAmount,
@@ -36,12 +38,12 @@ import {
   getTransactionTitle,
   hasMeaningfulText,
 } from '../lib/transaction-presentation'
+import { sendPaymentReceiptPdfToTelegramDm } from '../lib/report-delivery-api'
 import {
   fetchDeletedBillPaymentsFromApi,
   permanentDeleteBillPaymentFromApi,
   restoreBillPaymentFromApi,
 } from '../lib/records-api'
-import { savePaymentReceiptPdf } from '../lib/report-pdf'
 import useAuthStore from '../store/useAuthStore'
 import useBillStore from '../store/useBillStore'
 import useDashboardStore from '../store/useDashboardStore'
@@ -171,10 +173,12 @@ function PayrollGroupDetail({
   group,
   historyRows,
   isLoading,
+  isReceiptDelivering,
+  isTelegramMiniWeb,
   isReadOnly,
   onArchivePayment,
   onChangeTab,
-  onDownloadReceipt,
+  onSendReceipt,
   onOpenBill,
   onPermanentDeletePayment,
   onRestorePayment,
@@ -319,13 +323,14 @@ function PayrollGroupDetail({
                       </p>
                     </div>
 
-                    {isReadOnly ? null : (
+                    {isReadOnly || !isTelegramMiniWeb ? null : (
                       <div className="flex shrink-0 items-center gap-1">
                         <AppButton
-                          aria-label="Unduh kwitansi"
+                          aria-label={isReceiptDelivering ? 'Mengirim' : 'Kirim'}
                           iconOnly
-                          leadingIcon={<ReceiptText className="h-4 w-4" />}
-                          onClick={() => onDownloadReceipt(entry)}
+                          disabled={isReceiptDelivering}
+                          leadingIcon={<Send className={`h-4 w-4 ${isReceiptDelivering ? 'animate-pulse' : ''}`} />}
+                          onClick={() => onSendReceipt(entry)}
                           size="sm"
                           type="button"
                           variant="secondary"
@@ -384,6 +389,7 @@ function PayrollGroupDetail({
 function PaymentsPage() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { user: telegramUser } = useTelegram()
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
   const restoredPembayaranState = useMemo(
     () => readPembayaranListState(currentTeamId),
@@ -408,7 +414,9 @@ function PaymentsPage() {
   const deleteBillPayment = usePaymentStore((state) => state.deleteBillPayment)
   const currentRole = useAuthStore((state) => state.role)
   const { begin, clear, fail, succeed } = useMutationToast()
+  const isTelegramMiniWeb = telegramUser != null
   const isReadOnly = currentRole === 'Viewer' || currentRole === 'Payroll'
+  const [isReceiptDelivering, setIsReceiptDelivering] = useState(false)
   const [activeGroupTab, setActiveGroupTab] = useState('summary')
   const [billDetailById, setBillDetailById] = useState({})
   const [deletedBillPayments, setDeletedBillPayments] = useState([])
@@ -704,17 +712,43 @@ function PaymentsPage() {
     })
   }
 
-  const handleDownloadReceipt = useCallback((entry) => {
-    if (!entry?.payment) {
-      return
-    }
+  const handleSendReceipt = useCallback(
+    async (entry) => {
+      if (!isTelegramMiniWeb || isReceiptDelivering || !entry?.payment) {
+        return
+      }
 
-    savePaymentReceiptPdf({
-      paymentType: 'bill',
-      payment: entry.payment,
-      parentRecord: entry.bill ?? {},
-    })
-  }, [])
+      setIsReceiptDelivering(true)
+      begin({
+        title: 'Mengirim kwitansi',
+        message: 'Mohon tunggu sampai kwitansi terkirim ke DM Telegram.',
+      })
+
+      try {
+        const result = await sendPaymentReceiptPdfToTelegramDm({
+          paymentType: 'bill',
+          payment: entry.payment,
+          parentRecord: entry.bill ?? entry.payment ?? {},
+          generatedAt: new Date().toISOString(),
+        })
+
+        succeed({
+          title: result?.pdfError ? 'Kwitansi terkirim sebagian' : 'Kwitansi terkirim',
+          message: result?.pdfError
+            ? 'File PDF gagal dikirim, tetapi pesan Telegram berhasil diterima.'
+            : 'Kwitansi PDF berhasil dikirim ke DM Telegram.',
+        })
+      } catch (error) {
+        fail({
+          title: 'Kwitansi gagal dikirim',
+          message: error instanceof Error ? error.message : 'Gagal mengirim kwitansi.',
+        })
+      } finally {
+        setIsReceiptDelivering(false)
+      }
+    },
+    [begin, fail, isReceiptDelivering, isTelegramMiniWeb, succeed]
+  )
 
   const handleArchivePayment = useCallback(
     async (entry) => {
@@ -860,15 +894,17 @@ function PaymentsPage() {
             group={selectedGroup}
             historyRows={selectedGroupHistoryRows}
             isLoading={isGroupLoading}
+            isReceiptDelivering={isReceiptDelivering}
+            isTelegramMiniWeb={isTelegramMiniWeb}
             isReadOnly={isReadOnly}
             onArchivePayment={handleArchivePayment}
             onChangeTab={handleChangeGroupTab}
-          onDownloadReceipt={handleDownloadReceipt}
-          onOpenBill={handleOpenBillPayment}
-          onPermanentDeletePayment={handlePermanentDeletePayment}
-          onRestorePayment={handleRestorePayment}
-          tabOptions={selectedGroupTabOptions}
-        />
+            onOpenBill={handleOpenBillPayment}
+            onPermanentDeletePayment={handlePermanentDeletePayment}
+            onRestorePayment={handleRestorePayment}
+            onSendReceipt={handleSendReceipt}
+            tabOptions={selectedGroupTabOptions}
+          />
         ) : isBillsLoading || isGroupLoading ? (
           <section className="grid min-h-[calc(100dvh-18rem)] place-items-center px-4 text-center">
             <div className="flex flex-col items-center gap-5">

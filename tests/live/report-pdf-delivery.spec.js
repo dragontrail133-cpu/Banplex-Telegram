@@ -1,11 +1,8 @@
 import { expect, test } from '@playwright/test'
-import { readFile } from 'node:fs/promises'
 import { openLiveApp } from './helpers/live-app.js'
 
 test.describe('live report pdf smoke', () => {
-  test('proves browser download, mini web telegram trigger, and DM delivery for business report', async ({
-    page,
-  }) => {
+  test('delivers business report PDF via DM from Telegram Mini Web', async ({ page }) => {
     test.setTimeout(300000)
 
     let resolveReportDelivery = null
@@ -50,25 +47,13 @@ test.describe('live report pdf smoke', () => {
     })
 
     await expect(page).toHaveURL(/\/reports(?:\?.*)?$/)
-    await expect(page.getByRole('button', { name: 'Unduh PDF' })).toBeVisible({
+    await expect(page.getByRole('button', { name: 'Unduh PDF' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Kirim ke DM' })).toHaveCount(0)
+    const reportDeliveryButton = page.getByRole('button', { name: 'Kirim' })
+    await expect(reportDeliveryButton).toBeVisible({
       timeout: 60000,
     })
-    await expect(page.getByRole('button', { name: 'Kirim ke DM' })).toBeVisible({
-      timeout: 60000,
-    })
 
-    const reportDownloadPromise = page.waitForEvent('download')
-
-    await page.getByRole('button', { name: 'Unduh PDF' }).click()
-
-    const reportDownload = await reportDownloadPromise
-    const reportDownloadPath = await reportDownload.path()
-
-    expect(reportDownloadPath).toBeTruthy()
-    expect((await readFile(reportDownloadPath)).subarray(0, 5).toString('utf8')).toBe('%PDF-')
-    expect(reportDownload.suggestedFilename()).toContain('laporan-executive-finance')
-
-    const reportDeliveryButton = page.getByRole('button', { name: 'Kirim ke DM' })
     await reportDeliveryButton.click()
 
     const reportDelivery = await reportDeliveryPromise

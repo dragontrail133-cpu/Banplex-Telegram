@@ -5,9 +5,6 @@ const assistantCommandNames = new Set([
   'menu',
   'tambah',
   'status',
-  'cari',
-  'analytics',
-  'riwayat',
   'buka',
 ])
 const assistantCallbackPrefixes = Object.freeze({
@@ -121,18 +118,6 @@ function buildAssistantCommandInput(commandName, args = '') {
     return normalizedArgs ? `status ${normalizedArgs}` : 'status'
   }
 
-  if (normalizedCommand === 'cari') {
-    return normalizedArgs ? `cari ${normalizedArgs}` : ''
-  }
-
-  if (normalizedCommand === 'analytics') {
-    return normalizedArgs ? `ringkas ${normalizedArgs}` : ''
-  }
-
-  if (normalizedCommand === 'riwayat') {
-    return 'buka riwayat'
-  }
-
   if (normalizedCommand === 'buka') {
     return normalizedArgs ? `buka ${normalizedArgs}` : ''
   }
@@ -151,10 +136,7 @@ function resolveAssistantMenuCommandFromText(text, labels = {}) {
     ['menu', labels.menu],
     ['tambah', labels.add],
     ['buka', labels.open],
-    ['cari', labels.search],
     ['status', labels.status],
-    ['riwayat', labels.history],
-    ['analytics', labels.analytics],
   ]
 
   for (const [commandName, label] of labelToCommandPairs) {

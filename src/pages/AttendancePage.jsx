@@ -28,7 +28,7 @@ function AttendancePage() {
         onBack={() => navigate(backRoute, { replace: true })}
         title={attendanceShell.title}
       >
-        <AttendanceForm formId={formId} hideActions />
+        <AttendanceForm key={location.key} formId={formId} hideActions />
       </FormLayout>
     </ProtectedRoute>
   )

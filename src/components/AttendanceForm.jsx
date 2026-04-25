@@ -7,12 +7,13 @@ import {
   UserRound,
   Users,
 } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
 import SmartList from './ui/SmartList'
 import useTelegram from '../hooks/useTelegram'
 import useAttendanceStore from '../store/useAttendanceStore'
 import useAuthStore from '../store/useAuthStore'
 import useMasterStore from '../store/useMasterStore'
-import { getAppTodayKey } from '../lib/date-time'
+import { getAppTodayKey, toAppDateKey } from '../lib/date-time'
 import useMutationToast from '../hooks/useMutationToast'
 import { fetchAttendanceHistoryFromApi } from '../lib/records-api'
 import MasterPickerField from './ui/MasterPickerField'
@@ -41,6 +42,33 @@ function formatCurrency(value) {
 
 function getTodayDateString() {
   return getAppTodayKey()
+}
+
+function getInitialAttendanceSelection(location) {
+  const searchParams = new URLSearchParams(location.search)
+  const locationState = location.state ?? {}
+  const candidateDate =
+    searchParams.get('date') ??
+    locationState.date ??
+    locationState.attendanceDate ??
+    locationState.attendance_date ??
+    locationState.item?.attendance_date ??
+    locationState.record?.attendance_date ??
+    locationState.transaction?.attendance_date ??
+    ''
+  const candidateProjectId =
+    searchParams.get('projectId') ??
+    locationState.projectId ??
+    locationState.project_id ??
+    locationState.item?.project_id ??
+    locationState.record?.project_id ??
+    locationState.transaction?.project_id ??
+    ''
+
+  return {
+    selectedDate: toAppDateKey(candidateDate) || getTodayDateString(),
+    selectedProjectId: normalizeText(candidateProjectId, ''),
+  }
 }
 
 function getPreviousDateString(value) {
@@ -562,6 +590,7 @@ function AttendanceSettingsSheet({
 
 function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
   const { user } = useTelegram()
+  const location = useLocation()
   const authUser = useAuthStore((state) => state.user)
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
   const workers = useMasterStore((state) => state.workers)
@@ -579,8 +608,13 @@ function AttendanceForm({ onSuccess, formId = null, hideActions = false }) {
   const saveAttendanceSheet = useAttendanceStore((state) => state.saveAttendanceSheet)
   const { begin, clear, fail, succeed } = useMutationToast()
   const [dateAttendances, setDateAttendances] = useState([])
-  const [selectedDate, setSelectedDate] = useState(() => getTodayDateString())
-  const [selectedProjectId, setSelectedProjectId] = useState('')
+  const initialAttendanceSelection = getInitialAttendanceSelection(location)
+  const [selectedDate, setSelectedDate] = useState(
+    () => initialAttendanceSelection.selectedDate
+  )
+  const [selectedProjectId, setSelectedProjectId] = useState(
+    () => initialAttendanceSelection.selectedProjectId
+  )
   const [searchTerm, setSearchTerm] = useState('')
   const [rowDraftState, setRowDraftState] = useState({
     key: '',

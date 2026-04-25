@@ -1,7 +1,7 @@
 # Freeze Package Index
 
 Freeze date: `2026-04-19`
-Runtime reconciliation: `2026-04-23`
+Runtime reconciliation: `2026-04-25`
 Package status: `official active baseline, runtime-reconciled`
 Authority level: `primary planning authority for product, PRD, technical contract, lifecycle, and future AI task framing`
 
@@ -80,5 +80,5 @@ Dokumen di bawah tetap hidup sebagai backlog atau log kerja, tetapi harus tunduk
 2. Jika ada konflik antara repo reality dan dokumen freeze, cek repo reality dulu lalu revisi freeze secara eksplisit; jangan diam-diam mengikuti asumsi lama.
 3. Jika ada brief baru, identifikasi dulu domain target di `docs/freeze/03-source-of-truth-contract-map.md` dan lifecycle-nya di `docs/freeze/04-lifecycle-matrix.md`.
 4. `Riwayat` berarti completed/history surface; deleted recovery memakai `Recycle Bin` yang terpisah.
-5. `Halaman Absensi` existing adalah workspace input absensi harian. `Catatan Absensi` adalah halaman baru untuk histori, filter, dan rekap; payroll payable yang boleh muncul di `Jurnal` dan `Riwayat` adalah `Tagihan Upah` per worker.
+5. `Halaman Absensi` existing adalah workspace input absensi harian. `Catatan Absensi` adalah halaman baru untuk histori, filter, dan rekap; payroll payable `Tagihan Upah` dikelola lewat payroll/payment surfaces dan tidak menjadi row `Jurnal` / `Riwayat`.
 6. `Payment Receipt PDF` adalah supporting capability awal dari `Pembayaran`, bukan source of truth.

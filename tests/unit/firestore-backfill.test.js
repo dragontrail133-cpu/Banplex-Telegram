@@ -9,6 +9,7 @@ import {
   resolveParentLegacyPath,
   shouldSkipDuplicateRow,
 } from '../../scripts/firestore-backfill/load.mjs'
+import { resolveExpenseLineItemAmounts } from '../../scripts/firestore-backfill/extract.mjs'
 import {
   isUuid,
   remapRowTeamId,
@@ -119,6 +120,43 @@ test('firestore backfill helper falls back expense total amount to amount', () =
       total_amount: 0,
     }),
     450000
+  )
+})
+
+test('firestore backfill extractor maps legacy item price and total fields', () => {
+  assert.deepEqual(
+    resolveExpenseLineItemAmounts({
+      qty: 2,
+      price: 1300000,
+      total: 2600000,
+    }),
+    {
+      unitPrice: 1300000,
+      lineTotal: 2600000,
+    }
+  )
+
+  assert.deepEqual(
+    resolveExpenseLineItemAmounts({
+      qty: 3,
+      price: 5000,
+    }),
+    {
+      unitPrice: 5000,
+      lineTotal: 15000,
+    }
+  )
+
+  assert.deepEqual(
+    resolveExpenseLineItemAmounts({
+      qty: 4,
+      unitPrice: 25000,
+      lineTotal: 100000,
+    }),
+    {
+      unitPrice: 25000,
+      lineTotal: 100000,
+    }
   )
 })
 

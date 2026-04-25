@@ -52,6 +52,7 @@ test.describe('report surfaces', () => {
     const downloadButton = page.getByRole('button', { name: 'Unduh PDF' })
     await expect(downloadButton).toBeVisible({ timeout: 15000 })
     await expect(downloadButton).toBeEnabled({ timeout: 15000 })
+    await expect(page.getByRole('button', { name: 'Kirim' })).toHaveCount(0)
 
     const pdfDownload = page.waitForEvent('download')
     await downloadButton.click()

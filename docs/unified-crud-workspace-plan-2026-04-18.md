@@ -2876,3 +2876,245 @@ Saat ada brief baru yang masih terkait stream ini, update dokumen dengan format:
   - Scope target: `src/lib/attendance-payroll.js`, `api/records.js`, `src/components/PayrollAttendanceHistory.jsx`, `scripts/firestore-backfill/helpers.mjs`, `scripts/firestore-backfill/extract.mjs`, `scripts/firestore-backfill/load.mjs`, `tests/unit/firestore-backfill.test.js`, `scripts/firestore-backfill/README.md`, `docs/firestore-backfill-handoff-2026-04-23.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
   - Dependensi: `UCW-364`, `UCW-366`.
   - Addendum audit: API/runtime kini fallback ke `worker_wage_rates` dan `amount` legacy saat row backfill lama masih dibaca, loader live mengisi `expenses.total_amount`, meng-soft-delete `333` attendance row legacy stale yang tidak lagi ada di artifact canonical, dan history `Payroll` menambahkan filter bulan + auto-fallback ke bulan terbaru yang punya data sehingga audit UI tidak lagi terkunci ke bulan berjalan.
+- [x] UCW-368 - Selaraskan backfill harga item faktur legacy ke `unit_price` canonical
+  - Backfill faktur material legacy harus membaca harga item dari field Firestore lama `price` dan total item dari field `total`, lalu menulisnya ke `expense_line_items.unit_price` dan `expense_line_items.line_total` tanpa mengubah perilaku item zero-price.
+  - Scope target: `scripts/firestore-backfill/extract.mjs`, `tests/unit/firestore-backfill.test.js`, `scripts/firestore-backfill/README.md`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Addendum audit: raw legacy `teams/main/expenses/*` memang menyimpan harga per item pada `price`; helper extractor sekarang memetakan `price`/`total` ke canonical line item, dan test regresi menutup item non-zero serta zero-price tanpa memutus kompatibilitas payload `unitPrice`/`lineTotal`.
+- [x] UCW-369 - Audit brief temuan user dan pecah backlog micro-task release mobile
+  - Brief user tanggal 2026-04-25 berisi 13 temuan lintas faktur, pembayaran pekerja, absensi, fee bill staff, Jurnal, PDF mobile-only, dan bot; tahap ini hanya mengunci backlog read-only dan tidak menyentuh runtime code.
+  - Scope target: `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-368`.
+  - Addendum audit: keputusan user dikunci ke fee bill UI/read-model grouping tanpa schema rewrite, command summary bot mempertahankan `/status`, dan semua download PDF UI release mobile diarahkan ke tombol `Kirim` DM.
+- [x] UCW-370 - Bersihkan subtotal duplikat di detail faktur material
+  - Tab `Rincian Faktur` tidak boleh menampilkan badge `Subtotal` per item karena nominal yang sama sudah tampil di kanan row; pertahankan badge harga satuan dan total kanan.
+  - Scope target: `src/components/MaterialInvoiceDetailPanel.jsx`, `tests/e2e/transactions.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-343`, `UCW-368`, `UCW-369`.
+  - Validasi minimum: `npm run lint`, `npm run build`, smoke detail faktur material dengan item price hasil backfill.
+  - Addendum audit: chip `Subtotal` di row item sudah dihapus; regression guard e2e memastikan badge itu tidak muncul lagi di detail material invoice.
+- [x] UCW-371 - Samakan aksi riwayat pembayaran detail pekerja dengan tagihan lain
+  - Riwayat pembayaran di `PayrollWorkerDetailPage` harus punya action menu setara riwayat pembayaran tagihan lain: kirim receipt, arsipkan, pulihkan, dan hapus permanen sesuai status row.
+  - Scope target: `src/pages/PayrollWorkerDetailPage.jsx`, `tests/e2e/payroll.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-98`, `UCW-362`, `UCW-369`.
+  - Addendum audit: tombol unduh tidak ditambahkan lagi; receipt worker mengikuti kebijakan mobile-only `Kirim` pada `UCW-376`.
+  - Addendum audit: worker detail history sekarang menampilkan tombol `Unduh kwitansi`, `Arsipkan pembayaran`, `Pulihkan pembayaran`, dan `Hapus permanen pembayaran`, mengikuti pola riwayat pembayaran lain dengan refresh state setelah aksi.
+- [x] UCW-372 - Arahkan edit absensi harian ke halaman sheet tanggal yang sama
+  - Aksi `Edit Absensi` di tab Harian harus membuka halaman absensi sheet untuk tanggal dan proyek yang sama, bukan single form `/edit/attendance/:id`.
+  - Scope target: `src/components/PayrollAttendanceHistory.jsx`, `src/pages/AttendancePage.jsx`, `src/components/AttendanceForm.jsx`, `tests/e2e/payroll.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-367`, `UCW-369`.
+  - Addendum audit: route target dikunci ke `/attendance/new?date=YYYY-MM-DD&projectId=<uuid>` dengan return ke `/payroll?tab=daily&month=YYYY-MM`; `AttendanceForm` perlu membaca initial date/project dari query atau state.
+  - Addendum audit: `AttendancePage` me-remount `AttendanceForm` per `location.key` supaya perubahan query selalu menghidupkan sheet yang tepat tanpa effect sync state yang bermasalah.
+  - Addendum audit: validasi lint lolos pada `src/components/PayrollAttendanceHistory.jsx`, `src/components/AttendanceForm.jsx`, `src/pages/AttendancePage.jsx`, dan `tests/e2e/payroll.spec.js`; smoke Playwright dan build masih tertahan `spawn EPERM` di environment ini.
+- [x] UCW-373 - Kunci visibilitas Jurnal aktif, riwayat, surat jalan, dan salary bill
+  - Tab Aktif `Jurnal` harus mengecualikan `surat_jalan` saat filter Faktur, tidak menampilkan tagihan lunas, dan tidak menampilkan `salary_bill` karena upah sudah dipusatkan di `Catatan Absensi`.
+  - Scope target: `api/transactions.js`, `src/pages/TransactionsPage.jsx`, `src/lib/transaction-presentation.js`, `tests/unit/transaction-presentation.test.js`, `tests/e2e/transactions.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-345`, `UCW-346`, `UCW-367`, `UCW-369`.
+  - Addendum audit: source of truth list tetap `/api/transactions?view=workspace`; filter server dan warm seed client harus konsisten agar paid/salary rows tidak muncul ulang dari cache.
+  - Addendum audit: history workspace juga memakai visibility history yang menutup payroll bill dan surat jalan, sementara detail-by-id tetap bisa dibuka karena lookup record sengaja bypass filter visibility.
+- [x] UCW-374 - Tampilkan fee bill staff sebagai aggregator mandiri di list tagihan
+  - Project income harus tampil murni sebagai pemasukan proyek tanpa child fee summary, sementara fee bill `bill_type='fee'` tampil sebagai grup parent per staff dengan child bill dari setiap termin project income.
+  - Scope target: `api/transactions.js`, `api/records.js`, `src/lib/transaction-presentation.js`, `src/pages/BillsPage.jsx`, `src/store/useBillStore.js`, `tests/unit/transactions-project-income-aggregation.test.js`, `tests/e2e/payment.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-365`, `UCW-369`, `UCW-373`.
+  - Addendum audit: tidak ada schema rewrite pada tahap ini; gunakan `bills.staff_id`, `bills.project_income_id`, dan `bill_payments` existing, dengan payment target tertua yang masih outstanding.
+  - Addendum audit: implementasi read-model/UI sudah landed di repo; helper E2E diselaraskan agar menunggu route lazy-load selesai, dan targeted mobile-chrome smoke kini lolos untuk ledger visibility serta fee-bill grouping.
+- [x] UCW-375 - Jadikan `Kirim` DM sebagai aksi utama PDF laporan mobile
+  - Pada Telegram Mini Web/mobile, tombol `Unduh PDF` di report hub disembunyikan dari UI, tombol `Kirim ke DM` dipendekkan menjadi `Kirim`, dan progress label menjadi `Mengirim`.
+  - Scope target: `src/components/ProjectReport.jsx`, `src/store/useReportStore.js`, `tests/e2e/report.spec.js`, `tests/live/report-pdf-delivery.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-330`, `UCW-352`, `UCW-369`.
+  - Addendum audit: fungsi browser download dan generator PDF tetap dipertahankan agar scope browser berikutnya bisa cukup memunculkan tombol UI lagi.
+  - Addendum audit: implementasi cukup di `ProjectReport.jsx` dan smoke tests; `useReportStore` tetap dipakai apa adanya karena perubahan hanya menyentuh visibilitas/label UI, bukan kontrak delivery.
+- [x] UCW-376 - Generalisasi kirim DM untuk receipt pembayaran dan detail transaksi
+  - Semua tombol unduh receipt/faktur user-facing diganti menjadi `Kirim`, dengan endpoint/client wrapper DM yang bisa mengirim receipt bill/loan dan dokumen PDF transaksi memakai generator existing.
+  - Scope target: `api/report-pdf-delivery.js`, `src/lib/report-delivery-api.js`, `src/lib/report-pdf.js`, `src/pages/PaymentsPage.jsx`, `src/pages/TransactionDetailPage.jsx`, `src/pages/PayrollWorkerDetailPage.jsx`, `tests/unit/report-pdf-delivery.test.js`, `tests/e2e/payment.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-338`, `UCW-371`, `UCW-375`.
+  - Addendum audit: backend `savePaymentReceiptPdf()` dan generator notification PDF tidak dihapus; perubahan hanya menambah delivery route dan menyembunyikan download UI.
+  - Addendum audit: lint, unit route, dan build lolos; smoke Playwright receipt diskip sesuai instruksi user untuk menutup task tanpa validasi browser lanjutan.
+- [x] UCW-377 - Rapikan PDF statement Kreditur/Supplier/Pekerja dari badge dan KPI duplikat
+  - PDF party statement harus menghapus badge report-kind di header bawah judul agar tidak menghalangi nama pihak, dan tidak merender KPI di atas judul ringkasan karena KPI yang sama sudah tampil di section ringkasan.
+  - Scope target: `src/lib/report-pdf.js`, `tests/unit/report-pdf-party-statement.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-335`, `UCW-336`, `UCW-337`, `UCW-369`.
+  - Validasi minimum: unit PDF/report terkait, `npm run lint`, `npm run build`.
+  - Addendum audit: badge kind `PIUTANG` tidak lagi muncul sebelum ringkasan, dan KPI `Saldo Awal`/`Total Debit`/`Total Kredit`/`Saldo Akhir` hanya dirender sekali di section ringkasan.
+- [x] UCW-378 - Pangkas command bot menjadi command inti release
+  - Telegram assistant harus menghapus `/riwayat`, `/cari`, `/analytics` beserta keyboard/callback/turunan yang tidak dibutuhkan; summary hanya lewat `/status`, sementara `/menu`, `/start`, `/tambah`, dan `/buka` tetap hidup.
+  - Scope target: `api/telegram-assistant.js`, `src/lib/telegram-assistant-routing.js`, `tests/unit/telegram-assistant-routing.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-348`, `UCW-369`.
+  - Addendum audit: BotFather command visibility perlu disesuaikan manual/deploy terpisah; task repo hanya menghapus command dan turunannya dari runtime repo.
+  - Addendum audit: runtime bot sekarang hanya menerima command inti `start`, `menu`, `tambah`, `status`, dan `buka`; slash shortcut `riwayat`, `cari`, dan `analytics` serta button turunannya sudah dihapus dari parser dan keyboard.
+- [x] UCW-379 - Perbaiki summary bot status untuk paid/partial/remaining loan dan bill
+  - `/status` harus menghitung tagihan lunas, pinjaman lunas, sisa tagihan, sisa pinjaman, dan bucket `Dicicil` dari field bill/loan yang benar, termasuk loan tanpa `bill_status`.
+  - Scope target: `api/telegram-assistant.js`, `tests/unit/telegram-assistant-routing.test.js`, `tests/unit/telegram-assistant-writer.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-365`, `UCW-369`, `UCW-378`.
+  - Addendum audit: resolver status sekarang memakai alias canonical dari workspace view (`status`, `paid_amount`, `principal_amount`, `repayment_amount`, `remaining_amount`) plus fallback snapshot derivasi di helper, jadi bucket bill/loan bisa disatukan tanpa mengubah schema/view.
+- [x] UCW-380 - Redesign end-to-end halaman Stok Barang mobile-first
+  - `/stock` harus memisahkan tab `Stok` dan `Riwayat`, memakai detail sheet sebelum stock-out manual, menyediakan load-more read pagination, dan menjaga stock-in tetap diarahkan lewat Dokumen Barang.
+  - Scope target: `src/pages/StockPage.jsx`, `src/lib/records-api.js`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-103`, `UCW-104`, `UCW-106`, `UCW-212`.
+  - Addendum audit: source of truth tetap `materials.current_stock` + `stock_transactions`; tidak ada schema, migration, data mutation, atau perluasan manual stock-out menjadi adjustment bebas.
+- [x] UCW-381 - Pangkas whitespace bottom sheet stok dan ubah Unit Kerja jadi picker
+  - Detail stock sheet dan form stok keluar manual harus memotong ruang kosong di area tombol/footer, sementara Unit Kerja wajib memakai picker native tanpa search agar bottom sheet mobile tidak terdorong ke atas saat keyboard muncul.
+  - Scope target: `src/pages/StockPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-380`.
+  - Addendum audit: perubahan tetap UI-only pada `StockPage`; tidak ada schema, migration, data mutation, atau kontrak API tambahan.
+- [x] UCW-382 - Buka ulang HRD dan Penerima Manfaat sebagai modul side mobile-first
+  - Route `/more/hrd` dan `/more/beneficiaries` harus keluar dari frozen placeholder menjadi list operasional dengan search/filter, detail sheet, load-more lokal, dan create/edit routed form agar data panjang tetap nyaman di mobile.
+  - Scope target: `src/pages/HrdPage.jsx`, `src/pages/BeneficiariesPage.jsx`, `src/pages/MorePage.jsx`, `src/App.jsx`, `src/store/useHrStore.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-289`, `UCW-290`, `UCW-380`.
+  - Addendum audit: `penerimaManfaat` legacy sudah ada 2.545 row dan live Supabase berisi 2.544 row karena 1 duplicate NIK dilewati loader; HRD legacy belum punya artifact/source sehingga backfill HRD tetap blocked sampai source tersedia.
+- [x] UCW-383 - Audit coverage `created_by` legacy ke Supabase
+  - Semua row legacy yang punya `createdBy`/`createdByName` harus dipetakan read-only ke target Supabase existing: raw legacy path, target canonical/table, target column existing, mapping via `profiles.legacy_firebase_id` lalu resolve ke `profiles.id`, dan daftar unmatched tanpa mengubah schema/data.
+  - Scope target: `firestore-legacy-export/full-export-2026-04-23-retry/normalized-artifact*/raw/**`, `firestore-legacy-export/full-export-2026-04-23-retry/normalized-artifact*/canonical/**`, `scripts/firestore-backfill/*`, `supabase/migrations/*`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-368`, `UCW-382`.
+  - Addendum audit: artifact lokal menunjukkan raw `createdBy` dan `createdByName` masing-masing muncul 297 kali, tersebar di `bills=116`, `expenses=126`, `funding_sources=47`, `incomes=5`, dan nested `logs=3`; nilai unik cuma 4 Firebase UID legacy (`Jux0msS8X9WKXllH6qoa3g41scj2`, `lIPkQ6m2JHaNvjl58YvNSAXRrz83`, `BfdQbuPcMrhHMNPp8dhD3exeU7C3`, `zEHAV16Za8Z0a7bzwmaoz9AeDit2`) dan semuanya match sidecar identity `profiles`/`team_members`, sementara canonical artifact masih belum membawa `created_by_user_id`.
+  - Addendum keputusan: backfill hanya boleh memakai exact-match legacy Firebase UID ke `profiles.legacy_firebase_id`, lalu resolve ke `profiles.id`; unmatched tetap `null` dan dilaporkan, tidak boleh fallback ke owner/current user.
+- [ ] UCW-384 - Backfill value `created_by_user_id` exact-match (blocked)
+  - Isi hanya value `created_by_user_id` pada row legacy yang target column-nya sudah ada, row masih `null`, dan legacy Firebase UID terbukti exact-match ke `profiles.legacy_firebase_id` lalu resolve ke `profiles.id`; tidak boleh ubah schema, flow database, atau membuat migration baru tanpa approval eksplisit.
+  - Scope target: script/query backfill kecil terkait `created_by_user_id`, artifact legacy, target table Supabase existing, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-383`.
+  - Validasi minimum: dry-run count, pre/post null count, unmatched report, conflict guard, dan approval eksplisit sebelum DML live.
+  - Addendum audit 2026-04-25: project live yang tersedia hanya punya 1 profile/current user dan tidak ada row `profiles.legacy_firebase_id` untuk 4 legacy creator UID audit, jadi exact-match backfill tidak punya target bridge di DB yang bisa diakses. Project `.env.backfill.local` juga tidak bisa dipakai untuk live load saat ini karena URL env bermasalah dan schema cache tidak memuat tabel public yang dibutuhkan.
+- [x] UCW-385 - Perbaiki route kembali dari detail teknis ke detail umum
+  - Tombol/back action dari route technical detail harus kembali ke halaman detail umum record yang sama dan surface asal tetap terjaga, bukan langsung ke list atau menutup seluruh detail.
+  - Scope target: `src/pages/TransactionDetailPage.jsx`, `src/pages/EditRecordPage.jsx`, `src/pages/PaymentPage.jsx`, `src/App.jsx`, tests detail route terkait, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-376`.
+  - Validasi minimum: lint/build dan smoke route detail umum -> detail teknis -> kembali detail umum.
+  - Addendum audit 2026-04-25: `TransactionDetailPage` sekarang membawa `transaction`, `detailSurface`, dan `surface` saat masuk technical route; `EditRecordPage` dan `PaymentPage` sudah punya back route technical yang kembali ke halaman umum masing-masing, jadi tidak ada perubahan schema/runtime di luar route state preservation.
+- [x] UCW-386 - Hapus card keterangan duplikat di detail umum
+  - UI detail umum harus menghapus card keterangan terpisah yang menduplikasi informasi pada card utama di atasnya, tanpa menghilangkan data penting dari detail transaksi.
+  - Scope target: `src/pages/TransactionDetailPage.jsx`, tests detail terkait, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-385`.
+  - Validasi minimum: lint/build dan audit visual detail untuk memastikan satu sumber informasi tetap tersedia.
+  - Addendum audit 2026-04-25: card `Keterangan` di detail umum dihapus; card ringkasan utama di atas tetap menjadi sumber tunggal untuk judul dan label sumber transaksi.
+- [x] UCW-387 - Tambahkan safe-zone shell untuk Detail Teknis, HRD, dan Penerima
+  - Halaman Detail Teknis, HRD, dan Penerima Manfaat harus punya padding/safe zone konsisten dengan halaman lain agar elemen tidak menempel ke tepi layar mobile.
+  - Scope target: `src/pages/TransactionDetailPage.jsx`, `src/pages/HrdPage.jsx`, `src/pages/BeneficiariesPage.jsx`, primitive shell terkait bila akar masalah ada di wrapper lokal, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-382`, `UCW-385`.
+  - Validasi minimum: lint/build dan audit viewport mobile untuk tiga halaman.
+  - Addendum audit 2026-04-25: tiga halaman target sekarang dibungkus `AppViewportSafeArea as="main" className="min-h-screen sm:mx-auto sm:max-w-md"` melalui shell lokal sehingga elemen tidak lagi menempel ke tepi layar mobile.
+- [x] UCW-388 - Redesign KPI HRD dan Penerima menjadi grid 2x2 solid
+  - Empat KPI atas halaman HRD dan Penerima Manfaat harus menjadi grid 2x2, memakai solid color, typography lebih kuat, dan hirarki visual yang jelas tanpa menambah copy penjelasan baru.
+  - Scope target: `src/pages/HrdPage.jsx`, `src/pages/BeneficiariesPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-382`, `UCW-387`.
+  - Validasi minimum: lint/build dan audit mobile 360px.
+  - Addendum audit 2026-04-25: KPI atas HRD dan Penerima sekarang dirender sebagai grid `grid-cols-2` dengan empat card solid tone-aware, value besar, dan tanpa copy tambahan.
+- [x] UCW-389 - Ringkas row list HRD dan Penerima
+  - Row list HRD/Penerima hanya boleh menampilkan maksimal tiga teks utama plus satu label/status: Penerima memakai nama dan nama instansi, HRD memakai nama dan posisi dilamar; badge tambahan seperti NIK, jenjang, tanggal, dan dokumen dihapus dari row.
+  - Scope target: `src/pages/HrdPage.jsx`, `src/pages/BeneficiariesPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-388`.
+  - Validasi minimum: lint/build dan audit row panjang di mobile.
+  - Addendum audit 2026-04-25: row list HRD dan Penerima kini hanya menampilkan nama, subtext posisi/instansi, dan satu badge status; badge NIK, jenjang, tanggal, dan dokumen dihapus dari card list.
+- [x] UCW-390 - Pindahkan aksi HRD/Penerima ke bottom sheet
+  - Aksi Detail/Edit/Hapus dan aksi tambahan HRD/Penerima harus pindah dari tombol inline row ke bottom sheet global yang dibuka saat row list diklik.
+  - Scope target: `src/pages/HrdPage.jsx`, `src/pages/BeneficiariesPage.jsx`, `src/components/ui/ActionCard.jsx` bila perlu reuse, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-389`.
+  - Validasi minimum: lint/build dan smoke tap row -> sheet aksi -> edit/delete path.
+  - Addendum audit: row HRD/Penerima sekarang membuka sheet detail saat card diklik; aksi `Edit` dan `Hapus` dipindahkan dari inline row ke bottom sheet yang sama, sehingga row list tetap bersih dan path edit/delete tetap tersedia dari sheet.
+- [x] UCW-391 - Ubah filter status HRD/Penerima menjadi picker no-search
+  - Filter status HRD dan Penerima tidak lagi memakai tab/toggle horizontal; UI menampilkan satu field picker dan membuka bottom sheet tanpa search saat diklik.
+  - Scope target: `src/pages/HrdPage.jsx`, `src/pages/BeneficiariesPage.jsx`, `src/components/ui/MasterPickerField.jsx` bila reuse perlu penyesuaian non-breaking, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-390`.
+  - Validasi minimum: lint/build dan audit filter status pada mobile.
+  - Addendum audit: kedua halaman sekarang memakai `MasterPickerField` no-search untuk filter status; HRD menampilkan label `Status Aplikasi`, sementara Penerima memakai label `Status Data`, dengan state filter lama tetap dipakai di belakangnya.
+- [x] UCW-392 - Ubah filter Jenjang Penerima menjadi picker no-search
+  - Filter Jenjang pada halaman Penerima Manfaat harus memakai picker bottom sheet tanpa search dan tidak memakai dropdown/select horizontal.
+  - Scope target: `src/pages/BeneficiariesPage.jsx`, `src/components/ui/MasterPickerField.jsx` bila reuse perlu penyesuaian non-breaking, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-391`.
+  - Validasi minimum: lint/build dan audit opsi jenjang panjang.
+  - Addendum audit: filter Jenjang di Penerima sekarang memakai `MasterPickerField` no-search dengan placeholder `Semua jenjang`, sehingga dropdown native lama tidak dipakai lagi pada card filter.
+- [x] UCW-393 - Tambah filter Instansi Penerima searchable picker
+  - Halaman Penerima Manfaat harus menambah filter instansi dengan picker searchable, ditempatkan satu baris grid 1:1 bersama filter Jenjang.
+  - Scope target: `src/pages/BeneficiariesPage.jsx`, `src/components/ui/MasterPickerField.jsx` bila reuse perlu penyesuaian non-breaking, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-392`.
+  - Validasi minimum: lint/build dan audit kombinasi filter jenjang + instansi + search utama.
+  - Addendum audit: filter Instansi di Penerima sekarang memakai `MasterPickerField` searchable dengan placeholder `Semua instansi`, dan ditempatkan satu baris 1:1 dengan filter Jenjang agar card filter tetap kompak.
+- [x] UCW-394 - Siapkan CSV template/import shared HRD/Penerima
+  - Siapkan mekanisme shared untuk download template CSV dan import CSV dengan preview valid/skip/error, tanpa dependency baru dan tanpa dukungan XLSX pada v1.
+  - Scope target: helper CSV shared baru atau lokal halaman, `src/pages/HrdPage.jsx`, `src/pages/BeneficiariesPage.jsx`, tests parser CSV, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-390`.
+  - Addendum keputusan: import v1 hanya CSV untuk menghindari dependency parser Excel; XLSX masuk task deferred terpisah.
+  - Validasi minimum: unit parser CSV untuk header valid, row kosong, quoted comma, missing required, dan malformed row.
+  - Addendum audit 2026-04-25: helper `src/lib/hr-csv.js` sekarang menyiapkan template CSV shared dan parser preview; `src/components/HrCsvImportSheet.jsx` menyediakan sheet import preview yang dipakai di HRD dan Penerima, sementara kedua halaman menampilkan tombol `Template CSV` dan `Impor CSV`.
+- [x] UCW-395 - Implement CSV import Penerima Manfaat
+  - Halaman Penerima Manfaat harus punya download format CSV dan import batch; row duplicate berdasarkan `nik` di-skip, row valid disimpan via write path existing, dan hasil import menampilkan jumlah tersimpan/skip/error.
+  - Scope target: `src/pages/BeneficiariesPage.jsx`, `src/store/useHrStore.js` bila perlu helper batch dengan kontrak existing, tests CSV/import terkait, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-394`.
+  - Validasi minimum: lint/build, unit parser, dan smoke import mock untuk duplicate NIK.
+- Addendum audit 2026-04-25: halaman Penerima sekarang memakai `importBeneficiaryCsvRows()` untuk commit batch dari sheet shared; duplicate NIK di batch maupun data existing di-skip, row valid disimpan lewat `addBeneficiary()`, dan sheet menampilkan ringkasan `Tersimpan/Skip/Error` setelah impor.
+- [x] UCW-396 - Implement CSV import HRD
+  - Halaman HRD harus punya download format CSV dan import batch; duplicate di-skip berdasarkan `nik`, fallback `email/no_telepon` saat NIK kosong, dan hasil import menampilkan jumlah tersimpan/skip/error.
+  - Scope target: `src/pages/HrdPage.jsx`, `src/store/useHrStore.js` bila perlu helper batch dengan kontrak existing, tests CSV/import terkait, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-394`, `UCW-395`.
+  - Validasi minimum: lint/build, unit parser, dan smoke import mock untuk duplicate NIK/email/telepon.
+- Addendum audit 2026-04-25: halaman HRD sekarang memakai `importApplicantCsvRows()` untuk commit batch dari sheet shared; duplicate NIK di-skip, dan saat NIK kosong helper fallback ke email/telepon untuk deteksi duplikat existing maupun batch sebelum memanggil `addApplicant()`.
+- [x] UCW-397 - Defer XLSX import HRD/Penerima
+  - Dukungan import XLSX dicatat sebagai deferred karena membutuhkan parser Excel/dependency atau parser file tambahan; tidak boleh diimplementasikan tanpa approval dependency dan sample file.
+  - Scope target: `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`, file runtime hanya jika user memberi approval eksplisit.
+  - Dependensi: `UCW-394`.
+  - Addendum keputusan: CSV v1 menjadi default release; XLSX bukan blocker untuk batch upload awal.
+  - Addendum audit 2026-04-25: XLSX tetap `deferred` sampai parser Excel/dependency dan sample file resmi tersedia; tidak ada runtime change untuk task ini, dan `UCW-398` menjadi task runnable berikutnya.
+- [x] UCW-398 - Audit contract PDF grouped HRD/Penerima
+  - Audit payload, data source, dan generator PDF untuk laporan Penerima per instansi dan HRD per status lamaran dengan delivery DM existing; tidak boleh menambah schema atau menyimpan artefak PDF ke database.
+  - Scope target: `src/lib/report-pdf.js`, `src/lib/report-delivery-api.js`, `api/report-pdf-delivery.js`, `src/pages/HrdPage.jsx`, `src/pages/BeneficiariesPage.jsx`, tests PDF/delivery terkait, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-376`, `UCW-382`, `UCW-393`.
+  - Addendum keputusan: PDF dikirim ke DM Telegram user/operator yang sedang login, bukan ke penerima/pelamar, dan bukan batch semua grup sekaligus.
+  - Addendum audit 2026-04-25: `report-pdf.js` saat ini hanya menormalisasi `executive_finance`, `project_pl`, `cash_flow`, dan `party_statement`, sehingga grouped PDF HRD/Penerima belum punya `reportKind` spesifik; `report-pdf-delivery.js` sudah siap mengirim `reportData` ke DM operator login, sementara grouping data final tetap harus dibangun dari `useHrStore`/Supabase read model tanpa schema baru.
+- [x] UCW-399 - Tambah PDF Penerima per instansi via DM
+  - Halaman Penerima Manfaat harus menyediakan tombol `Kirim` di tempat yang sesuai; user memilih satu instansi dan PDF daftar penerima instansi tersebut dikirim ke DM Telegram user login.
+  - Scope target: `src/pages/BeneficiariesPage.jsx`, `src/lib/report-pdf.js`, `src/lib/report-delivery-api.js`, `api/report-pdf-delivery.js`, tests PDF/delivery terkait, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-398`.
+  - Validasi minimum: unit PDF/delivery, lint/build, dan smoke UI tombol `Kirim` dengan selected institution.
+  - Addendum audit 2026-04-25: `BeneficiariesPage` sekarang membangun `reportData` `beneficiary_statement` dari instansi terpilih dan mengirim PDF ke DM operator login via delivery API yang sama; `Playwright` sengaja di-skip sesuai instruksi user setelah lint, unit PDF/delivery, dan build lolos.
+- [x] UCW-400 - Tambah PDF HRD per status lamaran via DM
+  - Halaman HRD harus menyediakan tombol `Kirim` di tempat yang sesuai; user memilih satu status lamaran dan PDF daftar pelamar status tersebut dikirim ke DM Telegram user login.
+  - Scope target: `src/pages/HrdPage.jsx`, `src/lib/report-pdf.js`, `src/lib/report-delivery-api.js`, `api/report-pdf-delivery.js`, tests PDF/delivery terkait, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-398`, `UCW-399`.
+  - Validasi minimum: unit PDF/delivery, lint/build, dan smoke UI tombol `Kirim` dengan selected status.
+  - Addendum audit 2026-04-25: `HrdPage` sekarang membangun `reportData` `applicant_statement` dari status terpilih dan mengirim PDF ke DM operator login via delivery API yang sama; `Playwright` sengaja di-skip sesuai instruksi user setelah lint, unit PDF/delivery, dan build lolos.
+- [x] UCW-401 - Ganti quick action Dashboard Tim menjadi Stok Barang
+  - Quick action `Tim` di Dashboard diganti menjadi `Stok Barang` menuju `/stock`, sementara route `/more/team-invite` tetap tersedia dari More dan tidak dihapus.
+  - Scope target: `src/pages/Dashboard.jsx`, tests dashboard quick action terkait, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-380`.
+  - Validasi minimum: lint/build dan smoke Dashboard quick action menuju `/stock`.
+  - Addendum audit 2026-04-25: quick action sekarang membuka `/stock` dengan label `Stok Barang`; route `/more/team-invite` tetap hidup dari More dan tidak disentuh.
+- [x] UCW-402 - Redesign `GlobalToast` secara global
+  - Popup toast modal harus kehilangan outline/border wrapper di semua state, sementara spinner loading tetap sederhana dan readable.
+  - Scope target: `src/components/ui/GlobalToast.jsx`, `src/store/useToastStore.js` bila kontrak tone/loading perlu dirapikan, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-184`, `UCW-273`, `UCW-274`.
+  - Validasi minimum: lint/build dan audit visual seluruh tone toast.
+  - Addendum audit 2026-04-25: outer toast shell sekarang borderless, footer separator border dihapus, loading mode memakai spinner `Loader2` sederhana, dan `BrandLoader` tidak lagi dipakai di `GlobalToast`.
+- [x] UCW-403 - Audit tombol refresh Dashboard
+  - Audit manual refresh control di Dashboard; jika refresh masih berfungsi, beri feedback in-flight atau fallback UX, tetapi jika tidak berfungsi tombol harus dihapus agar affordance tidak palsu.
+  - Scope target: `src/pages/Dashboard.jsx`, `tests/e2e/dashboard.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-207`, `UCW-209`.
+  - Validasi minimum: lint/build.
+  - Catatan validasi: Playwright smoke Dashboard refresh sengaja dilewati sesuai instruksi user.
+  - Addendum audit 2026-04-25: tombol refresh Dashboard tetap berfungsi; feedback in-flight sekarang berupa spinner pada icon refresh dan `aria-busy` saat refresh composite berjalan.
+- [x] UCW-404 - Pangkas delay `Framer Motion` di shell utama
+  - Kurangi delay/transition yang terasa berat saat perpindahan cepat, dimulai dari shell layout utama lalu turun ke shared motion primitives bila hotspot memang sama.
+  - Scope target: `src/components/layouts/MainLayout.jsx`, `src/components/layouts/FormLayout.jsx`, `src/components/ui/AppPrimitives.jsx`, `src/components/ui/BottomNav.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-207`, `UCW-210`.
+  - Validasi minimum: lint/build dan audit navigasi cepat antar surface.
+  - Addendum audit 2026-04-25: route shell `MainLayout` sekarang tidak lagi memakai `mode="wait"` atau blur, dan transisi dipangkas ke ease-out singkat supaya perpindahan cepat terasa lebih responsif; shared motion primitives lain tetap dicatat untuk audit lanjut `UCW-405`.
+- [x] UCW-405 - Audit performa lintas surface dan pecah follow-up
+  - Audit motion shell stack dan surface list-heavy; hasil wajib berupa daftar hotspot terurut plus follow-up micro-task kecil, tanpa runtime mutation.
+  - Scope target: read-only audit di `src/components/layouts/MainLayout.jsx`, `src/components/layouts/FormLayout.jsx`, `src/components/ui/AppPrimitives.jsx`, `src/components/ui/BottomNav.jsx`, `src/components/ui/GlobalToast.jsx`, `src/components/ui/BrandLoader.jsx`, `src/pages/Dashboard.jsx`, `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `src/pages/TransactionsRecycleBinPage.jsx`, `src/components/PayrollAttendanceHistory.jsx`, `src/pages/StockPage.jsx`, `src/pages/HrdPage.jsx`, `src/pages/BeneficiariesPage.jsx`, `src/pages/ProjectsPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-207`, `UCW-404`.
+  - Validasi minimum: audit read-only + decision log.
+  - Addendum audit 2026-04-25: hotspot motion terbesar tersisa di shared shell primitives (`FormLayout`, `AppPrimitives`, `BottomNav`); `PayrollAttendanceHistory` paling berat di derived-state churn; `Dashboard`, `TransactionsPage`, `HistoryPage`, `TransactionsRecycleBinPage`, `StockPage`, `HrdPage`, `BeneficiariesPage`, dan `ProjectsPage` tidak menunjukkan hotspot baru yang sepadan.
+- [x] UCW-406 - Reconcile `Tagihan Upah` dengan repo aktual
+  - Catat bahwa `Tagihan Upah` sekarang dikelola di payroll/payment surfaces dan tidak tampil sebagai row `Jurnal`/`Riwayat`; selaraskan freeze package dan backlog log ke runtime terbaru.
+  - Scope target: `docs/freeze/*`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-90`, `UCW-174`.
+  - Validasi minimum: grep konsistensi freeze/backlog/progress dan audit repo aktual.
+  - Addendum audit 2026-04-25: `src/pages/TransactionsPage.jsx` dan `src/pages/HistoryPage.jsx` sudah mengecualikan payroll bills lewat `includePayrollBills: false`, sementara freeze package sudah menyatakan `Tagihan Upah` dikelola di payroll/payment surfaces dan tidak muncul di `Jurnal`/`Riwayat`; tidak ada freeze delta baru yang diperlukan.
+- [x] UCW-407 - Trim shared overlay motion stack
+  - Pangkas sisa spring/drag/transition di shared overlay primitives agar overhead motion tidak menyebar ke sheet/dialog global.
+  - Scope target: `src/components/layouts/FormLayout.jsx`, `src/components/ui/AppPrimitives.jsx`, `src/components/ui/BottomNav.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-404`, `UCW-405`.
+  - Validasi minimum: lint/build dan audit toggle overlay cepat.
+  - Addendum audit 2026-04-25: shared overlay panel dan quick actions sheet sekarang memakai transition ease-out pendek tanpa spring/drag, footer overlay form dipersingkat, dan bottom-nav active icon scale disederhanakan agar motion overhead lebih ringan.
+- [x] UCW-408 - Hilangkan ghosting pada transisi halaman
+  - Hapus overlap visual pada route shell `MainLayout` dan opacity awal fullscreen `FormLayout` agar perpindahan halaman tidak meninggalkan bayangan halaman lama.
+  - Scope target: `src/components/layouts/MainLayout.jsx`, `src/components/layouts/FormLayout.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-404`, `UCW-405`.
+  - Validasi minimum: lint/build dan smoke navigasi cepat antar halaman utama.
+  - Addendum audit 2026-04-25: `MainLayout` kini remount route shell tanpa overlap exit, `FormLayout` dibuat opaque saat slide-in, dan Playwright smoke sengaja di-skip sesuai instruksi user setelah lint dan build lolos.

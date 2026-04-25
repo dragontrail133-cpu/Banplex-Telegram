@@ -19,6 +19,18 @@ function normalizeText(value, fallback = '') {
   return normalizedValue.length > 0 ? normalizedValue : fallback
 }
 
+function getTransactionSourceType(transaction) {
+  return normalizeText(transaction?.sourceType ?? transaction?.source_type, '').toLowerCase()
+}
+
+function getTransactionDocumentType(transaction) {
+  return normalizeText(transaction?.document_type ?? transaction?.documentType, '').toLowerCase()
+}
+
+function getTransactionExpenseType(transaction) {
+  return normalizeText(transaction?.expense_type ?? transaction?.expenseType, '').toLowerCase()
+}
+
 export function hasMeaningfulText(value) {
   return normalizeText(value, '').length > 0
 }
@@ -156,7 +168,7 @@ function normalizeBillStatus(transaction) {
 }
 
 export function isDeliveryOrderTransaction(transaction) {
-  const documentType = normalizeText(transaction?.document_type ?? transaction?.documentType, '').toLowerCase()
+  const documentType = getTransactionDocumentType(transaction)
 
   return documentType === 'surat_jalan'
 }
@@ -259,7 +271,7 @@ export function getTransactionSettlementBadgeLabel(transaction) {
 }
 
 export function isPaidBillTransaction(transaction) {
-  const sourceType = normalizeText(transaction?.sourceType)
+  const sourceType = getTransactionSourceType(transaction)
 
   if (sourceType !== 'bill') {
     return false
@@ -286,7 +298,7 @@ function isPayrollBill(transaction) {
 }
 
 export function isPayrollBillTransaction(transaction) {
-  return normalizeText(transaction?.sourceType) === 'bill' && isPayrollBill(transaction)
+  return getTransactionSourceType(transaction) === 'bill' && isPayrollBill(transaction)
 }
 
 function formatLoanSettlementLabel(status) {
@@ -524,6 +536,24 @@ export function isPayrollBillSummary(bill) {
   return getBillSummaryType(bill) === 'gaji'
 }
 
+function isFeeBillSummary(bill) {
+  return getBillSummaryType(bill) === 'fee'
+}
+
+function getFeeBillSummaryGroupKey(bill) {
+  return normalizeText(
+    bill?.staffId ??
+      bill?.staff_id ??
+      bill?.workerId ??
+      bill?.worker_id ??
+      bill?.workerName ??
+      bill?.worker_name ??
+      bill?.worker_name_snapshot ??
+      '',
+    ''
+  ).toLowerCase()
+}
+
 export function getBillSummaryTitle(bill) {
   return normalizeText(
     bill?.description ?? bill?.billTitle ?? bill?.title ?? bill?.worker_name_snapshot ?? '',
@@ -620,6 +650,30 @@ function hasOutstandingPayrollBill(bill) {
   return normalizedStatus === 'partial' || normalizedStatus === 'unpaid' || remainingAmount > 0
 }
 
+function hasOutstandingBill(bill) {
+  return getBillSummaryAmount(bill) > 0
+}
+
+function compareBillPaymentTarget(left, right) {
+  const dueDateDiff =
+    getBillPriorityTimestamp(left?.dueDate ?? left?.due_date) -
+    getBillPriorityTimestamp(right?.dueDate ?? right?.due_date)
+
+  if (dueDateDiff !== 0) {
+    return dueDateDiff
+  }
+
+  const createdAtDiff =
+    getBillPriorityTimestamp(left?.created_at ?? left?.createdAt) -
+    getBillPriorityTimestamp(right?.created_at ?? right?.createdAt)
+
+  if (createdAtDiff !== 0) {
+    return createdAtDiff
+  }
+
+  return String(left?.id ?? '').localeCompare(String(right?.id ?? ''))
+}
+
 export function getPayrollBillGroupPaymentTarget(group) {
   const bills = Array.isArray(group?.bills) ? group.bills.filter(Boolean) : []
   const candidateBills = bills.filter(hasOutstandingPayrollBill)
@@ -656,6 +710,17 @@ export function getPayrollBillGroupPaymentTarget(group) {
   })[0]
 }
 
+export function getBillGroupPaymentTarget(group) {
+  const bills = Array.isArray(group?.bills) ? group.bills.filter(Boolean) : []
+  const candidateBills = bills.filter(hasOutstandingBill)
+
+  if (candidateBills.length === 0) {
+    return null
+  }
+
+  return candidateBills.slice().sort(compareBillPaymentTarget)[0]
+}
+
 export function getPayrollBillGroupSummary(group) {
   const bills = Array.isArray(group?.bills) ? group.bills : []
   const workerName = normalizeText(group?.workerName ?? getBillSummaryWorkerLabel(bills[0] ?? group), 'Pekerja')
@@ -677,6 +742,74 @@ export function getPayrollBillGroupSummary(group) {
     paymentTargetBillId: paymentTarget?.id ?? null,
     paymentTargetBillStatus: paymentTarget ? normalizeBillStatus(paymentTarget) : null,
   }
+}
+
+export function groupBillsForBillList(bills = []) {
+  const groupedBills = []
+  const workerGroups = new Map()
+  const staffGroups = new Map()
+
+  for (const bill of bills) {
+    if (isPayrollBillSummary(bill)) {
+      const groupKey = getBillSummaryGroupKey(bill) || String(bill?.id ?? '')
+      const nextGroup =
+        workerGroups.get(groupKey) ?? {
+          kind: 'worker-group',
+          groupKey,
+          workerName: getBillSummaryWorkerLabel(bill),
+          bills: [],
+          amount: 0,
+          totalAmount: 0,
+          remainingAmount: 0,
+        }
+
+      nextGroup.bills.push(bill)
+      nextGroup.amount += getBillSummaryAmount(bill)
+      nextGroup.totalAmount += getBillTotalAmount(bill)
+      nextGroup.remainingAmount += getBillSummaryAmount(bill)
+
+      if (!workerGroups.has(groupKey)) {
+        workerGroups.set(groupKey, nextGroup)
+        groupedBills.push(nextGroup)
+      }
+
+      continue
+    }
+
+    if (isFeeBillSummary(bill)) {
+      const groupKey = getFeeBillSummaryGroupKey(bill) || String(bill?.id ?? '')
+      const nextGroup =
+        staffGroups.get(groupKey) ?? {
+          kind: 'staff-group',
+          groupKey,
+          workerName: getBillSummaryWorkerLabel(bill),
+          staffName: getBillSummaryWorkerLabel(bill),
+          bills: [],
+          amount: 0,
+          totalAmount: 0,
+          remainingAmount: 0,
+        }
+
+      nextGroup.bills.push(bill)
+      nextGroup.amount += getBillSummaryAmount(bill)
+      nextGroup.totalAmount += getBillTotalAmount(bill)
+      nextGroup.remainingAmount += getBillSummaryAmount(bill)
+
+      if (!staffGroups.has(groupKey)) {
+        staffGroups.set(groupKey, nextGroup)
+        groupedBills.push(nextGroup)
+      }
+
+      continue
+    }
+
+    groupedBills.push({
+      kind: 'bill',
+      bill,
+    })
+  }
+
+  return groupedBills
 }
 
 export function getPayrollBillGroupHistoryRows(bills = [], deletedPayments = []) {
@@ -1079,17 +1212,45 @@ export function getTransactionLedgerFilterOptions({
   })
 }
 
+export function getTransactionLedgerVisibilityOptions(viewName = 'workspace') {
+  if (viewName === 'history') {
+    return {
+      includePaidBills: true,
+      includePayrollBills: false,
+      includeSuratJalan: false,
+    }
+  }
+
+  return {
+    includePaidBills: false,
+    includePayrollBills: false,
+    includeSuratJalan: true,
+  }
+}
+
 export function matchesTransactionLedgerFilter(
   transaction,
   filterValue,
-  { includePaidBills = true } = {}
+  {
+    includePaidBills = true,
+    includePayrollBills = true,
+    includeSuratJalan = true,
+  } = {}
 ) {
   const normalizedFilter = normalizeText(filterValue, 'all')
-  const sourceType = normalizeText(transaction?.sourceType)
-  const documentType = normalizeText(transaction?.document_type).toLowerCase()
-  const expenseType = normalizeText(transaction?.expense_type).toLowerCase()
+  const sourceType = getTransactionSourceType(transaction)
+  const documentType = getTransactionDocumentType(transaction)
+  const expenseType = getTransactionExpenseType(transaction)
 
   if (!includePaidBills && isPaidBillTransaction(transaction)) {
+    return false
+  }
+
+  if (!includePayrollBills && isPayrollBillTransaction(transaction)) {
+    return false
+  }
+
+  if (!includeSuratJalan && isDeliveryOrderTransaction(transaction)) {
     return false
   }
 
@@ -1106,7 +1267,11 @@ export function matchesTransactionLedgerFilter(
   }
 
   if (normalizedFilter === 'material-invoice') {
-    return sourceType === 'expense' && (expenseType === 'material' || expenseType === 'material_invoice')
+    return (
+      sourceType === 'expense' &&
+      (expenseType === 'material' || expenseType === 'material_invoice') &&
+      documentType !== 'surat_jalan'
+    )
   }
 
   if (normalizedFilter === 'surat-jalan') {

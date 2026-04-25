@@ -42,7 +42,7 @@ import {
 } from '../src/lib/telegram-assistant-transport.js'
 
 const assistantSelectColumns =
-  'team_id, source_type, type, id, sort_at, transaction_date, income_date, expense_date, due_date, created_at, updated_at, amount, description, project_name_snapshot, supplier_name_snapshot, creditor_name_snapshot, worker_name_snapshot, expense_type, document_type, bill_id, bill_type, bill_status, bill_amount, bill_paid_amount, bill_remaining_amount, bill_due_date, bill_paid_at, bill_description, bill_project_name_snapshot, bill_supplier_name_snapshot, bill_worker_name_snapshot, search_text'
+  'team_id, source_type, type, id, sort_at, transaction_date, income_date, expense_date, due_date, created_at, updated_at, amount, principal_amount:amount, description, project_name_snapshot, supplier_name_snapshot, creditor_name_snapshot, worker_name_snapshot, expense_type, document_type, bill_id, bill_type, bill_status, status:bill_status, bill_amount, repayment_amount:bill_amount, bill_paid_amount, paid_amount:bill_paid_amount, bill_remaining_amount, remaining_amount:bill_remaining_amount, bill_due_date, bill_paid_at, bill_description, bill_project_name_snapshot, bill_supplier_name_snapshot, bill_worker_name_snapshot, search_text'
 const sessionStates = new Set([
   'idle',
   'awaiting_workspace_choice',
@@ -158,33 +158,6 @@ const assistantCoreRouteMap = [
     label: 'Absensi',
   },
 ]
-const assistantSearchRouteMap = [
-  {
-    pattern: /\b(pemasukan|income|termin|uang masuk)\b/,
-    path: assistantRouteTargets.ledger,
-    label: 'Pemasukan',
-  },
-  {
-    pattern: /\b(pengeluaran|expense|uang keluar)\b/,
-    path: assistantRouteTargets.ledger,
-    label: 'Pengeluaran',
-  },
-  {
-    pattern: /\b(pinjaman|loan|kasbon|hutang|utang|nginjeum)\b/,
-    path: assistantRouteTargets.ledger,
-    label: 'Pinjaman',
-  },
-  {
-    pattern: /\b(faktur|material|barang|surat jalan)\b/,
-    path: assistantRouteTargets.billLedger,
-    label: 'Faktur Barang',
-  },
-  {
-    pattern: /\b(absensi|attendance|kehadiran|gaji|upah)\b/,
-    path: assistantRouteTargets.attendance,
-    label: 'Absensi',
-  },
-]
 const assistantStatusBucketRoutes = [
   {
     status: 'paid',
@@ -218,10 +191,6 @@ function resolveAssistantCreateRoutePath(text) {
 
 function resolveAssistantCoreRoutePath(text) {
   return findAssistantRouteConfigFromText(text, assistantCoreRouteMap)?.path ?? null
-}
-
-function resolveAssistantSearchRoutePath(text) {
-  return findAssistantRouteConfigFromText(text, assistantSearchRouteMap)?.path ?? null
 }
 const stopWordPatterns = [
   /\b(tolong|mohon|bantu|punten|mangga|parios|neangan|milarian|tingali|muka|buka|cek|status|cari|temukan|search|tampilkan|pindah|masuk|ke)\b/g,
@@ -341,16 +310,14 @@ const localeTemplates = {
     handoffInvalid: 'Tautan DM ini tidak valid, sudah dipakai, atau kedaluwarsa. Minta kirim ulang dari grup.',
     workspaceNotFound: 'Workspace tidak ditemukan.',
     menuIntro: 'Pilih aksi assistant yang dibutuhkan.',
-    menuHint: 'Command step-by-step: tambah, buka, cari, status, riwayat, dan analytics.',
+    menuHint: 'Command step-by-step: tambah, buka, status, dan menu.',
     summaryLoading: 'Bot sedang memproses ringkasan...',
     summaryLoadingFailed: 'Maaf, ringkasan belum selesai diproses. Coba lagi sebentar.',
     analyticsLoading: 'Bot sedang memproses analytics...',
     analyticsLoadingFailed: 'Maaf, analytics belum selesai diproses. Coba lagi sebentar.',
     addRoutePrompt: 'Pilih domain input yang mau dibuka.',
     openRoutePrompt: 'Pilih halaman core yang ingin dibuka.',
-    searchRoutePrompt: 'Pilih domain yang ingin dicari.',
     statusRoutePrompt: 'Pilih bucket status yang ingin dilihat.',
-    historyRoutePrompt: 'Pilih bucket riwayat yang ingin dibuka.',
     noResultStatus: (queryLabel) =>
       queryLabel
         ? `Tidak ada tagihan atau pinjaman outstanding yang cocok untuk "${queryLabel}".\nBuka Jurnal untuk melihat riwayat lengkap.`
@@ -409,9 +376,6 @@ const localeTemplates = {
     callbackWorkspaceNotFound: 'Workspace tidak ditemukan.',
     noActiveMembership: 'Akun ini belum punya membership workspace aktif. Hubungi admin untuk akses workspace yang valid.',
     quickStatus: 'Status',
-    quickSearch: 'Cari',
-    quickAnalytics: 'Analytics',
-    quickHistory: 'Riwayat',
     quickMenu: 'Menu',
     quickAdd: 'Tambah',
     quickOpen: 'Buka',
@@ -440,16 +404,14 @@ const localeTemplates = {
   },
   su: {
     menuIntro: 'Pilih aksi assistant nu diperlukeun.',
-    menuHint: 'Command step-by-step: tambah, buka, cari, status, riwayat, jeung analytics.',
+    menuHint: 'Command step-by-step: tambah, buka, status, jeung menu.',
     summaryLoading: 'Bot keur ngolah ringkesan...',
     summaryLoadingFailed: 'Punten, ringkesan can réngsé diolah. Coba deui sakedapan.',
     analyticsLoading: 'Bot keur ngolah analytics...',
     analyticsLoadingFailed: 'Punten, analytics can réngsé diolah. Coba deui sakedapan.',
     addRoutePrompt: 'Pilih domain input nu rek dibuka.',
     openRoutePrompt: 'Pilih halaman core nu rek dibuka.',
-    searchRoutePrompt: 'Pilih domain nu rek ditalungtik.',
     statusRoutePrompt: 'Pilih bucket status nu rek ditempo.',
-    historyRoutePrompt: 'Pilih bucket riwayat nu rek dibuka.',
     workspaceChoiceIntro: 'Kuring manggihan sababaraha workspace aktip. Pilih workspace nu dipaké:',
     workspaceChoiceHint: 'Kirim angka, nami workspace, atawa pencét tombol pilihan di handap.',
     workspaceChoiceCancelled: 'Pilihan workspace dibatalkeun.',
@@ -516,9 +478,6 @@ const localeTemplates = {
     callbackWorkspaceNotFound: 'Workspace teu kapanggih.',
     noActiveMembership: 'Akun ieu can boga membership workspace aktip. Hubungi admin pikeun aksés workspace nu valid.',
     quickStatus: 'Status',
-    quickSearch: 'Cari',
-    quickAnalytics: 'Analytics',
-    quickHistory: 'Riwayat',
     quickMenu: 'Menu',
     quickAdd: 'Tambah',
     quickOpen: 'Muka',
@@ -682,10 +641,7 @@ function buildAssistantMenuCommandLabels(language) {
     menu: locale.quickMenu,
     add: locale.quickAdd,
     open: locale.quickOpen,
-    search: locale.quickSearch,
     status: locale.quickStatus,
-    history: locale.quickHistory,
-    analytics: locale.quickAnalytics,
   }
 }
 
@@ -2426,46 +2382,6 @@ function buildAnalyticsPlan(text, context = {}) {
   }
 }
 
-function buildAnalyticsMenuPlan(language, session = null) {
-  const fallbackPlan = buildDeterministicPlan('', { session })
-  const fallbackAnalytics = fallbackPlan.analytics ?? {}
-
-  return {
-    ...fallbackPlan,
-    intent: 'analytics',
-    language: getLocaleTemplate(language),
-    clarificationCode: 'analytics_metric',
-    analytics: {
-      ...fallbackAnalytics,
-      metricKey: null,
-      entityType: null,
-      entityQuery: null,
-      windowKey: 'none',
-      dateFrom: null,
-      dateTo: null,
-      entityHints: [],
-      metricCandidates: [],
-      requiresWindow: false,
-      requiresEntity: false,
-      needsClarification: true,
-    },
-  }
-}
-
-function buildAnalyticsCommandPlan(commandArgs, language, session = null) {
-  const normalizedArgs = normalizeText(commandArgs, '')
-  const parsedPlan = normalizedArgs ? buildDeterministicPlan(normalizedArgs, { session }) : null
-
-  if (parsedPlan?.intent === 'analytics' && normalizeText(parsedPlan?.analytics?.metricKey, '')) {
-    return {
-      ...parsedPlan,
-      language: getLocaleTemplate(language),
-    }
-  }
-
-  return buildAnalyticsMenuPlan(language, session)
-}
-
 function determineIntentFromText(text) {
   const normalizedText = normalizeText(text, '').toLowerCase()
   const hasMutation = mutationKeywords.some((keyword) => normalizedText.includes(keyword))
@@ -3109,6 +3025,10 @@ function formatStatusLabel(status, remainingAmount = 0) {
     return `Belum lunas • Sisa ${formatCurrency(normalizedRemainingAmount)}`
   }
 
+  if (normalizedStatus === 'overdue') {
+    return `Jatuh tempo • Sisa ${formatCurrency(normalizedRemainingAmount)}`
+  }
+
   return `Sisa ${formatCurrency(normalizedRemainingAmount)}`
 }
 
@@ -3124,13 +3044,50 @@ function formatSummaryMoney(value) {
   return escapeTelegramHtml(formatCurrency(value))
 }
 
+function getSettlementLoanTermsSnapshot(row) {
+  const existingSnapshot = row?.loan_terms_snapshot
+
+  if (existingSnapshot && typeof existingSnapshot === 'object' && !Array.isArray(existingSnapshot)) {
+    return existingSnapshot
+  }
+
+  const sourceType = normalizeText(row?.source_type, '').toLowerCase()
+
+  if (sourceType !== 'loan-disbursement' && sourceType !== 'loan') {
+    return null
+  }
+
+  const principalAmount = normalizeAmountValue(row?.principal_amount ?? row?.amount)
+  const repaymentAmount = normalizeAmountValue(row?.repayment_amount ?? row?.bill_amount)
+
+  return {
+    principal_amount: principalAmount,
+    repayment_amount: repaymentAmount,
+    base_repayment_amount: repaymentAmount > 0 ? repaymentAmount : principalAmount,
+  }
+}
+
 function getSettlementItemGrossAmount(row) {
-  const candidates = [
-    row?.bill_amount,
-    row?.amount,
-    row?.repayment_amount,
-    row?.principal_amount,
-  ]
+  const sourceType = normalizeText(row?.source_type, '').toLowerCase()
+  const loanTermsSnapshot = getSettlementLoanTermsSnapshot(row)
+  const candidates =
+    sourceType === 'loan-disbursement' || sourceType === 'loan'
+      ? [
+          row?.bill_amount,
+          row?.repayment_amount,
+          loanTermsSnapshot?.repayment_amount,
+          row?.principal_amount,
+          loanTermsSnapshot?.base_repayment_amount,
+          row?.amount,
+        ]
+      : [
+          row?.bill_amount,
+          row?.amount,
+          row?.repayment_amount,
+          row?.principal_amount,
+          loanTermsSnapshot?.repayment_amount,
+          loanTermsSnapshot?.base_repayment_amount,
+        ]
 
   for (const candidate of candidates) {
     const normalizedAmount = normalizeAmountValue(candidate)
@@ -3185,6 +3142,10 @@ function getSettlementItemRemainingAmount(
   return 0
 }
 
+function getSettlementItemStatusValue(row) {
+  return normalizeText(row?.bill_status ?? row?.status, '').toLowerCase()
+}
+
 function getSettlementItemDueDateKey(row) {
   return toAppDateKey(row?.bill_due_date ?? row?.due_date ?? null)
 }
@@ -3226,7 +3187,7 @@ function getSettlementItemStatusMeta(row, fallbackMeta = null) {
   const grossAmount = getSettlementItemGrossAmount(row)
   const remainingAmount = getSettlementItemRemainingAmount(row, grossAmount)
   const paidAmount = getSettlementItemPaidAmount(row, grossAmount)
-  const normalizedStatus = normalizeText(row?.bill_status, '').toLowerCase()
+  const normalizedStatus = getSettlementItemStatusValue(row)
 
   if (remainingAmount <= 0 || normalizedStatus === 'paid') {
     return {
@@ -3259,6 +3220,12 @@ function getSettlementItemStatusMeta(row, fallbackMeta = null) {
       emoji: '⚠️',
     }
   )
+}
+
+function getSettlementBucketStatusKey(row) {
+  const statusKey = getSettlementItemStatusMeta(row).key
+
+  return statusKey === 'overdue' ? 'unpaid' : statusKey
 }
 
 function getSettlementSourceEmoji(row) {
@@ -3648,7 +3615,7 @@ function getRowSecondaryLabel(row) {
   if (sourceType === 'bill') {
     const parts = [
       normalizeText(row?.bill_type, null),
-      formatStatusLabel(row?.bill_status, row?.bill_remaining_amount),
+      formatStatusLabel(row?.bill_status ?? row?.status, row?.bill_remaining_amount ?? row?.remaining_amount),
     ].filter(Boolean)
 
     return parts.length > 0 ? parts.join(' • ') : normalizeText(row?.bill_description, null)
@@ -3695,9 +3662,7 @@ function filterRowsByPlan(rows, plan) {
   }
 
   if (status !== 'any') {
-    filteredRows = filteredRows.filter(
-      (row) => normalizeText(row?.bill_status, 'any').toLowerCase() === status
-    )
+    filteredRows = filteredRows.filter((row) => getSettlementBucketStatusKey(row) === status)
   }
 
   if (amount > 0) {
@@ -4531,14 +4496,16 @@ function buildRouteForRow(row, plan = {}) {
 
 function buildRowFactItem(row, plan, index = 0) {
   const routePath = buildRouteForRow(row, plan)
+  const grossAmount = getSettlementItemGrossAmount(row)
+  const remainingAmount = getSettlementItemRemainingAmount(row, grossAmount)
 
   return {
     index: index + 1,
     sourceLabel: getRowSourceLabel(row),
     primaryLabel: getRowPrimaryLabel(row),
     secondaryLabel: getRowSecondaryLabel(row),
-    amountLabel: formatCurrency(row?.amount ?? row?.bill_amount ?? 0),
-    remainingLabel: formatStatusLabel(row?.bill_status, row?.bill_remaining_amount),
+    amountLabel: formatCurrency(grossAmount),
+    remainingLabel: formatStatusLabel(getSettlementItemStatusValue(row), remainingAmount),
     routePath,
     routeLabel:
       routePath.startsWith('/payment') || routePath.startsWith('/loan-payment')
@@ -4553,8 +4520,10 @@ function buildRowSummary(row) {
   const sourceLabel = getRowSourceLabel(row)
   const primaryLabel = getRowPrimaryLabel(row)
   const secondaryLabel = getRowSecondaryLabel(row)
-  const amountLabel = formatCurrency(row?.amount ?? row?.bill_amount ?? 0)
-  const remainingLabel = formatStatusLabel(row?.bill_status, row?.bill_remaining_amount)
+  const grossAmount = getSettlementItemGrossAmount(row)
+  const remainingAmount = getSettlementItemRemainingAmount(row, grossAmount)
+  const amountLabel = formatCurrency(grossAmount)
+  const remainingLabel = formatStatusLabel(getSettlementItemStatusValue(row), remainingAmount)
   const dateLabel = formatDateLabel(row?.sort_at ?? row?.transaction_date ?? row?.expense_date ?? row?.due_date ?? row?.created_at)
 
   const lines = [
@@ -5072,20 +5041,8 @@ function buildAssistantQuickActionRows(language = 'id') {
         text: locale.quickStatus,
         callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'status'),
       },
-      {
-        text: locale.quickSearch,
-        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'cari'),
-      },
-      {
-        text: locale.quickAnalytics,
-        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'analytics'),
-      },
     ],
     [
-      {
-        text: locale.quickHistory,
-        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'riwayat'),
-      },
       {
         text: locale.quickMenu,
         callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'menu'),
@@ -5118,22 +5075,11 @@ function buildAssistantMainMenuKeyboardRows(language = 'id') {
       {
         text: locale.quickOpen,
       },
-      {
-        text: locale.quickSearch,
-      },
     ],
     [
       {
         text: locale.quickStatus,
       },
-      {
-        text: locale.quickHistory,
-      },
-      {
-        text: locale.quickAnalytics,
-      },
-    ],
-    [
       {
         text: locale.quickMenu,
       },
@@ -5165,10 +5111,6 @@ function buildAssistantTopLevelActionRows(language = 'id') {
         text: locale.quickOpen,
         callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'buka'),
       },
-      {
-        text: locale.quickSearch,
-        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'cari'),
-      },
     ],
     [
       {
@@ -5176,12 +5118,8 @@ function buildAssistantTopLevelActionRows(language = 'id') {
         callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'status'),
       },
       {
-        text: locale.quickHistory,
-        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'riwayat'),
-      },
-      {
-        text: locale.quickAnalytics,
-        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'analytics'),
+        text: locale.quickMenu,
+        callbackData: buildAssistantCallbackData(assistantCallbackPrefixes.command, 'menu'),
       },
     ],
   ]
@@ -5255,45 +5193,9 @@ function buildAssistantCreateRouteRows(language = 'id') {
   ]
 }
 
-function buildAssistantSearchRouteRows(language = 'id') {
-  const locale = getLocaleText(language)
-
-  return [
-    [
-      {
-        text: locale.searchRoute('Pemasukan'),
-        path: assistantRouteTargets.ledger,
-      },
-      {
-        text: locale.searchRoute('Pengeluaran'),
-        path: assistantRouteTargets.ledger,
-      },
-    ],
-    [
-      {
-        text: locale.searchRoute('Pinjaman'),
-        path: assistantRouteTargets.ledger,
-      },
-      {
-        text: locale.searchRoute('Faktur Barang'),
-        path: assistantRouteTargets.billLedger,
-      },
-    ],
-    [
-      {
-        text: locale.searchRoute('Absensi'),
-        path: assistantRouteTargets.payroll,
-      },
-    ],
-    ...buildAssistantMenuBackRow(language),
-  ]
-}
-
 function buildSettlementBucketSummaryRows(rows = []) {
   return assistantStatusBucketRoutes.map((bucket) => {
-    const bucketRows = rows.filter(
-      (row) => normalizeText(row?.bill_status, '').toLowerCase() === bucket.status
-    )
+    const bucketRows = rows.filter((row) => getSettlementBucketStatusKey(row) === bucket.status)
     const financeCount = bucketRows.filter((row) => !isPayrollRow(row)).length
     const payrollCount = bucketRows.filter((row) => isPayrollRow(row)).length
 
@@ -5379,7 +5281,7 @@ function buildSettlementBucketReply(language = 'id', rows = [], surface = 'statu
       },
     }
   }
-  const prompt = surface === 'history' ? locale.historyRoutePrompt : locale.statusRoutePrompt
+  const prompt = locale.statusRoutePrompt
   const totalCount = summaries.reduce((sum, bucket) => sum + bucket.totalCount, 0)
 
   return {
@@ -5426,9 +5328,7 @@ function buildSettlementBucketDetailReply(
   const bucketConfig =
     assistantStatusBucketRoutes.find((bucket) => bucket.status === normalizedBucketStatus) ??
     assistantStatusBucketRoutes[0]
-  const bucketRows = rows.filter(
-    (row) => normalizeText(row?.bill_status, '').toLowerCase() === bucketConfig.status
-  )
+  const bucketRows = rows.filter((row) => getSettlementBucketStatusKey(row) === bucketConfig.status)
   if (Array.isArray(bucketRows)) {
     const state = buildSettlementBucketState(bucketRows, bucketConfig.status)
     const bucketMode = state.bucketMode
@@ -5860,27 +5760,8 @@ function buildTambahReply(language = 'id') {
   }
 }
 
-function buildCariReply(language = 'id') {
-  const locale = getLocaleText(language)
-
-  return {
-    text: locale.searchRoutePrompt,
-    buttonRows: buildAssistantSearchRouteRows(language),
-    buttons: [],
-    needsClarification: false,
-    appendQuickActions: false,
-    facts: {
-      surface: 'search_route_picker',
-    },
-  }
-}
-
 function buildStatusSummaryReply(language = 'id', rows = []) {
   return buildSettlementBucketReply(language, rows, 'status')
-}
-
-function buildRiwayatSummaryReply(language = 'id', rows = []) {
-  return buildSettlementBucketReply(language, rows, 'history')
 }
 
 function buildInlineKeyboardButton(botUsername, button) {
@@ -6009,7 +5890,6 @@ async function processAssistantCommand({
   const commandInput = buildAssistantCommandInput(command?.command, command?.args)
   const directCreateRoutePath = resolveAssistantCreateRoutePath(commandArgs)
   const directCoreRoutePath = resolveAssistantCoreRoutePath(commandArgs)
-  const directSearchRoutePath = resolveAssistantSearchRoutePath(commandArgs)
 
   if (command?.command === 'menu') {
     const cleanedSessionPayload = stripAssistantSummaryMessageState(sessionPayload)
@@ -6046,24 +5926,6 @@ async function processAssistantCommand({
     return { processed: true }
   }
 
-  if (command?.command === 'analytics') {
-    const analyticsPlan = buildAnalyticsCommandPlan(commandArgs, responseLanguage, session)
-    const analyticsSourceText = commandInput || rawText
-
-    return sendAssistantAnalyticsReply({
-      adminClient,
-      botToken,
-      chatId,
-      replyToMessageId,
-      telegramUserId,
-      session,
-      sessionPayload,
-      selectedMembership,
-      plan: analyticsPlan,
-      sourceText: analyticsSourceText,
-    })
-  }
-
   if (command?.command === 'tambah') {
     const addReply = directCreateRoutePath
       ? buildDirectRouteReply(responseLanguage, directCreateRoutePath, 'add')
@@ -6098,22 +5960,6 @@ async function processAssistantCommand({
     return { processed: true }
   }
 
-  if (command?.command === 'cari' && directSearchRoutePath) {
-    const searchReply = buildDirectRouteReply(responseLanguage, directSearchRoutePath, 'search')
-
-    await sendTelegramMessage({
-      botToken,
-      chatId,
-      text: searchReply.text,
-      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), searchReply, {
-        language: responseLanguage,
-      }),
-      replyToMessageId,
-    })
-
-    return { processed: true }
-  }
-
   if (command?.command === 'buka' && !commandArgs) {
     const openReply = buildOpenRouteReply(responseLanguage)
 
@@ -6122,22 +5968,6 @@ async function processAssistantCommand({
       chatId,
       text: openReply.text,
       replyMarkup: buildReplyMarkup(getTelegramBotUsername(), openReply, {
-        language: responseLanguage,
-      }),
-      replyToMessageId,
-    })
-
-    return { processed: true }
-  }
-
-  if (command?.command === 'cari' && !commandArgs) {
-    const searchReply = buildCariReply(responseLanguage)
-
-    await sendTelegramMessage({
-      botToken,
-      chatId,
-      text: searchReply.text,
-      replyMarkup: buildReplyMarkup(getTelegramBotUsername(), searchReply, {
         language: responseLanguage,
       }),
       replyToMessageId,
@@ -6185,51 +6015,9 @@ async function processAssistantCommand({
     })
   }
 
-  if (command?.command === 'riwayat' && !commandArgs) {
-    const historyRows = await loadWorkspaceRows(
-      adminClient,
-      selectedMembership?.team_id,
-      { search: {} },
-      { limit: 100, outstandingOnly: false }
-    )
-    const historyReply = buildRiwayatSummaryReply(responseLanguage, historyRows)
-
-    const turnData = buildAssistantTurnData({
-      text: rawText,
-      plan: {
-        intent: 'status',
-        search: {},
-      },
-      language: responseLanguage,
-      workspaceName,
-    })
-
-    return sendAssistantHybridSummaryReply({
-      adminClient,
-      botToken,
-      chatId,
-      replyToMessageId,
-      telegramUserId,
-      chatType,
-      session,
-      sessionPayload,
-      selectedMembership,
-      plan: {
-        intent: 'status',
-        language: responseLanguage,
-        search: {},
-      },
-      reply: historyReply,
-      turnData,
-    })
-  }
-
   const settlementBucketStatus = extractStatusFilter(commandArgs)
 
-  if (
-    (command?.command === 'status' || command?.command === 'riwayat') &&
-    settlementBucketStatus !== 'any'
-  ) {
+  if (command?.command === 'status' && settlementBucketStatus !== 'any') {
     return sendSettlementBucketSummaryReply({
       adminClient,
       botToken,
@@ -6241,7 +6029,7 @@ async function processAssistantCommand({
       selectedMembership,
       sessionPayload,
       language: responseLanguage,
-      surface: command?.command === 'riwayat' ? 'history' : 'status',
+      surface: 'status',
       bucketStatus: settlementBucketStatus,
     })
   }
@@ -6288,23 +6076,11 @@ async function processAssistantCommand({
     return { processed: true }
   }
 
-  const clarificationCode =
-    command?.command === 'analytics' ? 'analytics_metric' : 'specific_filter'
+  const clarificationCode = 'specific_filter'
   const commandPlan = {
     intent: 'clarify',
     targetPath: null,
     search: {},
-    analytics: {
-      metricKey: null,
-      entityType: null,
-      entityQuery: null,
-      windowKey: 'none',
-      entityHints: [],
-      requiresEntity: false,
-      requiresWindow: false,
-      metricCandidates: [],
-      needsClarification: command?.command === 'analytics',
-    },
     language: responseLanguage,
     clarificationCode,
   }

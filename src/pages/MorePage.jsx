@@ -24,8 +24,6 @@ const modules = [
     to: '/more/hrd',
     icon: Briefcase,
     toneClass: 'bg-[var(--app-tone-info-bg)] text-[var(--app-tone-info-text)]',
-    status: 'Dikembangkan',
-    statusTone: 'warning',
   },
   {
     title: 'Penerima Manfaat',
@@ -33,8 +31,6 @@ const modules = [
     to: '/more/beneficiaries',
     icon: HeartHandshake,
     toneClass: 'bg-[var(--app-tone-warning-bg)] text-[var(--app-tone-warning-text)]',
-    status: 'Dikembangkan',
-    statusTone: 'warning',
   },
   {
     title: 'Tim',

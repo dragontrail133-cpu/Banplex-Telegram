@@ -762,6 +762,8 @@ function PayrollAttendanceHistory({
   const handleEditRecord = (record) => {
     if (
       !record?.id ||
+      !record?.attendance_date ||
+      !record?.project_id ||
       String(record?.billing_status ?? '').trim().toLowerCase() === 'billed' ||
       Boolean(record?.salary_bill_id)
     ) {
@@ -769,12 +771,21 @@ function PayrollAttendanceHistory({
     }
 
     closeSheet()
-    navigate(`/edit/attendance/${record.id}`, {
-      state: {
-        item: record,
-        returnTo: '/payroll?tab=worker',
-      },
-    })
+    navigate(
+      `/attendance/new?${new URLSearchParams({
+        date: record.attendance_date,
+        projectId: record.project_id,
+      }).toString()}`,
+      {
+        state: {
+          item: record,
+          attendanceDate: record.attendance_date,
+          date: record.attendance_date,
+          projectId: record.project_id,
+          returnTo: `/payroll?tab=daily&month=${selectedMonth}`,
+        },
+      }
+    )
   }
 
   const handleSelectAction = (kind, group, actionId) => {
