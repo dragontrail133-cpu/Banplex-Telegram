@@ -112,31 +112,6 @@ function normalizeStartParam(value) {
   return normalizedValue
 }
 
-async function redeemInviteToken(startParam, telegramUserId) {
-  const token = normalizeStartParam(startParam)
-
-  if (!token) {
-    return null
-  }
-
-  const numericTelegramUserId = Number(telegramUserId)
-
-  if (!Number.isSafeInteger(numericTelegramUserId)) {
-    throw new Error('Telegram ID tidak valid untuk redeem token undangan.')
-  }
-
-  const { data, error } = await supabase.rpc('fn_redeem_invite_token', {
-    p_token: token,
-    p_telegram_user_id: numericTelegramUserId,
-  })
-
-  if (error) {
-    throw error
-  }
-
-  return data ?? null
-}
-
 const defaultState = {
   user: null,
   memberships: [],
@@ -214,6 +189,7 @@ const useAuthStore = create((set, get) => ({
           },
           body: JSON.stringify({
             initData: normalizedInitData,
+            startParam,
             devBypass: shouldUseDevBypass,
           }),
         })
@@ -247,12 +223,10 @@ const useAuthStore = create((set, get) => ({
           null
         )
 
-        const ownerBypassMemberships = result?.isOwnerBypass
-          ? normalizeServerMemberships(result?.memberships)
-          : []
+        const responseMemberships = normalizeServerMemberships(result?.memberships)
         let memberships =
-          ownerBypassMemberships.length > 0
-            ? ownerBypassMemberships
+          responseMemberships.length > 0
+            ? responseMemberships
             : await fetchTeamMemberships()
         let currentMembership = memberships[0] ?? null
         let role =
@@ -261,21 +235,6 @@ const useAuthStore = create((set, get) => ({
             : normalizeRole(currentMembership?.role) ??
               normalizeRole(result?.role) ??
               normalizeRole(result?.profile?.role)
-
-        if (startParam && !result?.isOwnerBypass && role !== 'Owner') {
-          try {
-            await redeemInviteToken(startParam, telegramUserId)
-            memberships = await fetchTeamMemberships()
-            currentMembership = memberships[0] ?? null
-            role = normalizeRole(currentMembership?.role)
-          } catch (redeemError) {
-            if (memberships.length === 0) {
-              throw redeemError
-            }
-
-            console.warn('Redeem invite token dilewati:', redeemError)
-          }
-        }
 
         const fullName = [
           result?.telegramUser?.first_name,

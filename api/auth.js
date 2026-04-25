@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { Buffer } from 'node:buffer'
 import { createClient } from '@supabase/supabase-js'
-import { allRoles } from '../src/lib/rbac.js'
+import { allRoles, normalizeRole } from '../src/lib/rbac.js'
 
 const MAX_INIT_DATA_AGE_SECONDS = 60 * 60 * 24
 const validRoles = new Set(allRoles)
@@ -67,6 +67,16 @@ function normalizeOptionalText(value, fallback = null) {
   const normalizedValue = String(value ?? '').trim()
 
   return normalizedValue.length > 0 ? normalizedValue : fallback
+}
+
+function normalizeInviteStartParam(value) {
+  const normalizedValue = normalizeOptionalText(value, null)
+
+  if (!normalizedValue?.startsWith('inv_')) {
+    return null
+  }
+
+  return normalizedValue
 }
 
 function isTruthyBoolean(value) {
@@ -505,6 +515,83 @@ async function fetchMemberships(adminClient, telegramUserId, { includeInactive =
   return memberships ?? []
 }
 
+async function redeemInviteTokenForAuth(adminClient, telegramUserId, startParam) {
+  const token = normalizeInviteStartParam(startParam)
+
+  if (!token) {
+    return null
+  }
+
+  const normalizedTelegramUserId = normalizeTelegramIdentifier(telegramUserId)
+
+  if (!normalizedTelegramUserId) {
+    throw createHttpError(400, 'telegram_user_id tidak valid untuk redeem token undangan.')
+  }
+
+  const inviteResult = await adminClient
+    .from('invite_tokens')
+    .select('id, team_id, token, role, expires_at, is_used, created_at')
+    .eq('token', token)
+    .maybeSingle()
+
+  if (inviteResult.error) {
+    throw inviteResult.error
+  }
+
+  const invite = inviteResult.data ?? null
+
+  if (!invite) {
+    throw createHttpError(404, 'Token undangan tidak ditemukan.')
+  }
+
+  if (invite.is_used) {
+    throw createHttpError(409, 'Token undangan sudah pernah digunakan.')
+  }
+
+  if (invite.expires_at && new Date(invite.expires_at).getTime() <= Date.now()) {
+    throw createHttpError(410, 'Token undangan sudah kedaluwarsa.')
+  }
+
+  const approvalTimestamp = new Date().toISOString()
+
+  const upsertResult = await adminClient
+    .from('team_members')
+    .upsert(
+      {
+        team_id: invite.team_id,
+        telegram_user_id: normalizedTelegramUserId,
+        role: invite.role,
+        is_default: false,
+        status: 'active',
+        approved_at: approvalTimestamp,
+      },
+      {
+        onConflict: 'team_id,telegram_user_id',
+      }
+    )
+    .select(
+      'id, team_id, telegram_user_id, role, is_default, status, approved_at, teams:team_id ( id, name, slug, is_active )'
+    )
+    .single()
+
+  if (upsertResult.error) {
+    throw upsertResult.error
+  }
+
+  const markInviteResult = await adminClient
+    .from('invite_tokens')
+    .update({
+      is_used: true,
+    })
+    .eq('id', invite.id)
+
+  if (markInviteResult.error) {
+    throw markInviteResult.error
+  }
+
+  return upsertResult.data ?? null
+}
+
 async function resolveOwnerTeamId(adminClient) {
   const activeDefaultTeamResult = await adminClient
     .from('teams')
@@ -628,6 +715,8 @@ async function ensureOwnerMembership(adminClient, telegramUserId) {
   ]
 }
 
+export { normalizeInviteStartParam, redeemInviteTokenForAuth }
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({
@@ -660,6 +749,7 @@ export default async function handler(req, res) {
   try {
     const body = await parseRequestBody(req)
     const ownerTelegramIds = getOwnerTelegramIdentifiers()
+    const startParam = normalizeInviteStartParam(body?.startParam)
     const useDevBypass = isTruthyBoolean(body?.devBypass)
     let telegramUserId
     let telegramUser
@@ -721,18 +811,39 @@ export default async function handler(req, res) {
       isOwnerBypass ? 'Owner' : null
     )
     authStage = isOwnerBypass ? 'ensure_owner_membership' : 'fetch_memberships'
-    const memberships = isOwnerBypass
+    let memberships = isOwnerBypass
       ? await ensureOwnerMembership(adminClient, normalizedTelegramUserId)
       : await fetchMemberships(adminClient, normalizedTelegramUserId)
-    const effectiveRole = isOwnerBypass
+    let currentMembership = memberships[0] ?? null
+    let effectiveRole = isOwnerBypass
       ? 'Owner'
-      : String(memberships?.[0]?.role ?? profile?.role ?? 'Viewer').trim()
+      : String(currentMembership?.role ?? profile?.role ?? 'Viewer').trim()
     const responseProfile = isOwnerBypass
       ? {
           ...profile,
           role: 'Owner',
         }
       : profile
+
+    if (startParam && !isOwnerBypass && effectiveRole !== 'Owner') {
+      try {
+        await redeemInviteTokenForAuth(
+          adminClient,
+          normalizedTelegramUserId,
+          startParam
+        )
+        memberships = await fetchMemberships(adminClient, normalizedTelegramUserId)
+        currentMembership = memberships[0] ?? null
+        effectiveRole = normalizeRole(currentMembership?.role) ?? effectiveRole
+        authStage = 'fetch_memberships'
+      } catch (redeemError) {
+        if (memberships.length === 0) {
+          throw redeemError
+        }
+
+        console.warn('Redeem invite token dilewati:', redeemError)
+      }
+    }
 
     return res.status(200).json({
       success: true,
