@@ -198,6 +198,7 @@ function AppSelect({ className = '', ...props }) {
 function AppToggleGroup({
   label = null,
   description = null,
+  descriptionClassName = 'hidden sm:block',
   options = [],
   value = null,
   onChange,
@@ -213,7 +214,9 @@ function AppToggleGroup({
         <div className="space-y-1">
           {label ? <p className="text-sm font-semibold text-[var(--app-text-color)]">{label}</p> : null}
           {description ? (
-            <p className="text-xs leading-5 text-[var(--app-hint-color)]">{description}</p>
+            <p className={joinClasses('text-xs leading-5 text-[var(--app-hint-color)]', descriptionClassName)}>
+              {description}
+            </p>
           ) : null}
         </div>
       ) : null}
@@ -388,6 +391,7 @@ function PageHeader({
   eyebrow = null,
   title,
   description = null,
+  descriptionClassName = '',
   action = null,
   backAction = null,
   backLabel = 'Kembali',
@@ -401,7 +405,11 @@ function PageHeader({
         <div className="min-w-0 space-y-1.5">
           {eyebrow ? <p className="app-kicker">{eyebrow}</p> : null}
           <h1 className={compact ? 'app-form-page-title' : 'app-page-title'}>{title}</h1>
-          {description ? <p className={compact ? 'app-form-page-lead' : 'app-page-lead'}>{description}</p> : null}
+          {description ? (
+            <p className={joinClasses(compact ? 'app-form-page-lead' : 'app-page-lead', descriptionClassName)}>
+              {description}
+            </p>
+          ) : null}
         </div>
         {renderHeaderControl({ backAction, backLabel, action })}
       </div>
@@ -414,6 +422,7 @@ function SectionHeader({
   eyebrow = null,
   title,
   description = null,
+  descriptionClassName = '',
   action = null,
   backAction = null,
   backLabel = 'Kembali',
@@ -424,7 +433,7 @@ function SectionHeader({
       <div className="min-w-0 space-y-1.5">
         {eyebrow ? <p className="app-kicker">{eyebrow}</p> : null}
         <h2 className="app-section-title">{title}</h2>
-        {description ? <p className="app-section-lead">{description}</p> : null}
+        {description ? <p className={joinClasses('app-section-lead', descriptionClassName)}>{description}</p> : null}
       </div>
       {renderHeaderControl({ backAction, backLabel, action })}
     </div>
@@ -457,6 +466,7 @@ function FormSection({
   title,
   description = null,
   action = null,
+  descriptionClassName = 'hidden sm:block',
   className = '',
   children,
 }) {
@@ -466,6 +476,7 @@ function FormSection({
         eyebrow={eyebrow}
         title={title}
         description={description}
+        descriptionClassName={descriptionClassName}
         action={action}
       />
       {children}

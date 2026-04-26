@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { resolveTeamId, resolveTelegramUserId } from '../lib/auth-context'
 import {
+  createBillFromApi,
   createBillPaymentFromApi,
   deleteBillPaymentFromApi,
   updateBillPaymentFromApi,
@@ -152,6 +153,68 @@ function buildBillPaymentDeletePayload(paymentData = {}) {
   return {
     paymentId,
     teamId,
+  }
+}
+
+function buildBillPayload(billData = {}) {
+  const staffId = normalizeText(billData.staff_id ?? billData.staffId)
+  const teamId = resolveTeamId(billData.team_id ?? billData.teamId)
+  const telegramUserId = resolveTelegramUserId(
+    billData.telegram_user_id ?? billData.telegramUserId
+  )
+  const projectId = normalizeText(billData.project_id ?? billData.projectId, null)
+  const billType = normalizeText(billData.bill_type ?? billData.billType, 'gaji').toLowerCase()
+  const staffName = normalizeText(
+    billData.staff_name_snapshot ??
+      billData.staffName ??
+      billData.worker_name_snapshot ??
+      billData.workerName,
+    null
+  )
+  const projectName = normalizeText(
+    billData.project_name_snapshot ?? billData.projectName,
+    null
+  )
+  const dueDate = normalizeText(
+    billData.due_date ?? billData.dueDate ?? billData.date,
+    null
+  )
+  const amount = Number(billData.amount)
+  const description = normalizeText(
+    billData.description,
+    staffName ? `Tagihan Upah ${staffName}` : 'Tagihan Upah'
+  )
+
+  if (!staffId) {
+    throw new Error('Staf wajib dipilih.')
+  }
+
+  if (!teamId) {
+    throw new Error('Akses workspace tidak ditemukan.')
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Nominal tagihan harus lebih dari 0.')
+  }
+
+  if (!dueDate) {
+    throw new Error('Tanggal tagih wajib diisi.')
+  }
+
+  return {
+    staff_id: staffId,
+    team_id: teamId,
+    telegram_user_id: telegramUserId,
+    project_id: projectId,
+    bill_type: billType || 'gaji',
+    description,
+    amount,
+    due_date: dueDate,
+    notes: normalizeText(billData.notes),
+    worker_name_snapshot: staffName,
+    supplier_name_snapshot: null,
+    project_name_snapshot: projectName,
+    updated_at: new Date().toISOString(),
   }
 }
 
@@ -366,6 +429,49 @@ const usePaymentStore = create((set) => ({
   isSubmitting: false,
   error: null,
   clearError: () => set({ error: null }),
+  submitBill: async (billData = {}) => {
+    set({ isSubmitting: true, error: null })
+
+    try {
+      const payload = buildBillPayload(billData)
+      const bill = await createBillFromApi(payload)
+
+      if (!bill?.id) {
+        throw new Error('Server tidak mengembalikan data tagihan.')
+      }
+
+      await useBillStore.getState()
+        .fetchUnpaidBills({
+          teamId: payload.team_id,
+          silent: true,
+        })
+        .catch((refreshError) => {
+          console.error('Gagal menyegarkan daftar tagihan setelah simpan:', refreshError)
+        })
+
+      set({ error: null })
+      showToast({
+        tone: 'success',
+        title: 'Tagihan upah tersimpan',
+        message: 'Tagihan upah berhasil dicatat.',
+      })
+
+      return bill
+    } catch (error) {
+      const normalizedError = toError(error)
+
+      set({ error: normalizedError.message })
+      showToast({
+        tone: 'error',
+        title: 'Tagihan upah gagal disimpan',
+        message: normalizedError.message,
+      })
+
+      throw normalizedError
+    } finally {
+      set({ isSubmitting: false })
+    }
+  },
   submitBillPayment: async (paymentData = {}) => {
     set({ isSubmitting: true, error: null })
 

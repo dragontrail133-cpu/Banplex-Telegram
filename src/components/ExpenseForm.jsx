@@ -339,17 +339,17 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
             {
               id: 'expense-identity',
               title: 'Relasi Transaksi',
-              description: 'Pilih master relasional yang mengikat transaksi ini.',
+              description: 'Pilih proyek, kategori, dan supplier.',
             },
             {
               id: 'expense-details',
               title: 'Nilai dan Status',
-              description: 'Isi nominal, status pembayaran, dan deskripsi transaksi.',
+              description: 'Isi tanggal, nominal, status, dan deskripsi.',
             },
             {
               id: 'expense-notes',
               title: 'Catatan dan Aksi',
-              description: 'Tambahkan catatan tambahan dan simpan perubahan.',
+              description: 'Catatan, lampiran, lalu simpan.',
             },
           ]}
           submitDisabled={!isMasterDataReady || isLocked || isAttachmentResetPending}
@@ -357,7 +357,7 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
           <FormSection
             eyebrow="Relasi"
             title="Relasi Transaksi"
-            description="Pilih master proyek, kategori, dan supplier yang dipakai oleh pengeluaran ini."
+            description="Pilih proyek, kategori, dan supplier."
           >
             <MasterPickerField
               disabled={isSubmitting || isMasterLoading || projects.length === 0}
@@ -432,7 +432,7 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
           <FormSection
             eyebrow="Nilai"
             title="Nilai dan Status"
-            description="Isi tanggal transaksi, nominal, status pembayaran, dan deskripsi singkat."
+            description="Isi tanggal, nominal, status, dan deskripsi."
           >
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block space-y-2">
@@ -473,7 +473,7 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
 
             <AppToggleGroup
               buttonSize="sm"
-              description="Status pembayaran hanya punya dua opsi dan tidak mengambil master data."
+              description="Dua opsi status."
               label="Status Pembayaran"
               onChange={(nextValue) =>
                 handleChange({
@@ -508,7 +508,7 @@ function ExpenseForm({ initialData = null, onSuccess, formId = 'expense-form' })
           <FormSection
             eyebrow="Catatan"
             title="Catatan dan Lampiran"
-            description="Tambahkan catatan tambahan, lampiran, lalu simpan dari footer halaman."
+            description="Catatan, lampiran, lalu simpan."
           >
             <details className="group rounded-[22px] border border-dashed border-[var(--app-outline-soft)] bg-[var(--app-surface-low-color)] px-4 py-3">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-[var(--app-text-color)]">

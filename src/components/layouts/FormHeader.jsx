@@ -14,6 +14,7 @@ function FormHeader({
       eyebrow={eyebrow}
       title={title}
       description={description}
+      descriptionClassName="hidden sm:block"
       action={action}
       backAction={onBack}
       backLabel={backLabel}

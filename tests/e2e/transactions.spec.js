@@ -121,6 +121,26 @@ function createLedgerVisibilityMock() {
       search_text: 'faktur aktif',
     },
     {
+      id: 'workspace-settled-expense-1',
+      sourceType: 'expense',
+      source_type: 'expense',
+      type: 'expense',
+      expense_type: 'operasional',
+      document_type: 'faktur',
+      bill_status: 'paid',
+      bill_amount: 180_000,
+      bill_paid_amount: 180_000,
+      bill_remaining_amount: 0,
+      bill_due_date: '2026-04-24',
+      bill_paid_at: '2026-04-24T09:30:00.000Z',
+      amount: 180_000,
+      description: 'Operasional Settled Aktif',
+      created_at: '2026-04-24T09:30:00.000Z',
+      updated_at: '2026-04-24T09:30:00.000Z',
+      sort_at: '2026-04-24T09:30:00.000Z',
+      search_text: 'operasional settled aktif',
+    },
+    {
       id: 'workspace-delivery-1',
       sourceType: 'expense',
       source_type: 'expense',
@@ -290,6 +310,8 @@ test.describe('transaction surfaces', () => {
     await expect(page.getByRole('heading', { name: 'Operasional Aktif' })).toBeVisible({
       timeout: 30000,
     })
+    await expect(page.getByText('Operasional Settled Aktif')).toHaveCount(0)
+    await expect(page.getByText('Lunas', { exact: true })).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'Faktur Aktif' })).toBeVisible({
       timeout: 30000,
     })

@@ -4,6 +4,12 @@
 
 Dokumen ini adalah rencana standalone untuk mendukung penggunaan Banplex Greenfield dari browser desktop biasa tanpa merusak pengalaman Telegram Mini Web App/mobile yang sudah menjadi baseline produk.
 
+Status kerja saat ini:
+
+- Dokumen ini dipakai sebagai planning-only authority untuk stream browser desktop + auth.
+- Turn ini bersifat docs-only; tidak ada runtime code yang boleh diubah dari plan ini.
+- Audit progres untuk stream ini dicatat di `docs/progress/browser-desktop-auth-adaptation-progress-log.md`.
+
 Alasan dokumen ini dipisahkan dari stream aktif:
 
 - Scope ini bersifat future adaptation, bukan bagian backlog `Unified CRUD Workspace` yang sedang berjalan.
@@ -177,7 +183,7 @@ Keputusan berikut sudah dikunci sebelum dokumen ini dibuat agar implementasi mas
 - Release harus preview internal first sebelum production flag dinyalakan.
 - Rollback utama adalah disable `VITE_ENABLE_DESKTOP_BROWSER_MODE`.
 - Dokumen ini bukan izin implementasi; coding wajib brief implementasi terpisah.
-- Progress log aktif tidak diupdate untuk dokumen ini.
+- Progress log aktif untuk stream ini berada di `docs/progress/browser-desktop-auth-adaptation-progress-log.md`.
 
 ## 6. Frontend Desktop Adaptation Plan
 
@@ -522,10 +528,169 @@ Catatan sequencing: Phase 1 dan Phase 2 dapat dipisah atau diurutkan sesuai kebu
 
 ### Phase 3 - Page-by-page desktop adaptation
 
-- Reports read/report + PDF download first.
+- Jurnal contract + first table adaptation first.
+- Dashboard home hub next.
+- Reports read/report + PDF download after Dashboard.
 - Payments hub/list after Reports.
+- Master workspace CRUD after Payments.
 - Future data table adapter untuk Jurnal dan Reports.
 - Forms, payment form, payroll, stock, master, team, attachments, HRD, dan Beneficiaries hanya setelah audit per-domain.
+
+### Phase 3A - Reports desktop redesign contract
+
+Keputusan khusus untuk redesign desktop `Reports` dikunci sebagai berikut agar task implementasi berikutnya tidak melebar:
+
+- Scope redesign hanya untuk route existing `/reports`.
+- Redesign ini additive; tidak menjadi redesign total app atau penggantian design system global.
+- Flowbite React, jika dipakai, hanya untuk desktop shell primitives seperti sidebar/topbar/container/table wrapper; komponen konten inti tetap mengikuti app primitives existing.
+- Layout target adalah `hybrid summary`: KPI + dua chart di atas, lalu detail/list existing tetap dipertahankan di bawah.
+- Chart prioritas hanya untuk `executive_finance`.
+- Set chart awal:
+  - `Cash Flow Trend` dari payload `cashMutations`.
+  - `Project Profit Comparison` dari payload `projectSummaries`.
+- KPI angka utama tetap mengambil `reportData.summary`; chart tidak boleh menjadi owner baru untuk total/saldo/status.
+- Filter, mode laporan, dan tombol PDF tetap memakai flow existing; yang berubah hanya penempatan/komposisi visual desktop.
+- PDF desktop tetap `download-first`; tidak ada redesign kontrak PDF atau template PDF pada fase ini.
+- Tidak membuat source-of-truth baru, endpoint baru, agregasi server baru, atau kalkulasi canonical baru untuk desktop reports.
+- Browser auth tidak menjadi syarat desain dokumen ini; sequencing untuk redesign reports adalah `UI-first`, sedangkan browser auth tetap mengikuti stream foundation terpisah.
+- Access implementasi awal tetap `Owner/Admin` only sesuai gate desktop browser plan existing.
+- Jika implementasi chart nanti membutuhkan library baru, kandidat yang boleh dievaluasi lebih lanjut adalah ApexCharts; keputusan install dependency tetap memerlukan brief implementasi terpisah dan approval eksplisit.
+
+### Phase 3B - Jurnal desktop redesign contract
+
+Keputusan khusus untuk redesign desktop `Jurnal` dikunci sebagai berikut agar implementasi berikutnya tidak mengubah perilaku ledger secara liar:
+
+- Scope redesign hanya untuk route existing `/transactions` beserta query tab existing: `active`, `tagihan`, dan `history`.
+- Desktop `Jurnal` adalah `workspace table`, bukan card-first layout, bukan modal-heavy workspace, dan bukan split master-detail.
+- `Aktif`, `Tagihan`, dan `Riwayat` tetap menjadi satu workspace dengan tiga tab setara pada surface `Jurnal`.
+- Header desktop `Jurnal` bersifat `sticky workspace header` di area content desktop.
+- Header desktop hanya berisi title, tabs, search/filter controls, dan shortcut `Arsip`; tidak ada KPI strip tambahan agar tidak tumpang tindih dengan `Dashboard`.
+- Navigasi data tetap memakai cursor pagination existing + tombol `Muat Berikutnya`; tidak membuka numbered pagination baru dan tidak mengubah kontrak API.
+- Detail pattern tetap route-based: klik row utama membuka route detail existing, sedangkan pay/edit/delete tetap menuju route atau flow existing.
+- Model filter tetap menjaga taxonomy existing dari ledger filter source-type; tidak membuka multi-filter contract baru pada fase ini.
+
+#### Kontrak tab `Aktif`
+
+- Presentasi desktop `Aktif` memakai tabel dengan baseline kolom:
+  - `Tanggal/Waktu`
+  - `Tipe/Source`
+  - `Proyek/Pihak`
+  - `Deskripsi`
+  - `Status Settlement`
+  - `Nominal`
+  - `Aksi`
+- Klik row membuka detail route existing.
+- Kolom `Aksi` memakai model `aksi column + kebab`: ada action primer yang terlihat dan menu ringkas untuk action sekunder, tetapi tidak memindahkan mutation inline ke dalam tabel.
+- Search/filter state untuk `Aktif` dipertahankan independen terhadap tab lain.
+
+#### Kontrak tab `Riwayat`
+
+- Presentasi desktop `Riwayat` memakai `audit-focused table`, bukan copy penuh dari tabel `Aktif`.
+- Baseline kolom `Riwayat`:
+  - `Waktu`
+  - `Source`
+  - `Context`
+  - `Nominal`
+  - `Creator`
+  - `Detail`
+- Aksi `Riwayat` dibatasi `detail only`; tidak membawa pay/edit/delete kembali ke surface audit.
+- Search/filter state `Riwayat` independen dari tab lain.
+
+#### Kontrak tab `Tagihan`
+
+- Presentasi desktop `Tagihan` tetap mempertahankan grouped settlement list; tidak diratakan penuh menjadi tabel umum.
+- `Tagihan` memiliki `search + simple filters` dengan cakupan:
+  - `group type`
+  - `due urgency`
+- `Tagihan` boleh `inline expand` di dalam workspace `Jurnal`, tetapi kedalaman expand dibatasi hanya:
+  - summary group/item
+  - daftar child bills
+- Expand `Tagihan` tidak boleh menduplikasi seluruh capability `Payments hub`.
+- Klik child bill di dalam expand harus membuka route payment/detail existing; tidak ada nested expand level kedua.
+- Shortcut `Arsip` tetap hidup di header `Jurnal`, bukan dipindah ke utilitas sidebar.
+
+#### Guardrail implementasi
+
+- Tidak menambah source-of-truth baru, API baru, atau server aggregation baru untuk desktop `Jurnal`.
+- Tidak mengubah kontrak `/api/transactions`, `vw_workspace_transactions`, atau `vw_history_transactions` untuk sekadar memenuhi layout desktop.
+- Tidak mengubah route high-risk seperti payment form, edit form, atau recycle-bin detail flow.
+- Desktop `Jurnal` hanya mengadaptasi presentasi read/navigation dan reuse permission helper existing untuk visibility aksi.
+
+### Phase 3C - Dashboard desktop redesign contract
+
+Keputusan khusus untuk redesign desktop `Dashboard` dikunci sebagai berikut agar task implementasi berikutnya tidak melebar:
+
+- Scope redesign hanya untuk route existing `/` sebagai landing page `Dashboard`.
+- Redesign ini additive; tidak menjadi redesign total app atau penggantian design system global.
+- Desktop `Dashboard` adalah `home hub`, bukan command center penuh, bukan analytics dashboard penuh, dan bukan shortcut grid yang menggantikan shell navigasi.
+- Header desktop disederhanakan menjadi title `Dashboard` dan tombol refresh; tidak ada chip row tambahan, tidak ada action grid di header, dan tidak ada intro copy baru.
+- Layout desktop memakai komposisi dua kolom: konten utama tetap menonjol, sedangkan chart cash flow ditempatkan di side panel.
+- Empat kartu ringkasan atas tetap dipertahankan dalam grid `2x2`: `Saldo Kas`, `Laba Bersih`, `Pinjaman Aktif`, dan `Tagihan Pending`.
+- `Tagihan Pending` tetap menjadi `CTA alert card`; tidak diperlakukan sebagai KPI biasa.
+- Semua shortcut aksi utama di area dashboard desktop dihapus; discovery navigasi pindah ke desktop shell/sidebar, bukan ke action card di dashboard.
+- Satu chart desktop yang dibekukan adalah `Cash Flow Trend` dengan visual `stacked bar`, rentang `14 hari`, dan source dari `cashMutations`.
+- CTA pada card chart mengarah ke `Jurnal penuh` di `/transactions`.
+- Aktivitas terbaru menjadi `preview table` read-only dengan 8 baris, source dari `workspaceTransactions`.
+- Kolom preview table dibekukan sebagai:
+  - `Waktu`
+  - `Jenis`
+  - `Deskripsi`
+  - `Nominal`
+  - `Status`
+- Filter preview table tetap `Semua`, `Hari Ini`, dan `Proyek` dengan kontrol `chips/segmented` inline.
+- Data composite dashboard tetap memakai source existing: `summary`, `workspaceTransactions`, `bills`, `loans`, dan `portfolioSummary`; tidak ada source-of-truth baru atau kalkulasi canonical baru.
+- Access implementasi awal tetap `Owner/Admin` only sesuai gate desktop browser plan existing.
+- Browser auth tidak menjadi syarat desain dokumen ini; sequencing untuk redesign dashboard adalah `UI-first`, sedangkan browser auth tetap mengikuti stream foundation terpisah.
+
+### Phase 3D - Payments desktop redesign contract
+
+Keputusan khusus untuk redesign desktop `Payments` dikunci sebagai berikut agar task implementasi berikutnya tidak melebar:
+
+- Scope redesign hanya untuk route existing `/pembayaran`, termasuk mode detail existing `?group=` untuk worker-group settlement.
+- Route payment entry `/payment/:id` dan `/loan-payment/:id` tetap standalone, route-based, dan high-risk; tidak ikut diredesign pada fase ini.
+- Redesign ini additive; tidak menjadi redesign total app atau penggantian design system global.
+- Desktop `Payments` adalah settlement hub/list, bukan form pembayaran, bukan command center penuh, dan bukan analytics dashboard.
+- Layout desktop mempertahankan tiga blok utama:
+  - `Histori settlement`
+  - `Tagihan`
+  - `Pinjaman`
+- `Histori settlement` tetap menjadi preview read-only dari settlement transaction existing; baris yang dibuka tetap menuju detail transaction existing.
+- `Tagihan` tetap menjadi grouped settlement list berdasarkan worker, dengan entry point ke detail group dan entry point ke route pembayaran existing.
+- `Pinjaman` tetap menjadi list outstanding loan, dengan entry point ke route payment loan existing.
+- Detail group `?group=` tetap mempertahankan tab `Summary`, `Rekap`, dan `Riwayat`; tidak dipindahkan ke modal baru, nested route baru, atau write-heavy workspace baru.
+- Receipt delivery, archive, restore, dan permanent delete tetap visible hanya pada kondisi yang sudah diizinkan helper existing; tidak ada action permission matrix baru.
+- Payment entry points tetap route-based:
+  - bill payment membuka `/payment/:id`
+  - loan payment membuka `/loan-payment/:id`
+  - history entry membuka `/transactions/:id?surface=pembayaran`
+- Tidak membuat source-of-truth baru, endpoint baru, agregasi server baru, atau kalkulasi canonical baru untuk desktop payments.
+- Access implementasi awal tetap `Owner/Admin` only sesuai gate desktop browser plan existing.
+- Browser auth tidak menjadi syarat desain dokumen ini; sequencing untuk redesign payments adalah `UI-first`, sedangkan browser auth tetap mengikuti stream foundation terpisah.
+
+### Phase 3E - Master desktop redesign contract
+
+Keputusan khusus untuk redesign desktop `Master` dikunci sebagai berikut agar task implementasi berikutnya tidak melebar:
+
+- Scope redesign hanya untuk route existing `/master` beserta subroute existing `/master/:tab/add`, `/master/:tab/edit/:id`, dan `/master/recycle-bin`.
+- Redesign ini additive; tidak menjadi redesign total app atau penggantian design system global.
+- Desktop `Master` adalah `workspace CRUD` dengan `overview + top tabs`, bukan read-only index, bukan split detail shell, dan bukan modal-heavy editor.
+- Panel overview desktop menampilkan count entity aktif dan hotspot dependency/deletion dari data existing; panel ini berada di atas tab strip, bukan menggantikan tab strip.
+- Delapan tab entity existing tetap menjadi scope penuh:
+  - `Projects`
+  - `Workers`
+  - `Suppliers`
+  - `Materials`
+  - `Categories`
+  - `Creditors`
+  - `Professions`
+  - `Staff`
+- Isi tiap tab tetap list berbasis card seperti existing; tidak ada rewrite ke tabel desktop pada freeze ini.
+- Create/edit/delete tetap route-based existing; tidak ada modal CRUD baru, inline editor, atau split detail workspace.
+- Tombol `Recycle Bin` dan route recycle bin existing tetap dipertahankan sebagai boundary arsip.
+- Dependency guard existing tetap dipertahankan untuk record yang masih dipakai; tidak ada perubahan contract guard.
+- Tidak membuat source-of-truth baru, endpoint baru, agregasi server baru, atau kalkulasi canonical baru untuk desktop master.
+- Access implementasi awal tetap `Owner/Admin` only sesuai gate desktop browser plan existing.
+- Browser auth tidak menjadi syarat desain dokumen ini; sequencing untuk redesign master adalah `UI-first`, sedangkan browser auth tetap mengikuti stream foundation terpisah.
 
 ### Phase 4 - Hardening and regression testing
 
@@ -620,6 +785,7 @@ Dokumen ini dianggap siap menjadi referensi jika future implementation brief mem
 - File scope sempit.
 - Mode kerja bukan docs-only.
 - Source-of-truth domain yang disentuh.
+- Kontrak redesign desktop `Master` sudah dibekukan.
 - Validasi mobile + desktop smoke.
 - Rollback via `VITE_ENABLE_DESKTOP_BROWSER_MODE`.
 - Konfirmasi tidak mengubah `/api/auth` Mini App kecuali ada approval khusus.

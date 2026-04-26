@@ -283,7 +283,7 @@ function WorkerForm({
 
           <AppToggleGroup
             buttonSize="sm"
-            description="Status pekerja hanya punya dua mode."
+            description="Aktif atau nonaktif."
             label="Status"
             onChange={(nextValue) =>
               handleFieldChange({

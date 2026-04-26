@@ -63,6 +63,10 @@ const ledgerPageSize = 20
 const ledgerListStateStorageKey = 'banplex:transactions-list-state'
 const ledgerPerfEnabled = import.meta.env.DEV
 
+function isActiveLedgerVisibleTransaction(transaction) {
+  return getTransactionSettlementBadgeLabel(transaction) !== 'Lunas'
+}
+
 function createDefaultPageInfo() {
   return {
     hasMore: false,
@@ -165,7 +169,7 @@ function TransactionsPage() {
             transaction,
             restoredLedgerFilter,
             workspaceLedgerVisibilityOptions
-          )
+          ) && isActiveLedgerVisibleTransaction(transaction)
         )
       : []
   }, [restoredLedgerFilter, restoredLedgerState?.transactions])
@@ -274,7 +278,7 @@ function TransactionsPage() {
               transaction,
               filter,
               workspaceLedgerVisibilityOptions
-            )
+            ) && isActiveLedgerVisibleTransaction(transaction)
           )
           .slice(0, ledgerPageSize)
       : []
@@ -374,25 +378,44 @@ function TransactionsPage() {
       }
 
       try {
-        const result = await fetchWorkspaceTransactionPageFromApi(currentTeamId, {
-          cursor,
-          limit: ledgerPageSize,
-          search: debouncedSearchTerm,
-          filter,
-        })
+        let nextCursor = cursor
+        let result = null
+        let nextTransactions = []
+        let pageInfo = createDefaultPageInfo()
 
-        if (requestId !== requestSequenceRef.current) {
-          return
-        }
+        do {
+          result = await fetchWorkspaceTransactionPageFromApi(currentTeamId, {
+            cursor: nextCursor,
+            limit: ledgerPageSize,
+            search: debouncedSearchTerm,
+            filter,
+          })
 
-        const nextTransactions = (result.workspaceTransactions ?? []).filter((transaction) =>
-          matchesTransactionLedgerFilter(transaction, filter, workspaceLedgerVisibilityOptions)
+          if (requestId !== requestSequenceRef.current) {
+            return
+          }
+
+          nextTransactions = (result.workspaceTransactions ?? []).filter(
+            (transaction) =>
+              matchesTransactionLedgerFilter(
+                transaction,
+                filter,
+                workspaceLedgerVisibilityOptions
+              ) && isActiveLedgerVisibleTransaction(transaction)
+          )
+          pageInfo = result.pageInfo ?? createDefaultPageInfo()
+          nextCursor = pageInfo.nextCursor
+        } while (
+          !append &&
+          nextTransactions.length === 0 &&
+          pageInfo.hasMore &&
+          Boolean(nextCursor)
         )
 
         setTransactions((currentTransactions) =>
           append ? [...currentTransactions, ...nextTransactions] : nextTransactions
         )
-        setPageInfo(result.pageInfo ?? createDefaultPageInfo())
+        setPageInfo(pageInfo)
         setHasLoadedLedger(true)
         setLedgerError(null)
 
@@ -401,9 +424,9 @@ function TransactionsPage() {
             'Jurnal first-page fetch',
             {
               fetchMs: roundMs(nowMs() - requestStartedAt),
-              serverTiming: result.timing ?? null,
+              serverTiming: result?.timing ?? null,
               itemCount: nextTransactions.length,
-              hasMore: result.pageInfo?.hasMore ?? false,
+              hasMore: pageInfo.hasMore,
             },
             ledgerPerfEnabled
           )
@@ -844,6 +867,10 @@ function TransactionsPage() {
                 const presentation = getTransactionPresentation(transaction)
                 const Icon = presentation.Icon
                 const settlementBadgeLabel = getTransactionSettlementBadgeLabel(transaction)
+                const visibleSettlementBadgeLabel =
+                  ledgerTab === 'active' && settlementBadgeLabel === 'Lunas'
+                    ? null
+                    : settlementBadgeLabel
                 const hideAmount = shouldHideTransactionAmount(transaction)
                 const amount = hideAmount ? null : Math.abs(Number(transaction.amount ?? 0))
                 const canEdit = Boolean(transaction.canEdit ?? canEditTransaction(transaction))
@@ -912,8 +939,8 @@ function TransactionsPage() {
                     }
                     amountClassName={presentation.amountClassName}
                     badge={getTransactionCreatorLabel(transaction)}
-                    badges={settlementBadgeLabel ? [settlementBadgeLabel] : []}
-                    maxVisibleBadges={settlementBadgeLabel ? 2 : 1}
+                    badges={visibleSettlementBadgeLabel ? [visibleSettlementBadgeLabel] : []}
+                    maxVisibleBadges={visibleSettlementBadgeLabel ? 2 : 1}
                     actions={actions}
                     menuMode="shared"
                     onOpenMenu={handleOpenActionMenu}

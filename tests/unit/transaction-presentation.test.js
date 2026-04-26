@@ -3,6 +3,9 @@ import test from 'node:test'
 
 import {
   hasMeaningfulText,
+  getBillGroupDeleteTarget,
+  getBillGroupEditRoute,
+  getTransactionLedgerSummary,
   getTransactionSettlementBadgeLabel,
   getTransactionLedgerFilterOptions,
   matchesTransactionLedgerFilter,
@@ -78,6 +81,64 @@ test('transaction settlement badge labels normalize payment status', () => {
       remaining_amount: 0,
     }),
     'Lunas'
+  )
+})
+
+test('project income ledger summary stays independent from legacy fee bills', () => {
+  assert.equal(
+    getTransactionLedgerSummary({
+      sourceType: 'project-income',
+      bill: {
+        status: 'partial',
+        remainingAmount: 250000,
+      },
+    }),
+    ''
+  )
+})
+
+test('bill group delete target resolves the oldest unpaid child bill and blocks paid groups', () => {
+  assert.equal(
+    getBillGroupDeleteTarget({
+      bills: [
+        {
+          id: 'bill-fee-newer',
+          projectIncomeId: 'income-fee-newer',
+          amount: 120000,
+          paidAmount: 0,
+          remainingAmount: 120000,
+          dueDate: '2026-04-22',
+          created_at: '2026-04-19T09:00:00.000Z',
+        },
+        {
+          id: 'bill-fee-oldest',
+          projectIncomeId: 'income-fee-oldest',
+          amount: 100000,
+          paidAmount: 0,
+          remainingAmount: 100000,
+          dueDate: '2026-04-20',
+          created_at: '2026-04-18T09:00:00.000Z',
+        },
+      ],
+    })?.id,
+    'bill-fee-oldest'
+  )
+
+  assert.equal(
+    getBillGroupDeleteTarget({
+      bills: [
+        {
+          id: 'bill-fee-paid',
+          projectIncomeId: 'income-fee-paid',
+          amount: 100000,
+          paidAmount: 25000,
+          remainingAmount: 75000,
+          dueDate: '2026-04-20',
+          created_at: '2026-04-18T09:00:00.000Z',
+        },
+      ],
+    }),
+    null
   )
 })
 
@@ -194,4 +255,49 @@ test('ledger filter options can hide payroll and delivery-order filters', () => 
 
   assert.equal(options.some((item) => item.value === 'bill'), false)
   assert.equal(options.some((item) => item.value === 'surat-jalan'), false)
+})
+
+test('bill group edit route resolves the oldest unpaid child bill and blocks paid groups', () => {
+  assert.equal(
+    getBillGroupEditRoute({
+      bills: [
+        {
+          id: 'bill-fee-newer',
+          projectIncomeId: 'income-fee-newer',
+          amount: 120000,
+          paidAmount: 0,
+          remainingAmount: 120000,
+          dueDate: '2026-04-22',
+          created_at: '2026-04-19T09:00:00.000Z',
+        },
+        {
+          id: 'bill-fee-oldest',
+          projectIncomeId: 'income-fee-oldest',
+          amount: 100000,
+          paidAmount: 0,
+          remainingAmount: 100000,
+          dueDate: '2026-04-20',
+          created_at: '2026-04-18T09:00:00.000Z',
+        },
+      ],
+    }),
+    '/edit/project-income/income-fee-oldest'
+  )
+
+  assert.equal(
+    getBillGroupEditRoute({
+      bills: [
+        {
+          id: 'bill-fee-paid',
+          projectIncomeId: 'income-fee-paid',
+          amount: 100000,
+          paidAmount: 25000,
+          remainingAmount: 75000,
+          dueDate: '2026-04-20',
+          created_at: '2026-04-18T09:00:00.000Z',
+        },
+      ],
+    }),
+    null
+  )
 })

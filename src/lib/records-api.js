@@ -225,6 +225,15 @@ export async function fetchUnpaidBillsFromApi(teamId) {
   return result.bills ?? []
 }
 
+export async function createBillFromApi(payload) {
+  const result = await requestRecordsApi('POST', {
+    resource: 'bills',
+    body: payload,
+  })
+
+  return result.bill ?? null
+}
+
 export async function softDeleteBillFromApi(billId, teamId, expectedUpdatedAt = null) {
   await requestRecordsApi('DELETE', {
     resource: 'bills',

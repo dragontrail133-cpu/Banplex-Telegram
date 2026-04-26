@@ -3,6 +3,8 @@ import {
   ArrowLeft,
   ChevronRight,
   FileText,
+  PencilLine,
+  Trash2,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -14,6 +16,8 @@ import {
 } from '../components/ui/AppPrimitives'
 import {
   formatCurrency,
+  getBillGroupDeleteTarget,
+  getBillGroupEditRoute,
   getBillGroupPaymentTarget,
   getBillSummaryAmount,
   getBillSummarySubtitle,
@@ -101,31 +105,66 @@ function BillRowButton({ bill, onOpenBill }) {
   )
 }
 
-function BillGroupCard({ group, onOpenGroup }) {
+function BillGroupCard({ group, onOpenGroup, onOpenEdit, onOpenDelete }) {
+  const editRoute = getBillGroupEditRoute(group)
+  const deleteTarget = group.kind === 'staff-group' ? getBillGroupDeleteTarget(group) : null
+
   return (
     <AppCardStrong className="px-4 py-4">
-      <button
-        className="flex w-full items-center gap-3 text-left"
-        onClick={() => onOpenGroup(group)}
-        type="button"
-      >
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--app-surface-low-color)] text-[var(--app-text-color)]">
-          <FileText className="h-[18px] w-[18px]" />
-        </div>
+      <div className="flex items-center gap-2">
+        <button
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+          onClick={() => onOpenGroup(group)}
+          type="button"
+        >
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--app-surface-low-color)] text-[var(--app-text-color)]">
+            <FileText className="h-[18px] w-[18px]" />
+          </div>
 
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
-            {group.workerName}
-          </p>
-        </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
+              {group.workerName}
+            </p>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-sm font-semibold text-[var(--app-text-color)]">
+              {formatCurrency(group.amount)}
+            </span>
+            <ChevronRight className="h-4 w-4 text-[var(--app-hint-color)]" />
+          </div>
+        </button>
 
         <div className="flex shrink-0 items-center gap-2">
-          <span className="text-sm font-semibold text-[var(--app-text-color)]">
-            {formatCurrency(group.amount)}
-          </span>
-          <ChevronRight className="h-4 w-4 text-[var(--app-hint-color)]" />
+          {deleteTarget ? (
+            <AppButton
+              aria-label="Hapus tagihan"
+              className="shrink-0"
+              leadingIcon={<Trash2 className="h-4 w-4" />}
+              onClick={() => onOpenDelete(group)}
+              size="sm"
+              type="button"
+              variant="danger"
+            >
+              Hapus
+            </AppButton>
+          ) : null}
+
+          {editRoute ? (
+            <AppButton
+              aria-label="Edit tagihan"
+              className="shrink-0"
+              leadingIcon={<PencilLine className="h-4 w-4" />}
+              onClick={() => onOpenEdit(group)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Edit
+            </AppButton>
+          ) : null}
         </div>
-      </button>
+      </div>
     </AppCardStrong>
   )
 }
@@ -142,6 +181,7 @@ function BillsPage({ embedded = false } = {}) {
   const isLoading = useBillStore((state) => state.isLoading)
   const error = useBillStore((state) => state.error)
   const fetchUnpaidBills = useBillStore((state) => state.fetchUnpaidBills)
+  const softDeleteBill = useBillStore((state) => state.softDeleteBill)
 
   const persistTagihanListState = useCallback(() => {
     if (!currentTeamId || typeof window === 'undefined') {
@@ -250,6 +290,61 @@ function BillsPage({ embedded = false } = {}) {
     [embedded, navigate, persistTagihanListState]
   )
 
+  const handleOpenBillGroupEdit = useCallback(
+    (group) => {
+      if (!group?.groupKey) {
+        return
+      }
+
+      const editRoute = getBillGroupEditRoute(group)
+
+      if (!editRoute) {
+        return
+      }
+
+      persistTagihanListState()
+      navigate(editRoute, {
+        state: {
+          returnTo: embedded ? '/transactions?tab=tagihan' : '/pembayaran',
+        },
+      })
+    },
+    [embedded, navigate, persistTagihanListState]
+  )
+
+  const handleOpenBillGroupDelete = useCallback(
+    async (group) => {
+      if (!group?.groupKey || !currentTeamId) {
+        return
+      }
+
+      const deleteTarget = getBillGroupDeleteTarget(group)
+
+      if (!deleteTarget) {
+        return
+      }
+
+      const shouldDelete = typeof window === 'undefined'
+        ? false
+        : window.confirm(`Hapus tagihan ${group.workerName || 'ini'}?`)
+
+      if (!shouldDelete) {
+        return
+      }
+
+      try {
+        await softDeleteBill(
+          deleteTarget.id,
+          deleteTarget.updatedAt ?? deleteTarget.updated_at ?? null
+        )
+        await fetchUnpaidBills({ teamId: currentTeamId, silent: true })
+      } catch (error) {
+        console.error('Gagal menghapus tagihan fee:', error)
+      }
+    },
+    [currentTeamId, fetchUnpaidBills, softDeleteBill]
+  )
+
   const handleOpenBill = useCallback(
     (bill) => {
       const paymentRoute = getTransactionPaymentRoute(bill)
@@ -338,6 +433,8 @@ function BillsPage({ embedded = false } = {}) {
                   key={item.groupKey}
                   group={item}
                   onOpenGroup={handleOpenBillGroup}
+                  onOpenEdit={handleOpenBillGroupEdit}
+                  onOpenDelete={handleOpenBillGroupDelete}
                 />
               )
             }

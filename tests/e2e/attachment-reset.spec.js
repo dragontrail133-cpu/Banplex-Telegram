@@ -27,13 +27,55 @@ function createDeferredUploadGate() {
   }
 }
 
-function createAttachmentSmokeMockApi(uploadGate) {
+function createAttachmentSmokeMockApi(uploadGate, options = {}) {
   const fileAssetsById = new Map()
   const attachmentsByExpenseId = new Map()
   let expenseSequence = 0
   let attachmentSequence = 0
   let fileAssetSequence = 0
   const timestamp = '2026-04-24T08:00:00.000Z'
+  const materialInvoiceAiDraft =
+    options.materialInvoiceAiDraft ?? {
+      draft: {
+        documentDate: '2026-04-24',
+        supplierName: 'Supplier Material',
+        invoiceNumber: 'INV-241',
+      },
+      review: [
+        {
+          tempId: 'ai-row-1',
+          name: 'Baja Ringan',
+          unit: 'pcs',
+          qty: 4,
+          unitPrice: 125000,
+          lineTotal: 500000,
+          status: 'matched',
+          reason: 'Cocok dengan master.',
+          selectedMaterialId: 'material-e2e-1',
+          selectedMaterialName: 'Baja Ringan',
+          selectedMaterialUnit: 'pcs',
+          materialDraftName: '',
+          materialDraftUnit: '',
+          candidates: [],
+        },
+        {
+          tempId: 'ai-row-2',
+          name: 'Semen Portland',
+          unit: 'sak',
+          qty: 10,
+          unitPrice: 75000,
+          lineTotal: 750000,
+          status: 'new_material',
+          reason: 'Bisa dibuat sebagai master baru.',
+          selectedMaterialId: '',
+          selectedMaterialName: '',
+          selectedMaterialUnit: '',
+          materialDraftName: 'Semen Portland',
+          materialDraftUnit: 'sak',
+          candidates: [],
+        },
+      ],
+    }
 
   return {
     async supabase({ url, method, body }) {
@@ -261,6 +303,13 @@ function createAttachmentSmokeMockApi(uploadGate) {
           attachments: includeDeleted
             ? attachments
             : attachments.filter((attachment) => !attachment.deleted_at),
+        }
+      }
+
+      if (resource === 'material-invoice-ai-draft' && method === 'POST') {
+        return {
+          success: true,
+          ...materialInvoiceAiDraft,
         }
       }
 
@@ -545,7 +594,7 @@ test.describe('attachment reset smoke', () => {
 
     await selectMasterOption(page, /Pilih proyek/i, 'Pilih Proyek', 'Proyek Smoke')
     await selectMasterOption(page, /Pilih supplier material/i, 'Pilih Supplier Material', 'Supplier Material')
-    await selectMasterOption(page, /Pilih material 1/i, 'Pilih Material 1', 'Baja Ringan')
+    await selectMasterOption(page, /Pilih material/i, 'Pilih Material 1', 'Baja Ringan')
 
     await page.locator('input[placeholder="0"]').first().fill('12')
     await page.locator('input[placeholder="Rp 0"]').first().fill('75000')
@@ -583,6 +632,100 @@ test.describe('attachment reset smoke', () => {
       timeout: 15000,
     })
     await expect(page.getByText('material-invoice.pdf')).toHaveCount(0)
+  })
+
+  test('steps through material invoice items one card at a time', async ({ page }) => {
+    const mockApi = createAttachmentSmokeMockApi(Promise.resolve())
+    const materialInvoiceForm = page.locator('#material-invoice-form')
+
+    await openApp(page, '/material-invoice/new', {
+      mockApi,
+    })
+
+    await selectMasterOption(page, /Pilih proyek/i, 'Pilih Proyek', 'Proyek Smoke')
+    await selectMasterOption(page, /Pilih supplier material/i, 'Pilih Supplier Material', 'Supplier Material')
+    await selectMasterOption(page, /Pilih material/i, 'Pilih Material 1', 'Baja Ringan')
+
+    await expect(page.getByText('Baris 1 dari 1')).toBeVisible({ timeout: 15000 })
+
+    await page.locator('input[placeholder="0"]').fill('4')
+    await page.locator('input[placeholder="Rp 0"]').fill('125000')
+
+    await page.getByRole('button', { name: /^Tambah$/ }).click()
+    await expect(page.getByText('Baris 2 dari 2')).toBeVisible({ timeout: 15000 })
+
+    await selectMasterOption(page, /Pilih material/i, 'Pilih Material 2', 'Baja Ringan')
+    await page.locator('input[placeholder="0"]').fill('2')
+    await page.locator('input[placeholder="Rp 0"]').fill('50000')
+
+    await materialInvoiceForm.getByRole('button', { name: 'Kembali' }).click()
+    await expect(page.getByText('Baris 1 dari 2')).toBeVisible({ timeout: 15000 })
+    await expect(page.locator('input[placeholder="0"]').first()).toHaveValue('4')
+
+    await materialInvoiceForm.getByRole('button', { name: 'Lanjut' }).click()
+    await expect(page.getByText('Baris 2 dari 2')).toBeVisible({ timeout: 15000 })
+    await expect(page.locator('input[placeholder="0"]').first()).toHaveValue('2')
+
+    await page.getByRole('button', { name: /^Hapus item 2$/ }).click()
+    await expect(page.getByText('Baris 1 dari 1')).toBeVisible({ timeout: 15000 })
+
+    await page.getByRole('button', { name: /^Tambah$/ }).click()
+    await expect(page.getByText('Baris 2 dari 2')).toBeVisible({ timeout: 15000 })
+
+    await selectMasterOption(page, /Pilih material/i, 'Pilih Material 2', 'Baja Ringan')
+    await page.locator('input[placeholder="0"]').fill('2')
+    await page.locator('input[placeholder="Rp 0"]').fill('50000')
+
+    const saveRequestPromise = page.waitForRequest((request) => {
+      return request.method() === 'POST' && request.url().includes('resource=material-invoices')
+    })
+
+    await page.getByRole('button', { name: /Simpan Faktur Material/i }).click()
+    const saveRequest = await saveRequestPromise
+    expect(saveRequest.postDataJSON().itemsData).toHaveLength(2)
+  })
+
+  test('shows AI OCR as a thumbnail stepper and applies row review', async ({ page }) => {
+    const mockApi = createAttachmentSmokeMockApi(Promise.resolve())
+
+    await openApp(page, '/material-invoice/new', {
+      mockApi,
+    })
+
+    await selectMasterOption(page, /Pilih proyek/i, 'Pilih Proyek', 'Proyek Smoke')
+    await selectMasterOption(page, /Pilih supplier material/i, 'Pilih Supplier Material', 'Supplier Material')
+
+    await page.getByRole('button', { name: /Scan AI/i }).click()
+
+    const aiSheet = page.getByRole('dialog', { name: 'Scan Faktur Barang' })
+    await expect(aiSheet.getByText('Ketuk untuk pilih gambar')).toBeVisible({ timeout: 15000 })
+
+    await aiSheet.locator('input[type="file"]').setInputFiles({
+      name: 'material-ai.png',
+      mimeType: 'image/png',
+      buffer: samplePngBuffer,
+    })
+
+    await expect(aiSheet.getByRole('button', { name: /Ganti file material-ai\.png/i })).toBeVisible({
+      timeout: 15000,
+    })
+    await expect(aiSheet.getByRole('button', { name: /Hapus file material-ai\.png/i })).toBeVisible({
+      timeout: 15000,
+    })
+    await expect(aiSheet.getByRole('img', { name: 'material-ai.png' })).toBeVisible({
+      timeout: 15000,
+    })
+
+    await aiSheet.getByRole('button', { name: /Proses AI/i }).click()
+
+    await expect(aiSheet.getByText('Item 1 dari 2')).toBeVisible({ timeout: 15000 })
+    await aiSheet.getByRole('button', { name: 'Lanjut' }).click()
+    await expect(aiSheet.getByText('Item 2 dari 2')).toBeVisible({ timeout: 15000 })
+    await aiSheet.getByRole('button', { name: 'Kembali' }).click()
+    await expect(aiSheet.getByText('Item 1 dari 2')).toBeVisible({ timeout: 15000 })
+
+    await aiSheet.getByRole('button', { name: /Terapkan/i }).click()
+    await expect(page.getByText('Baris 1 dari 2')).toBeVisible({ timeout: 15000 })
   })
 
   test('keeps expense attachment preview visible after edit save', async ({ page }) => {

@@ -363,17 +363,17 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
             {
               id: 'loan-identity',
               title: 'Sumber Dana',
-              description: 'Pilih kreditur dan tanggal pinjaman terlebih dahulu.',
+              description: 'Pilih kreditur dan tanggal.',
             },
             {
               id: 'loan-preview',
               title: 'Pokok dan Preview',
-              description: 'Masukkan nominal lalu lihat hasil pengembalian otomatis.',
+              description: 'Masukkan nominal dan cek hasil.',
             },
             {
               id: 'loan-late-charge',
               title: 'Denda dan Catatan',
-              description: 'Atur denda keterlambatan dan catatan internal.',
+              description: 'Atur denda dan catatan.',
             },
           ]}
           submitDisabled={!isMasterDataReady}
@@ -381,7 +381,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
           <FormSection
             eyebrow="Pinjaman / Modal"
             title="Sumber Dana"
-            description="Pilih kreditur dan tanggal pinjaman terlebih dahulu."
+            description="Pilih kreditur dan tanggal."
           >
 
             <MasterPickerField
@@ -450,7 +450,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
 
               <AppToggleGroup
                 buttonSize="sm"
-                description="Tipe bunga hanya punya dua mode dan tidak mengambil master data."
+                description="Dua mode bunga."
                 label="Tipe Bunga"
                 onChange={(nextValue) =>
                   handleChange({
@@ -472,7 +472,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
           <FormSection
             eyebrow="Perhitungan"
             title="Pokok dan Preview"
-            description="Masukkan nominal lalu lihat hasil pengembalian otomatis."
+            description="Masukkan nominal dan cek hasil."
           >
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block space-y-2">
@@ -623,7 +623,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
           <FormSection
             eyebrow="Risiko"
             title="Denda dan Catatan"
-            description="Atur bunga keterlambatan, penalti, dan catatan internal."
+            description="Atur denda dan catatan."
           >
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -646,7 +646,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
 
               <AppToggleGroup
                 buttonSize="sm"
-                description="Basis hitung denda hanya punya dua opsi."
+                description="Dua opsi basis hitung."
                 label="Basis Hitung Denda"
                 onChange={(nextValue) =>
                   handleChange({
@@ -667,7 +667,7 @@ function LoanForm({ onSuccess, initialData = null, recordId = null, formId = 'lo
             <div className="grid gap-4 sm:grid-cols-2">
               <AppToggleGroup
                 buttonSize="sm"
-                description="Jenis penalti hanya punya dua mode."
+                description="Dua mode penalti."
                 label="Jenis Penalti"
                 onChange={(nextValue) =>
                   handleChange({

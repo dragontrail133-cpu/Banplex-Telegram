@@ -721,6 +721,36 @@ export function getBillGroupPaymentTarget(group) {
   return candidateBills.slice().sort(compareBillPaymentTarget)[0]
 }
 
+export function getBillGroupEditRoute(group) {
+  const bills = Array.isArray(group?.bills) ? group.bills.filter(Boolean) : []
+
+  if (bills.some((bill) => getBillPaidAmount(bill) > 0)) {
+    return null
+  }
+
+  const targetBill = getBillGroupPaymentTarget(group)
+  const projectIncomeId = normalizeText(
+    targetBill?.projectIncomeId ?? targetBill?.project_income_id,
+    null
+  )
+
+  if (!projectIncomeId) {
+    return null
+  }
+
+  return `/edit/project-income/${projectIncomeId}`
+}
+
+export function getBillGroupDeleteTarget(group) {
+  const bills = Array.isArray(group?.bills) ? group.bills.filter(Boolean) : []
+
+  if (bills.some((bill) => getBillPaidAmount(bill) > 0)) {
+    return null
+  }
+
+  return getBillGroupPaymentTarget(group)
+}
+
 export function getPayrollBillGroupSummary(group) {
   const bills = Array.isArray(group?.bills) ? group.bills : []
   const workerName = normalizeText(group?.workerName ?? getBillSummaryWorkerLabel(bills[0] ?? group), 'Pekerja')
@@ -982,18 +1012,6 @@ export function getTransactionLedgerSummary(transaction) {
       summaryLabel,
       statusLabel,
       remainingAmount > 0 ? `Sisa ${formatCurrency(remainingAmount)}` : null,
-    ]
-      .filter(Boolean)
-      .join(' · ')
-  }
-
-  if (transaction?.sourceType === 'project-income' && transaction?.bill) {
-    return [
-      'Fee bill',
-      isPayrollBill(transaction)
-        ? formatPayrollSettlementLabel(transaction.bill.status)
-        : formatBillStatusLabel(transaction.bill.status),
-      `Sisa ${formatCurrency(transaction.bill.remainingAmount ?? transaction.bill.remaining_amount)}`,
     ]
       .filter(Boolean)
       .join(' · ')

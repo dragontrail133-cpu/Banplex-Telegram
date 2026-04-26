@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
+  Plus,
   ReceiptText,
   Send,
   RotateCcw,
@@ -1049,6 +1050,24 @@ function PaymentsPage() {
                 <p className="app-kicker">Aksi Settlement</p>
                 <h2 className="app-section-title">Tagihan</h2>
               </div>
+              {!isReadOnly ? (
+                <AppButton
+                  onClick={() => {
+                    persistPembayaranListState()
+                    navigate('/edit/bill/new', {
+                      state: {
+                        returnTo: '/pembayaran',
+                      },
+                    })
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                  leadingIcon={<Plus className="h-4 w-4" />}
+                >
+                  Tambah Tagihan Upah
+                </AppButton>
+              ) : null}
             </div>
 
             {displayBills.length === 0 ? (

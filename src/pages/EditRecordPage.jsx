@@ -4,6 +4,7 @@ import FormLayout from '../components/layouts/FormLayout'
 import IncomeForm from '../components/IncomeForm'
 import LoanForm from '../components/LoanForm'
 import MaterialInvoiceForm from '../components/MaterialInvoiceForm'
+import TagihanUpahForm from '../components/TagihanUpahForm'
 import TransactionDeleteDialog from '../components/TransactionDeleteDialog'
 import BrandLoader from '../components/ui/BrandLoader'
 import {
@@ -14,6 +15,7 @@ import {
   AppNominalInput,
   AppToggleGroup,
   AppTextarea,
+  AppViewportSafeArea,
   PageHeader,
   PageShell,
   AppTechnicalGrid,
@@ -80,6 +82,7 @@ function EditRecordPage({ technicalView = false }) {
   const item = location.state?.item ?? location.state?.record ?? null
   const isCreateMode = id === 'new'
   const normalizedType = String(type ?? '').trim().toLowerCase()
+  const isLoanEditMode = !isCreateMode && normalizedType === 'loan'
   const fetchMaterialInvoiceById = useTransactionStore(
     (state) => state.fetchMaterialInvoiceById
   )
@@ -106,7 +109,7 @@ function EditRecordPage({ technicalView = false }) {
   const fetchProjectIncomeById = useIncomeStore((state) => state.fetchProjectIncomeById)
   const fetchLoanById = useIncomeStore((state) => state.fetchLoanById)
   const [resolvedItem, setResolvedItem] = useState(item)
-  const [isLoadingRecord, setIsLoadingRecord] = useState(false)
+  const [isLoadingRecord, setIsLoadingRecord] = useState(() => isLoanEditMode)
   const [recordError, setRecordError] = useState(null)
   const [attendanceEditState, setAttendanceEditState] = useState({
     attendanceStatus: '',
@@ -200,7 +203,7 @@ function EditRecordPage({ technicalView = false }) {
     expense: 'Pengeluaran',
     loan: 'Pinjaman',
     attendance: 'Absensi',
-    bill: 'Tagihan',
+    bill: 'Tagihan Upah',
   }
   const resolvedTitle = formatValue(titleMap[normalizedType] ?? type)
   const technicalRoute = `/edit/${normalizedType}/${id}/technical`
@@ -444,7 +447,7 @@ function EditRecordPage({ technicalView = false }) {
       item &&
       normalizedType !== 'expense' &&
       normalizedType !== 'attendance' &&
-      !['income', 'project-income'].includes(normalizedType)
+      !['income', 'project-income', 'loan'].includes(normalizedType)
     ) {
       setResolvedItem(item)
       setRecordError(null)
@@ -646,35 +649,37 @@ function EditRecordPage({ technicalView = false }) {
 
   if (!isCreateMode && isLoadingRecord) {
     return (
-      <PageShell className="space-y-4">
-        <PageHeader
-          eyebrow={technicalView ? 'Owner' : 'Form'}
-          title={
-            technicalView
-              ? `Detail Teknis ${resolvedTitle}`
-              : `${isCreateMode ? 'Tambah' : 'Edit'} ${resolvedTitle}`
-          }
-          backAction={technicalView ? handleTechnicalBack : handleBack}
-        />
+      <AppViewportSafeArea className="min-h-full sm:mx-auto sm:max-w-md">
+        <PageShell className="min-h-full">
+          <PageHeader
+            eyebrow={technicalView ? 'Owner' : 'Form'}
+            title={
+              technicalView
+                ? `Detail Teknis ${resolvedTitle}`
+                : `${isCreateMode ? 'Tambah' : 'Edit'} ${resolvedTitle}`
+            }
+            backAction={technicalView ? handleTechnicalBack : handleBack}
+          />
 
-        <section className="grid min-h-[calc(100dvh-16rem)] place-items-center px-4 text-center">
-          <div className="flex flex-col items-center gap-5">
-            <BrandLoader context="form" size="hero" />
-            <div className="space-y-2">
-              <h2 className="text-xl font-bold tracking-[-0.03em] text-[var(--app-text-color)]">
-                {technicalView
-                  ? `Memuat detail teknis ${resolvedTitle}`
-                  : `Memuat ${resolvedTitle}`}
-              </h2>
-              <p className="max-w-[20rem] text-sm leading-6 text-[var(--app-hint-color)]">
-                {technicalView
-                  ? 'Menyiapkan data teknis.'
-                  : 'Menyiapkan data yang akan diubah.'}
-              </p>
+          <section className="grid min-h-[calc(100dvh-16rem)] place-items-center px-4 text-center">
+            <div className="flex flex-col items-center gap-5">
+              <BrandLoader context="form" size="hero" />
+              <div className="space-y-2">
+                <h2 className="text-xl font-bold tracking-[-0.03em] text-[var(--app-text-color)]">
+                  {technicalView
+                    ? `Memuat detail teknis ${resolvedTitle}`
+                    : `Memuat ${resolvedTitle}`}
+                </h2>
+                <p className="max-w-[20rem] text-sm leading-6 text-[var(--app-hint-color)]">
+                  {technicalView
+                    ? 'Menyiapkan data teknis.'
+                    : 'Menyiapkan data yang akan diubah.'}
+                </p>
+              </div>
             </div>
-          </div>
-        </section>
-      </PageShell>
+          </section>
+        </PageShell>
+      </AppViewportSafeArea>
     )
   }
 
@@ -755,6 +760,8 @@ function EditRecordPage({ technicalView = false }) {
           <LoanForm onSuccess={handleFormSuccess} />
         ) : null}
 
+        {isCreateMode && normalizedType === 'bill' ? <TagihanUpahForm /> : null}
+
         {!isCreateMode &&
         ['income', 'project-income'].includes(normalizedType) &&
         resolvedItem &&
@@ -782,7 +789,7 @@ function EditRecordPage({ technicalView = false }) {
               <form id={attendanceFormId} className="space-y-3" onSubmit={handleAttendanceSave}>
                 <AppToggleGroup
                   buttonSize="sm"
-                  description="Status absensi yang diedit akan menyesuaikan total upah sesuai komponen upah."
+                  description="Status mengubah total upah."
                   label="Status Absensi"
                   disabled={isAttendanceSaving}
                   onChange={(nextValue) =>
@@ -959,7 +966,7 @@ function EditRecordPage({ technicalView = false }) {
         ) : null}
 
         {isCreateMode &&
-        !['income', 'project-income', 'expense', 'loan'].includes(normalizedType) ? (
+        !['income', 'project-income', 'expense', 'loan', 'bill'].includes(normalizedType) ? (
           <section className="app-section-surface p-4">
             <p className="text-sm font-semibold text-[var(--app-text-color)]">
               Tipe form belum dipetakan.

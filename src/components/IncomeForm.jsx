@@ -246,24 +246,24 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = '
             {
               id: 'income-identity',
               title: 'Identitas Termin',
-              description: 'Pilih proyek dan tanggal transaksi.',
+              description: 'Pilih proyek dan tanggal.',
             },
             {
               id: 'income-details',
               title: 'Nominal dan Deskripsi',
-              description: 'Isi nominal termin dan ringkasan singkat.',
+              description: 'Isi nominal termin.',
             },
             {
               id: 'income-preview',
               title: 'Preview dan Simpan',
-              description: 'Cek ringkasan fee sebelum menyimpan.',
+              description: 'Cek fee sebelum simpan.',
             },
           ]}
           submitDisabled={!isMasterDataReady}
         >
           <FormSection
             title="Identitas Termin"
-            description="Pilih proyek dan tanggal transaksi."
+            description="Pilih proyek dan tanggal."
           >
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-4">
@@ -316,7 +316,7 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = '
                   <p className="text-sm leading-6 text-sky-800">
                     {selectedProject?.project_type
                       ? `Tipe proyek: ${selectedProject.project_type}`
-                      : 'Ringkasan proyek akan membantu memastikan termin masuk ke konteks yang tepat.'}
+                      : 'Cek konteks termin.'}
                   </p>
                 </AppCard>
               </div>
@@ -325,7 +325,7 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = '
 
           <FormSection
             title="Nominal dan Deskripsi"
-            description="Isi nominal termin dan ringkasan singkat."
+            description="Isi nominal termin."
           >
             <div className="grid gap-4 sm:grid-cols-2">
               <AppCard className="space-y-3 bg-white">
@@ -376,7 +376,7 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = '
                     {formatCurrency(terminAmount)}
                   </p>
                   <p className="text-sm leading-6 text-[var(--app-hint-color)]">
-                    Estimasi fee staf akan dihitung berdasarkan nominal termin yang diisi.
+                    Fee staf mengikuti nominal termin.
                   </p>
                 </AppCard>
               </div>
@@ -385,7 +385,7 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = '
 
           <FormSection
             title="Preview dan Simpan"
-            description="Cek ringkasan nominal dan estimasi fee staf."
+            description="Cek fee sebelum simpan."
           >
             <div className="grid gap-4">
               <AppCard className="space-y-3 bg-white">
@@ -397,7 +397,7 @@ function IncomeForm({ onSuccess, initialData = null, recordId = null, formId = '
 
                 {staffFeePreview.length === 0 ? (
                   <p className="text-sm leading-6 text-sky-800">
-                    Belum ada data staf. Tambahkan staf jika fee termin perlu dihitung.
+                    Belum ada data staf. Tambahkan staf jika perlu.
                   </p>
                 ) : (
                   <div className="space-y-3">

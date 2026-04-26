@@ -302,6 +302,7 @@ function makeFeeBill(overrides = {}) {
 function createBillsPageMockApi({ bills = [] } = {}) {
   const state = {
     bills: bills.map(clonePayment),
+    lastDeleteRequest: null,
   }
 
   const billById = new Map(
@@ -309,6 +310,22 @@ function createBillsPageMockApi({ bills = [] } = {}) {
       .map((bill) => [String(bill?.id ?? ''), bill])
       .filter(([billId]) => Boolean(billId))
   )
+
+  function deleteBill(billId, body) {
+    const billIndex = state.bills.findIndex((bill) => String(bill?.id ?? '') === String(billId))
+
+    if (billIndex < 0) {
+      return null
+    }
+
+    const deletedBill = clonePayment(state.bills[billIndex])
+
+    state.bills.splice(billIndex, 1)
+    state.lastDeleteRequest = body
+    billById.delete(String(billId))
+
+    return deletedBill
+  }
 
   return {
     state,
@@ -328,7 +345,14 @@ function createBillsPageMockApi({ bills = [] } = {}) {
 
       return undefined
     },
-    records: async ({ method, resource, url }) => {
+    records: async ({ method, resource, url, body }) => {
+      if (resource === 'bills' && method === 'DELETE') {
+        const billId = String(body?.billId ?? body?.bill_id ?? body?.id ?? '')
+        const deletedBill = deleteBill(billId, body)
+
+        return deletedBill ? { success: true, bill: deletedBill } : { success: true }
+      }
+
       if (resource !== 'bills' || method !== 'GET') {
         return undefined
       }
@@ -348,6 +372,67 @@ function createBillsPageMockApi({ bills = [] } = {}) {
       }
     },
     supabase: async () => [],
+  }
+}
+
+function createProjectIncomeEditMockSupabase({ billRows = [] } = {}) {
+  const projectIncomeRow = {
+    id: 'income-fee-1',
+    telegram_user_id: '20002',
+    created_by_user_id: 'e2e-profile',
+    team_id: 'e2e-team',
+    project_id: 'project-e2e-1',
+    transaction_date: '2026-04-18',
+    income_date: '2026-04-18',
+    amount: 2_500_000,
+    description: 'Termin Proyek E2E',
+    notes: 'Termin E2E',
+    project_name_snapshot: 'Proyek E2E',
+    created_at: '2026-04-18T08:00:00.000Z',
+    updated_at: '2026-04-18T08:00:00.000Z',
+    deleted_at: null,
+  }
+
+  const projectRow = {
+    id: 'project-e2e-1',
+    name: 'Proyek E2E',
+    project_name: 'Proyek E2E',
+    status: 'active',
+    deleted_at: null,
+    team_id: 'e2e-team',
+  }
+
+  const staffRow = {
+    id: 'staff-e2e-1',
+    staff_name: 'Staff A',
+    payment_type: 'per_termin',
+    fee_percentage: 10,
+    fee_amount: 0,
+    salary: 0,
+    deleted_at: null,
+    team_id: 'e2e-team',
+  }
+
+  return async ({ url }) => {
+    const tableName = url.pathname.split('/').filter(Boolean).at(-1)
+
+    if (tableName === 'projects') {
+      return [projectRow]
+    }
+
+    if (tableName === 'staff') {
+      return [staffRow]
+    }
+
+    if (tableName === 'project_incomes') {
+      return [projectIncomeRow]
+    }
+
+    if (tableName === 'bills') {
+      return billRows.map(clonePayment)
+    }
+
+    return []
   }
 }
 
@@ -548,6 +633,112 @@ test.describe('payment surfaces', () => {
     await page.getByRole('button', { name: /Staff A/ }).click()
 
     await expect(page).toHaveURL(/\/payment\/bill-fee-oldest(?:\?.*)?$/)
+  })
+
+  test('edits fee bill groups through the oldest editable child bill', async ({ page }) => {
+    page.setDefaultNavigationTimeout(120_000)
+    const bills = [
+      makeFeeBill({
+        id: 'bill-fee-oldest',
+        description: 'Fee termin Proyek E2E - Staff A',
+        amount: 100_000,
+        paid_amount: 0,
+        paidAmount: 0,
+        remaining_amount: 100_000,
+        remainingAmount: 100_000,
+        status: 'unpaid',
+        due_date: '2026-04-20',
+        dueDate: '2026-04-20',
+        created_at: '2026-04-18T09:00:00.000Z',
+        createdAt: '2026-04-18T09:00:00.000Z',
+        project_income_id: 'income-fee-1',
+        projectIncomeId: 'income-fee-1',
+      }),
+      makeFeeBill({
+        id: 'bill-fee-newer',
+        description: 'Fee termin Proyek E2E - Staff A',
+        amount: 120_000,
+        paid_amount: 0,
+        paidAmount: 0,
+        remaining_amount: 120_000,
+        remainingAmount: 120_000,
+        status: 'unpaid',
+        due_date: '2026-04-22',
+        dueDate: '2026-04-22',
+        created_at: '2026-04-19T09:00:00.000Z',
+        createdAt: '2026-04-19T09:00:00.000Z',
+        project_income_id: 'income-fee-1',
+        projectIncomeId: 'income-fee-1',
+      }),
+    ]
+
+    const mockApi = createBillsPageMockApi({
+      bills,
+    })
+
+    mockApi.supabase = createProjectIncomeEditMockSupabase({ billRows: bills })
+
+    await openApp(page, '/transactions?tab=tagihan', {
+      mockApi,
+    })
+
+    await expect(page.getByRole('button', { name: /Staff A/ })).toBeVisible({
+      timeout: 30000,
+    })
+
+    await page.getByRole('button', { name: 'Edit tagihan' }).click()
+
+    await expect(page).toHaveURL(/\/edit\/project-income\/income-fee-1(?:\?.*)?$/)
+    await expect(page.getByRole('heading', { name: 'Edit Pemasukan Proyek' })).toBeVisible({
+      timeout: 30000,
+    })
+  })
+
+  test('deletes fee bill groups through the oldest unpaid child bill', async ({ page }) => {
+    page.setDefaultNavigationTimeout(120_000)
+    const bills = [
+      makeFeeBill({
+        id: 'bill-fee-oldest',
+        description: 'Fee termin Proyek E2E - Staff A',
+        amount: 100_000,
+        paid_amount: 0,
+        paidAmount: 0,
+        remaining_amount: 100_000,
+        remainingAmount: 100_000,
+        status: 'unpaid',
+        due_date: '2026-04-20',
+        dueDate: '2026-04-20',
+        created_at: '2026-04-18T09:00:00.000Z',
+        createdAt: '2026-04-18T09:00:00.000Z',
+        project_income_id: 'income-fee-1',
+        projectIncomeId: 'income-fee-1',
+      }),
+    ]
+
+    const mockApi = createBillsPageMockApi({
+      bills,
+    })
+
+    await openApp(page, '/transactions?tab=tagihan', {
+      mockApi,
+    })
+
+    await expect(page.getByRole('button', { name: /Staff A/ })).toBeVisible({
+      timeout: 30000,
+    })
+
+    page.once('dialog', async (dialog) => {
+      await dialog.accept()
+    })
+
+    await page.getByRole('button', { name: 'Hapus tagihan' }).click()
+
+    await expect(page.getByText('Belum Ada Tagihan')).toBeVisible({
+      timeout: 30000,
+    })
+    expect(mockApi.state.lastDeleteRequest).toMatchObject({
+      billId: 'bill-fee-oldest',
+    })
   })
 
   test('sends a bill receipt to telegram dm from payment history', async ({ page }) => {

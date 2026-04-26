@@ -3136,3 +3136,84 @@ Saat ada brief baru yang masih terkait stream ini, update dokumen dengan format:
   - Dependensi: `UCW-409`.
   - Validasi minimum: syntax backend, lint file scope, dan build.
   - Addendum audit 2026-04-25: backend mencoba ulang model utama sekali, lalu memakai fallback default `gemini-2.5-flash-lite` atau daftar `GEMINI_INVOICE_FALLBACK_MODELS`; error 503 dan 429 sekarang dipetakan ke pesan yang bisa ditindaklanjuti.
+- [x] UCW-412 - Audit service-role contract untuk manual stock-out
+  - Submit stock-out manual harus diverifikasi terhadap contract `SUPABASE_SERVICE_ROLE_KEY` dan grant RPC `fn_create_atomic_manual_stock_out` agar error `permission denied for function fn_create_atomic_manual_stock_out` tidak lagi muncul pada flow simpan normal.
+  - Scope target: `src/pages/StockPage.jsx`, `src/lib/records-api.js`, `api/records.js`, `supabase/migrations/20260419090000_create_atomic_manual_stock_out_function.sql`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-106`, `UCW-107`.
+  - Validasi minimum: audit dokumen + mapping repo untuk contract UI/store/API/function, dan fail-fast check bila service-role config belum siap.
+  - Addendum audit 2026-04-26: stock-out manual sekarang memakai service-role client terpisah untuk RPC `fn_create_atomic_manual_stock_out`, sementara access check tetap lewat client user-context; error `42501` permission denied dipetakan ke pesan yang mengarah ke migration/grant yang harus di-deploy.
+- [x] UCW-413 - Kunci parity paid-row di Jurnal aktif
+  - Row `bill` yang berstatus `paid` harus tetap tidak muncul di tab `Jurnal` aktif, sementara tab `Riwayat` tetap menjadi surface canonical untuk histori `paid` agar UX lebih terfokus.
+  - Scope target: `src/lib/transaction-presentation.js`, `src/pages/TransactionsPage.jsx`, `src/pages/HistoryPage.jsx`, `api/transactions.js`, `tests/e2e/transactions.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-247`, `UCW-373`.
+  - Validasi minimum: audit dokumen + mapping repo untuk cache, filter helper, dan fetch server-side agar paid row tidak rehydrated ke view aktif.
+  - Addendum audit 2026-04-26: active `Jurnal` kini menyaring row settled `Lunas` dari render/cache sebelum ditampilkan, sehingga row paid tidak lagi muncul di tab aktif sementara `Riwayat` tetap menjadi surface canonical untuk histori settled.
+- [x] UCW-414 - Redesign stepper item MaterialInvoiceForm dan OCR mobile-first
+  - MaterialInvoice create/edit faktur dan surat jalan memakai satu item aktif dalam stepper mobile-first; tombol `Tambah` tetap singkat dengan icon `+` dan sejajar dengan `Hapus`, lalu `Kembali/Lanjut` mengatur fokus antar item; saat item aktif dihapus, fokus kembali ke item sebelumnya.
+  - Bottomsheet AI OCR di create mode berubah jadi stepper review yang ringkas: card ringkasan tanggal/supplier/no faktur dihapus, upload menjadi thumbnail placeholder yang bisa diklik untuk membuka file picker, thumbnail punya overlay `Hapus` saat difokuskan, dan CTA utama tetap `Proses AI`.
+  - Scope target: `src/components/MaterialInvoiceForm.jsx`, `tests/e2e/attachment-reset.spec.js`, `tests/e2e/create.spec.js`, `tests/e2e/edit.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-409`, `UCW-67`.
+  - Validasi minimum: lint/build, plus smoke Playwright create/edit material invoice untuk memastikan stepper item, thumbnail picker, dan apply OCR tetap aman.
+  - Addendum implementasi 2026-04-26: runtime stepper item dan OCR mobile-first sudah diimplementasikan dan divalidasi lewat lint/build serta smoke Playwright pada `attachment-reset.spec.js`.
+- [x] UCW-415 - Kunci Tagihan Upah sebagai payable independen
+  - `Tagihan Upah` diposisikan sebagai payable mandiri; relasi proyek/pemasukan hanya referensi opsional untuk laporan/audit, dan model `project-income -> fee bill` lama dipertahankan hanya sebagai kompatibilitas legacy sampai seam runtime berikutnya dibuka.
+  - Scope target: `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-406`, `UCW-98`.
+  - Validasi minimum: audit dokumen + konsistensi istilah/flow tanpa runtime mutation.
+  - Addendum audit 2026-04-26: keputusan produk dikunci ke `Tagihan Upah` independen; runtime tetap ditahan sampai backlog compatibility selesai.
+- [x] UCW-416 - Audit kompatibilitas fee staf legacy
+  - Mapping semua surface yang masih mengasumsikan fee staf adalah child dari `project-income`, lalu tandai mana yang masih perlu dipertahankan sebagai compatibility path.
+  - Scope target: `src/lib/transaction-presentation.js`, `src/pages/BillsPage.jsx`, `src/pages/PaymentsPage.jsx`, `src/pages/TransactionDetailPage.jsx`, `src/pages/EditRecordPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-415`.
+  - Validasi minimum: audit read-only mapping + keputusan compatibility/risk.
+  - Addendum audit 2026-04-26: `IncomeForm` masih menampilkan estimasi/preview fee staf, `useIncomeStore` masih hydrate `projectIncome.bill/bills` dari `bills.project_income_id`, `BillsPage` dan `PaymentsPage` masih memilih child bill outstanding tertua sebagai target pembayaran, `TransactionDetailPage` masih membaca snapshot `Tagihan Upah` legacy, dan `EditRecordPage` masih membuka editor `project-income` yang bergantung pada hydration relasi lama.
+  - Keputusan compatibility: read/detail/edit legacy tetap dipertahankan sampai `UCW-417`-`UCW-421` membuka seam runtime baru; task ini tetap docs-only dan tidak mengubah runtime contract.
+- [x] UCW-417 - Tambah shell create Tagihan Upah mandiri
+  - Tambah entrypoint input untuk `Tagihan Upah` mandiri dengan field minimum yang paling stabil; belum ada save mutation, hanya shell form dan state dasar.
+  - Scope target: `src/pages/PaymentsPage.jsx`, `src/pages/EditRecordPage.jsx`, `src/components/TagihanUpahForm.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-416`.
+  - Validasi minimum: lint/build plus smoke render form kosong.
+  - Addendum implementasi 2026-04-26: shell create `Tagihan Upah` kini tampil di `/edit/bill/new` dengan picker staf/proyek, tanggal tagih/jatuh tempo, nominal, dan catatan; entrypoint `Tambah Tagihan Upah` tersedia dari `Pembayaran`.
+- [x] UCW-418 - Sambungkan save path Tagihan Upah
+  - Hubungkan submit `Tagihan Upah` ke write path yang sudah ada dengan relasi proyek opsional, tanpa menyentuh coupling parent income dulu.
+  - Scope target: `src/components/TagihanUpahForm.jsx`, `src/store/usePaymentStore.js`, `src/lib/records-api.js`, `api/records.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-417`.
+  - Validasi minimum: lint/build dan smoke Playwright create flow kecil.
+  - Addendum implementasi 2026-04-26: `submitBill` sekarang membangun payload bill lalu memanggil `createBillFromApi`, `api/records.js` menerima `POST resource=bills` dengan validasi staf/proyek/tanggal/nominal sebelum insert `bill_type: gaji`, dan smoke `tests/e2e/create.spec.js` menutup alur simpan sampai kembali ke `/pembayaran`.
+- [x] UCW-419 - Tambah aksi Edit di row tagihan agregat
+  - Tambah tombol Edit hanya di row agregat `List Tagihan`; target deterministik mengikuti child fee bill tertua, lalu membuka editor yang sesuai.
+  - Scope target: `src/pages/BillsPage.jsx`, `src/pages/PaymentsPage.jsx`, `src/lib/transaction-presentation.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-415`, `UCW-416`.
+  - Validasi minimum: lint/build dan smoke navigasi Edit dari row agregat.
+  - Addendum implementasi 2026-04-26: `BillsPage` sekarang menampilkan tombol `Edit` pada card fee-bill agregat yang masih aman diedit; helper `getBillGroupEditRoute` memilih child unpaid tertua yang punya `projectIncomeId`, lalu `tests/e2e/payment.spec.js` memverifikasi route membuka editor `Pemasukan Proyek` yang benar.
+- [x] UCW-420 - Tambah aksi Hapus di row tagihan agregat
+  - Tambah tombol Hapus hanya di row agregat `List Tagihan`; jika sudah ada pembayaran, tombol tidak dirender supaya group tetap read-only.
+  - Scope target: `src/pages/BillsPage.jsx`, `src/lib/transaction-presentation.js`, `tests/unit/transaction-presentation.test.js`, `tests/e2e/payment.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-415`, `UCW-416`.
+  - Validasi minimum: lint/build dan smoke guard delete.
+  - Addendum implementasi 2026-04-26: `BillsPage` sekarang menampilkan tombol `Hapus` untuk `staff-group` yang masih eligible; klik memicu confirm native lalu soft-delete pada child bill outstanding tertua, kemudian daftar tagihan di-refresh dan smoke Playwright memastikan row hilang setelah hapus.
+- [x] UCW-421 - Lepas auto-create fee staf dari project-income
+  - Hentikan ownership otomatis fee staf dari alur `project-income`; income tetap tersimpan sebagai pendapatan, sedangkan tagihan upah hidup sebagai payable mandiri.
+  - Scope target: `src/store/useIncomeStore.js`, `api/transactions.js`, `tests/unit/transactions-project-income-aggregation.test.js`, `tests/unit/transaction-presentation.test.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-415`, `UCW-418`.
+  - Validasi minimum: lint/build dan audit legacy-child removal.
+  - Addendum implementasi 2026-04-26: `useIncomeStore` tidak lagi hydrate `projectIncome.bill/bills` saat fetch detail, `api/transactions.js` tidak lagi memblokir edit/hapus karena fee child dan hard delete memutus `project_income_id` dari `bills` sebelum parent dihapus, sementara regresi unit memastikan summary fee tidak muncul lagi di read model project-income.
+- [x] UCW-422 - Regression tests untuk seams fee staf
+  - Tambah regresi kecil untuk resolver target, edit/hapus guard, save path, dan legacy compatibility supaya perubahan per seam tidak saling merusak.
+  - Scope target: `tests/unit/*`, `tests/e2e/*`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-417`, `UCW-418`, `UCW-419`, `UCW-420`, `UCW-421`.
+  - Validasi minimum: lint/build dan smoke terfokus per seam.
+  - Addendum implementasi 2026-04-26: delete bill sekarang memakai service-client RPC `fn_soft_delete_bill_with_history`, permission denied dibungkus jadi pesan kontrak yang jelas, dan regresi unit mengunci jalur service-role tersebut.
+- [x] UCW-423 - Audit dan pangkas copy AI berlebih di form mobile lintas domain
+  - Pangkas helper text, deskripsi section, copy hasil AI/OCR/review, empty/error state, dan CTA label pada form create/edit aktif supaya layar mobile lebih pendek dan fokus review tetap ke input utama.
+  - Scope target: `src/components/AttendanceForm.jsx`, `src/components/ExpenseForm.jsx`, `src/components/IncomeForm.jsx`, `src/components/LoanForm.jsx`, `src/components/MaterialInvoiceForm.jsx`, `src/components/WorkerForm.jsx`, `src/components/master/GenericMasterForm.jsx`, `src/pages/AttendancePage.jsx`, `src/pages/BeneficiariesPage.jsx`, `src/pages/EditRecordPage.jsx`, `src/pages/HrdPage.jsx`, `src/pages/MasterFormPage.jsx`, `src/pages/MaterialInvoicePage.jsx`, `src/pages/PaymentPage.jsx`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-16`, `UCW-17`, `UCW-18`, `UCW-414`.
+  - Validasi minimum: `npm run lint`, `npm run build`, plus smoke mobile pada form representatif bila pangkasan copy mengubah wrap atau hierarchy visual.
+  - Addendum implementasi 2026-04-26: form shell descriptions now hide on mobile, toggle helper copy is compacted, and the heaviest visible helper sentences were shortened without touching data flow; smoke Playwright mobile tetap lolos pada create attendance, create material invoice, dan edit record shell.
+- [x] UCW-424 - Audit edit loan prefilling dan safe-zone loading shell
+  - Edit `loan` harus selalu hydrate dari row canonical `loans` lewat `fetchLoanById`, meski `location.state.item` hanya membawa summary transaksi dari ledger/detail, supaya field `creditorId`, nominal, tanggal, dan bunga tidak kosong saat form dibuka.
+  - Loading shell `EditRecordPage` untuk semua domain edit memakai wrapper safe-zone yang sama dengan form shell agar padding mobile dan lebar desktop konsisten selama data masih loading.
+  - Scope target: `src/pages/EditRecordPage.jsx`, `tests/e2e/edit.spec.js`, `docs/unified-crud-workspace-plan-2026-04-18.md`, `docs/progress/unified-crud-workspace-progress-log.md`.
+  - Dependensi: `UCW-423`.
+  - Validasi minimum: `npx eslint src/pages/EditRecordPage.jsx tests/e2e/edit.spec.js`, `npm run build`, `npx playwright test tests/e2e/edit.spec.js --project=mobile-chrome --grep "hydrates loan edit form from canonical record even when route state is sparse|keeps the loan loading shell inside the viewport safe zone" --reporter=line --workers=1`, dan smoke Chromium yang sama.
+  - Addendum implementasi 2026-04-26: route-state summary pinjaman yang sparse tetap di-override oleh fetch canonical, dan loading shell sekarang dibungkus `AppViewportSafeArea` supaya safe zone padding konsisten.

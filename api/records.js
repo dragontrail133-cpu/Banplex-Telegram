@@ -392,6 +392,26 @@ async function assertMaterialStockAvailability(adminClient, deltaByMaterialId = 
   }
 }
 
+function assertMutationRows(rows, expectedCount, message) {
+  const rowCount = Array.isArray(rows) ? rows.length : 0
+  const normalizedExpectedCount =
+    Number.isInteger(expectedCount) && expectedCount >= 0 ? expectedCount : null
+
+  if (normalizedExpectedCount === null) {
+    if (rowCount === 0) {
+      throw createHttpError(409, message)
+    }
+
+    return rowCount
+  }
+
+  if (rowCount !== normalizedExpectedCount) {
+    throw createHttpError(409, message)
+  }
+
+  return rowCount
+}
+
 async function applyMaterialStockDelta(adminClient, deltaByMaterialId = new Map()) {
   const materialStocks = await loadMaterialStocksByIds(adminClient, [...deltaByMaterialId.keys()])
   const timestamp = new Date().toISOString()
@@ -411,17 +431,24 @@ async function applyMaterialStockDelta(adminClient, deltaByMaterialId = new Map(
         : 0
       const nextStock = currentStock + numericDelta
 
-      const { error } = await adminClient
+      const { data: updatedRows, error } = await adminClient
         .from('materials')
         .update({
           current_stock: nextStock,
           updated_at: timestamp,
         })
         .eq('id', materialId)
+        .select('id')
 
       if (error) {
         throw error
       }
+
+      assertMutationRows(
+        updatedRows,
+        1,
+        `Stok material ${currentMaterial.id} gagal diperbarui. Muat ulang data lalu coba lagi.`
+      )
     })
   )
 }
@@ -527,14 +554,21 @@ async function syncMaterialInvoiceStockMovement(
     .filter((itemId) => itemId && !nextItemIds.has(itemId))
 
   if (deleteIds.length > 0) {
-    const { error } = await adminClient
+    const { data: deletedRows, error } = await adminClient
       .from('stock_transactions')
       .delete()
       .in('expense_line_item_id', deleteIds)
+      .select('id')
 
     if (error) {
       throw error
     }
+
+    assertMutationRows(
+      deletedRows,
+      deleteIds.length,
+      'Riwayat stok faktur material gagal dihapus. Muat ulang data lalu coba lagi.'
+    )
   }
 
   await Promise.all(
@@ -581,6 +615,19 @@ async function syncMaterialInvoiceStockMovement(
 
 function getEnv(name, fallback = '') {
   return String(globalThis.process?.env?.[name] ?? fallback).trim()
+}
+
+function resolveStockOutServiceRoleKey() {
+  const serviceRoleKey = getEnv('SUPABASE_SERVICE_ROLE_KEY')
+
+  if (!serviceRoleKey) {
+    throw createHttpError(
+      500,
+      'Environment records belum lengkap untuk stock-out manual. SUPABASE_SERVICE_ROLE_KEY wajib ada.'
+    )
+  }
+
+  return serviceRoleKey
 }
 
 function createHttpError(status, message) {
@@ -1877,6 +1924,135 @@ async function loadBillById(adminClient, billId) {
   }
 }
 
+async function loadBillStaffById(adminClient, staffId, teamId) {
+  const normalizedStaffId = normalizeText(staffId, null)
+  const normalizedTeamId = normalizeText(teamId, null)
+
+  if (!normalizedStaffId) {
+    throw createHttpError(400, 'Staf wajib dipilih.')
+  }
+
+  const { data, error } = await adminClient
+    .from('staff')
+    .select('id, staff_name, team_id, deleted_at')
+    .eq('id', normalizedStaffId)
+    .eq('team_id', normalizedTeamId)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  if (!data?.id) {
+    throw createHttpError(404, 'Staf tidak ditemukan.')
+  }
+
+  if (data.deleted_at) {
+    throw createHttpError(400, 'Staf terhapus tidak bisa dipakai untuk tagihan baru.')
+  }
+
+  return data
+}
+
+async function loadBillProjectById(adminClient, projectId, teamId) {
+  const normalizedProjectId = normalizeText(projectId, null)
+  const normalizedTeamId = normalizeText(teamId, null)
+
+  if (!normalizedProjectId) {
+    return null
+  }
+
+  const { data, error } = await adminClient
+    .from('projects')
+    .select('id, name, project_name, team_id, deleted_at')
+    .eq('id', normalizedProjectId)
+    .eq('team_id', normalizedTeamId)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  if (!data?.id) {
+    throw createHttpError(404, 'Proyek terkait tidak ditemukan.')
+  }
+
+  if (data.deleted_at) {
+    throw createHttpError(400, 'Proyek terhapus tidak bisa dipakai untuk tagihan baru.')
+  }
+
+  return data
+}
+
+async function createBill(adminClient, body = {}, telegramUserId) {
+  const teamId = normalizeText(body.teamId ?? body.team_id, null)
+  const effectiveTeamId = await assertTeamAccess(adminClient, telegramUserId, teamId)
+  const staffId = normalizeText(body.staffId ?? body.staff_id, null)
+  const projectId = normalizeText(body.projectId ?? body.project_id, null)
+  const billType = normalizeText(body.billType ?? body.bill_type, 'gaji').toLowerCase() || 'gaji'
+  const dueDate = normalizeText(body.dueDate ?? body.due_date ?? body.date, null)
+  const amount = toNumber(body.amount)
+  const notes = normalizeText(body.notes, null)
+
+  if (!dueDate) {
+    throw createHttpError(400, 'Tanggal tagih wajib diisi.')
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw createHttpError(400, 'Nominal tagihan harus lebih dari 0.')
+  }
+
+  const staff = await loadBillStaffById(adminClient, staffId, effectiveTeamId)
+  const project = await loadBillProjectById(adminClient, projectId, effectiveTeamId)
+  const staffName = normalizeText(
+    body.staffName ?? body.staff_name_snapshot ?? staff.staff_name,
+    'Staf'
+  )
+  const projectName = project
+    ? normalizeText(body.projectName ?? body.project_name_snapshot ?? project.name ?? project.project_name, null)
+    : null
+  const description = normalizeText(
+    body.description,
+    staffName ? `Tagihan Upah ${staffName}` : 'Tagihan Upah'
+  )
+  const timestamp = new Date().toISOString()
+
+  const { data: insertedBill, error: billError } = await adminClient
+    .from('bills')
+    .insert({
+      telegram_user_id: telegramUserId,
+      team_id: effectiveTeamId,
+      staff_id: staff.id,
+      project_id: project?.id ?? null,
+      bill_type: billType || 'gaji',
+      description,
+      amount,
+      paid_amount: 0,
+      due_date: dueDate,
+      status: 'unpaid',
+      paid_at: null,
+      notes,
+      worker_name_snapshot: staffName,
+      supplier_name_snapshot: null,
+      project_name_snapshot: projectName,
+      updated_at: timestamp,
+    })
+    .select('id')
+    .single()
+
+  if (billError) {
+    throw billError
+  }
+
+  if (!insertedBill?.id) {
+    throw createHttpError(500, 'Tagihan upah gagal dibuat.')
+  }
+
+  return {
+    bill: await loadBillById(adminClient, insertedBill.id),
+  }
+}
+
 async function createBillPayment(adminClient, body = {}, telegramUserId) {
   const billId = normalizeText(body.billId ?? body.bill_id ?? body.id, null)
   const teamId = normalizeText(body.teamId ?? body.team_id, null)
@@ -2196,7 +2372,7 @@ async function loadUnpaidBills(adminClient, teamId) {
   return (data ?? []).map(mapBillRow)
 }
 
-async function softDeleteBill(adminClient, billId, expectedUpdatedAt = null) {
+async function softDeleteBill(adminClient, serviceClient, billId, expectedUpdatedAt = null) {
   const normalizedBillId = normalizeText(billId)
 
   if (!normalizedBillId) {
@@ -2217,11 +2393,24 @@ async function softDeleteBill(adminClient, billId, expectedUpdatedAt = null) {
     assertOptimisticConcurrency(expectedUpdatedAt, bill?.updated_at, 'Tagihan')
   }
 
-  const { error } = await adminClient.rpc('fn_soft_delete_bill_with_history', {
+  const { error } = await serviceClient.rpc('fn_soft_delete_bill_with_history', {
     p_bill_id: normalizedBillId,
   })
 
   if (error) {
+    const normalizedErrorCode = normalizeText(error?.code, null)
+    const normalizedErrorMessage = normalizeText(error?.message, '').toLowerCase()
+
+    if (
+      normalizedErrorCode === '42501' ||
+      normalizedErrorMessage.includes('permission denied for function fn_soft_delete_bill_with_history')
+    ) {
+      throw createHttpError(
+        500,
+        'Kontrak soft delete tagihan belum lengkap di database. Pastikan migration 20260418094000_soft_delete_bill_with_payment_history.sql sudah diterapkan dan grant execute untuk service_role tersedia.'
+      )
+    }
+
     throw error
   }
 
@@ -2457,7 +2646,13 @@ async function loadActiveProjectsForTeam(adminClient, teamId) {
   return (data ?? []).map(normalizeProjectOptionRow)
 }
 
-async function createManualStockOut(adminClient, body = {}, telegramUserId, createdByUserId = null) {
+async function createManualStockOut(
+  accessClient,
+  serviceClient,
+  body = {},
+  telegramUserId,
+  createdByUserId = null
+) {
   const materialId = normalizeText(body.materialId ?? body.material_id, null)
   const teamId = normalizeText(body.teamId ?? body.team_id, null)
   const projectId = normalizeText(body.projectId ?? body.project_id, null)
@@ -2476,19 +2671,19 @@ async function createManualStockOut(adminClient, body = {}, telegramUserId, crea
     throw createHttpError(400, 'Catatan stock-out wajib diisi.')
   }
 
-  const material = await loadMaterialById(adminClient, materialId)
+  const material = await loadMaterialById(accessClient, materialId)
 
   if (!material) {
     throw createHttpError(404, 'Material tidak ditemukan.')
   }
 
-  const effectiveTeamId = await assertTeamAccess(adminClient, telegramUserId, teamId ?? material.team_id)
+  const effectiveTeamId = await assertTeamAccess(accessClient, telegramUserId, teamId ?? material.team_id)
 
   if (normalizeText(material.team_id, null) !== effectiveTeamId) {
     throw createHttpError(404, 'Material tidak ditemukan.')
   }
 
-  const { data, error } = await adminClient.rpc('fn_create_atomic_manual_stock_out', {
+  const { data, error } = await serviceClient.rpc('fn_create_atomic_manual_stock_out', {
     p_telegram_user_id: telegramUserId,
     p_team_id: effectiveTeamId,
     p_project_id: projectId,
@@ -2499,6 +2694,19 @@ async function createManualStockOut(adminClient, body = {}, telegramUserId, crea
   })
 
   if (error) {
+    const normalizedErrorCode = normalizeText(error?.code, null)
+    const normalizedErrorMessage = normalizeText(error?.message, '').toLowerCase()
+
+    if (
+      normalizedErrorCode === '42501' ||
+      normalizedErrorMessage.includes('permission denied for function fn_create_atomic_manual_stock_out')
+    ) {
+      throw createHttpError(
+        500,
+        'Kontrak stock-out manual belum lengkap di database. Pastikan migration 20260419090000_create_atomic_manual_stock_out_function.sql sudah diterapkan dan grant execute untuk service_role tersedia.'
+      )
+    }
+
     throw error
   }
 
@@ -2954,14 +3162,21 @@ async function syncMaterialInvoiceLineItems(adminClient, expenseId, itemsData = 
     .filter((itemId) => !nextIds.has(itemId))
 
   if (deleteIds.length > 0) {
-    const { error } = await adminClient
+    const { data: deletedRows, error } = await adminClient
       .from('expense_line_items')
       .delete()
       .in('id', deleteIds)
+      .select('id')
 
     if (error) {
       throw error
     }
+
+    assertMutationRows(
+      deletedRows,
+      deleteIds.length,
+      'Baris faktur material gagal dihapus. Muat ulang data lalu coba lagi.'
+    )
   }
 
   await Promise.all(
@@ -2978,14 +3193,21 @@ async function syncMaterialInvoiceLineItems(adminClient, expenseId, itemsData = 
       }
 
       if (item.id && currentItemsById.has(item.id)) {
-        const { error } = await adminClient
+        const { data: updatedRows, error } = await adminClient
           .from('expense_line_items')
           .update(payload)
           .eq('id', item.id)
+          .select('id')
 
         if (error) {
           throw error
         }
+
+        assertMutationRows(
+          updatedRows,
+          1,
+          'Baris faktur material gagal diperbarui. Muat ulang data lalu coba lagi.'
+        )
 
         return
       }
@@ -3180,7 +3402,7 @@ async function rollbackExpense(adminClient, expenseId) {
 
   const timestamp = new Date().toISOString()
 
-  const { error } = await adminClient
+  const { data: rolledBackRows, error } = await adminClient
     .from('expenses')
     .update({
       deleted_at: timestamp,
@@ -3188,8 +3410,23 @@ async function rollbackExpense(adminClient, expenseId) {
     })
     .eq('id', expenseId)
     .is('deleted_at', null)
+    .select('id')
 
-  return error ?? null
+  if (error) {
+    return error
+  }
+
+  try {
+    assertMutationRows(
+      rolledBackRows,
+      1,
+      'Pengeluaran gagal di-rollback setelah item faktur material gagal disimpan.'
+    )
+  } catch (rollbackError) {
+    return rollbackError
+  }
+
+  return null
 }
 
 async function upsertExpense(adminClient, body, authUserId, telegramUserId, teamId) {
@@ -5109,7 +5346,7 @@ async function persistAttendanceSheet(adminClient, body, telegramUserId, teamId)
 
   await Promise.all(
     deletes.map(async (row) => {
-      const { error } = await adminClient
+      const { data: deletedRows, error } = await adminClient
         .from('attendance_records')
         .update({
           deleted_at: timestamp,
@@ -5117,10 +5354,17 @@ async function persistAttendanceSheet(adminClient, body, telegramUserId, teamId)
         })
         .eq('id', row.sourceId)
         .is('deleted_at', null)
+        .select('id')
 
       if (error) {
         throw error
       }
+
+      assertMutationRows(
+        deletedRows,
+        1,
+        'Absensi gagal dipindahkan ke recycle bin. Muat ulang data lalu coba lagi.'
+      )
     })
   )
 
@@ -7040,6 +7284,16 @@ export default async function handler(req, res) {
         })
       }
 
+      if (method === 'POST') {
+        const body = await parseRequestBody(req)
+        const result = await createBill(adminClient, body, telegramUserId)
+
+        return res.status(200).json({
+          success: true,
+          bill: result.bill,
+        })
+      }
+
       if (method === 'DELETE') {
         const body = await parseRequestBody(req)
         const bill = await loadBillById(adminClient, body.billId)
@@ -7053,7 +7307,7 @@ export default async function handler(req, res) {
         }
 
         await assertTeamAccess(adminClient, telegramUserId, body.teamId ?? bill.teamId)
-        await softDeleteBill(adminClient, body.billId, expectedUpdatedAt)
+        await softDeleteBill(adminClient, serviceClient, body.billId, expectedUpdatedAt)
 
         return res.status(200).json({
           success: true,
@@ -7068,9 +7322,12 @@ export default async function handler(req, res) {
 
       const body = await parseRequestBody(req)
       const teamId = normalizeText(body.teamId ?? body.team_id, null)
+      const stockOutServiceRoleKey = resolveStockOutServiceRoleKey()
+      const stockOutServiceClient = createDatabaseClient(supabaseUrl, stockOutServiceRoleKey)
       await assertManualStockOutAccess(adminClient, telegramUserId, teamId)
       const result = await createManualStockOut(
         adminClient,
+        stockOutServiceClient,
         body,
         telegramUserId,
         profile?.id ?? context.authUser.id
@@ -7978,7 +8235,11 @@ export default async function handler(req, res) {
 }
 
 export {
+  createBill,
+  createManualStockOut,
   loadPartyStatementWorkerRows,
   normalizePartyStatementPartyType,
+  softDeleteBill,
+  resolveStockOutServiceRoleKey,
   summarizePartyStatementRows,
 }

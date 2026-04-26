@@ -273,12 +273,24 @@ function sortPermanentDeleteCandidates(records = []) {
   })
 }
 
-function assertDeletedRows(deletedRows, message) {
-  if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+function assertDeletedRows(deletedRows, message, expectedCount = null) {
+  const rowCount = Array.isArray(deletedRows) ? deletedRows.length : 0
+  const normalizedExpectedCount =
+    Number.isInteger(expectedCount) && expectedCount >= 0 ? expectedCount : null
+
+  if (normalizedExpectedCount === null) {
+    if (rowCount === 0) {
+      throw createHttpError(409, message)
+    }
+
+    return rowCount
+  }
+
+  if (rowCount !== normalizedExpectedCount) {
     throw createHttpError(409, message)
   }
 
-  return deletedRows.length
+  return rowCount
 }
 
 function mapRecycleBinTransactionRecord(row) {
@@ -1018,8 +1030,6 @@ function normalizeBillSummaryRow(row) {
 }
 
 function mapWorkspaceProjectIncomeRow(row) {
-  const feeBillPaidAmount = toNumber(row?.fee_bill_paid_amount)
-
   return {
     ...mapProjectIncomeRow(row),
     sort_at: row?.sort_at ?? row?.updated_at ?? row?.created_at ?? null,
@@ -1029,8 +1039,6 @@ function mapWorkspaceProjectIncomeRow(row) {
     ledger_summary: null,
     sourceType: 'project-income',
     canView: true,
-    canEdit: feeBillPaidAmount <= 0,
-    canDelete: feeBillPaidAmount <= 0,
     detailRoute: `/transactions/${row.id}`,
     editRoute: `/edit/project-income/${row.id}`,
   }
@@ -1130,8 +1138,6 @@ function mapWorkspaceTransactionViewRow(row) {
         created_at: row.created_at,
         updated_at: row.updated_at,
         project_name_snapshot: row.project_name_snapshot,
-        bill_paid_amount: row.bill_paid_amount,
-        bill_paid_at: row.bill_paid_at,
         deleted_at: null,
       },
     )
@@ -1961,9 +1967,6 @@ export function aggregateProjectIncomeViewRows(rows = []) {
     }
 
     const existingGroup = projectIncomeGroups.get(groupKey)
-    const billAmount = toNumber(row?.bill_amount)
-    const billPaidAmount = toNumber(row?.bill_paid_amount)
-    const hasBill = normalizeText(row?.bill_id, null) !== null
 
     if (!existingGroup) {
       projectIncomeGroups.set(groupKey, {
@@ -1983,10 +1986,6 @@ export function aggregateProjectIncomeViewRows(rows = []) {
         bill_worker_name_snapshot: null,
         bill_ids: [],
         bill_count: 0,
-        fee_bill_ids: hasBill ? [row.bill_id] : [],
-        fee_bill_count: hasBill ? 1 : 0,
-        fee_bill_amount: hasBill ? billAmount : 0,
-        fee_bill_paid_amount: hasBill ? billPaidAmount : 0,
         search_text: normalizeText(row?.search_text, ''),
       })
       continue
@@ -1999,20 +1998,10 @@ export function aggregateProjectIncomeViewRows(rows = []) {
       getWorkspaceViewSortValue(row) > getWorkspaceViewSortValue(existingGroup)
         ? row?.sort_at ?? existingGroup.sort_at ?? null
         : existingGroup.sort_at ?? row?.sort_at ?? null
-    const nextFeeBillCount = existingGroup.fee_bill_count + (hasBill ? 1 : 0)
-    const nextFeeBillAmount = existingGroup.fee_bill_amount + (hasBill ? billAmount : 0)
-    const nextFeeBillPaidAmount =
-      existingGroup.fee_bill_paid_amount + (hasBill ? billPaidAmount : 0)
 
     projectIncomeGroups.set(groupKey, {
       ...existingGroup,
       sort_at: nextSortAt,
-      fee_bill_ids: hasBill
-        ? [...existingGroup.fee_bill_ids, row.bill_id]
-        : existingGroup.fee_bill_ids,
-      fee_bill_count: nextFeeBillCount,
-      fee_bill_amount: nextFeeBillAmount,
-      fee_bill_paid_amount: nextFeeBillPaidAmount,
       search_text: [...nextSearchParts].join(' '),
     })
   }
@@ -2940,7 +2929,8 @@ async function hardDeleteBillPaymentRecord(adminClient, serviceClient, paymentId
 
   assertDeletedRows(
     deletedRows,
-    'Pembayaran tagihan tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+    'Pembayaran tagihan tidak terhapus permanen. Muat ulang data lalu coba lagi.',
+    1
   )
 
   const bill = payment.bill_id
@@ -2991,7 +2981,8 @@ async function hardDeleteExpenseAttachmentRecord(adminClient, serviceClient, att
 
   assertDeletedRows(
     deletedRows,
-    'Lampiran tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+    'Lampiran tidak terhapus permanen. Muat ulang data lalu coba lagi.',
+    1
   )
 
   return {
@@ -3087,25 +3078,6 @@ async function softDeleteProjectIncome(adminClient, id, expectedUpdatedAt = null
     throw createHttpError(400, 'ID pemasukan proyek tidak valid.')
   }
 
-  const { data: paidFeeBills, error: paidFeeBillsError } = await adminClient
-    .from('bills')
-    .select('id')
-    .eq('project_income_id', normalizedId)
-    .is('deleted_at', null)
-    .gt('paid_amount', 0)
-    .limit(1)
-
-  if (paidFeeBillsError) {
-    throw paidFeeBillsError
-  }
-
-  if ((paidFeeBills ?? []).length > 0) {
-    throw createHttpError(
-      400,
-      'Pemasukan proyek yang sudah memiliki pembayaran fee tidak bisa dihapus.'
-    )
-  }
-
   if (normalizeVersion(expectedUpdatedAt)) {
     const { data: currentIncome, error: currentIncomeError } = await adminClient
       .from('project_incomes')
@@ -3123,7 +3095,7 @@ async function softDeleteProjectIncome(adminClient, id, expectedUpdatedAt = null
 
   const timestamp = new Date().toISOString()
 
-  const { error: incomeError } = await adminClient
+  const { data: updatedIncomeRows, error: incomeError } = await adminClient
     .from('project_incomes')
     .update({
       deleted_at: timestamp,
@@ -3131,24 +3103,17 @@ async function softDeleteProjectIncome(adminClient, id, expectedUpdatedAt = null
     })
     .eq('id', normalizedId)
     .is('deleted_at', null)
+    .select('id')
 
   if (incomeError) {
     throw incomeError
   }
 
-  const { error: billError } = await adminClient
-    .from('bills')
-    .update({
-      deleted_at: timestamp,
-      updated_at: timestamp,
-      status: 'cancelled',
-    })
-    .eq('project_income_id', normalizedId)
-    .is('deleted_at', null)
-
-  if (billError) {
-    throw billError
-  }
+  assertDeletedRows(
+    updatedIncomeRows,
+    'Pemasukan proyek gagal dihapus. Muat ulang data lalu coba lagi.',
+    1
+  )
 
   return true
 }
@@ -3193,7 +3158,7 @@ async function softDeleteLoan(adminClient, id, expectedUpdatedAt = null) {
     assertOptimisticConcurrency(expectedUpdatedAt, currentLoan?.updated_at, 'Pinjaman')
   }
 
-  const { error } = await adminClient
+  const { data: updatedLoanRows, error } = await adminClient
     .from('loans')
     .update({
       deleted_at: new Date().toISOString(),
@@ -3201,10 +3166,17 @@ async function softDeleteLoan(adminClient, id, expectedUpdatedAt = null) {
     })
     .eq('id', normalizedId)
     .is('deleted_at', null)
+    .select('id')
 
   if (error) {
     throw error
   }
+
+  assertDeletedRows(
+    updatedLoanRows,
+    'Pinjaman gagal dihapus. Muat ulang data lalu coba lagi.',
+    1
+  )
 
   return true
 }
@@ -3248,21 +3220,6 @@ async function restoreProjectIncome(adminClient, id, expectedUpdatedAt = null) {
 
   if (incomeError) {
     throw incomeError
-  }
-
-  const { error: billError } = await adminClient
-    .from('bills')
-    .update({
-      deleted_at: null,
-      updated_at: timestamp,
-      status: 'unpaid',
-      paid_at: null,
-    })
-    .eq('project_income_id', normalizedId)
-    .not('deleted_at', 'is', null)
-
-  if (billError) {
-    throw billError
   }
 
   return mapProjectIncomeRow(restoredIncome)
@@ -3562,7 +3519,7 @@ async function restoreBill(adminClient, id, telegramUserId = null, teamId = null
   )
 
   if (restoredPaymentIds.length > 0) {
-    const { error: restorePaymentsError } = await adminClient
+    const { data: restoredPaymentRows, error: restorePaymentsError } = await adminClient
       .from('bill_payments')
       .update({
         deleted_at: null,
@@ -3570,10 +3527,17 @@ async function restoreBill(adminClient, id, telegramUserId = null, teamId = null
       })
       .in('id', restoredPaymentIds)
       .not('deleted_at', 'is', null)
+      .select('id')
 
     if (restorePaymentsError) {
       throw restorePaymentsError
     }
+
+    assertDeletedRows(
+      restoredPaymentRows,
+      'Pembayaran tagihan gagal dipulihkan. Muat ulang data lalu coba lagi.',
+      restoredPaymentIds.length
+    )
   }
 
   const { data: syncedBill, error: syncError } = await adminClient
@@ -3680,24 +3644,27 @@ async function hardDeleteProjectIncome(adminClient, serviceClient, id) {
   }
 
   const billIds = (bills ?? []).map((bill) => bill.id).filter(Boolean)
+  const timestamp = new Date().toISOString()
 
   if (billIds.length > 0) {
-    const { error: paymentError } = await serviceClient
-      .from('bill_payments')
-      .delete()
-      .in('bill_id', billIds)
+    const { data: detachedBillRows, error: billDetachError } = await serviceClient
+      .from('bills')
+      .update({
+        project_income_id: null,
+        updated_at: timestamp,
+      })
+      .eq('project_income_id', normalizedId)
+      .select('id')
 
-    if (paymentError) {
-      throw paymentError
+    if (billDetachError) {
+      throw billDetachError
     }
 
-    const { error: billDeleteError } = await serviceClient
-      .from('bills')
-      .delete()
-      .eq('project_income_id', normalizedId)
-
-    if (billDeleteError) {
-      throw billDeleteError
+    if ((detachedBillRows ?? []).length !== billIds.length) {
+      throw createHttpError(
+        500,
+        'Tagihan pemasukan proyek gagal dilepas dari parent. Muat ulang data lalu coba lagi.'
+      )
     }
   }
 
@@ -3714,7 +3681,8 @@ async function hardDeleteProjectIncome(adminClient, serviceClient, id) {
 
   assertDeletedRows(
     deletedRows,
-    'Pemasukan proyek tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+    'Pemasukan proyek tidak terhapus permanen. Muat ulang data lalu coba lagi.',
+    1
   )
 
   return true
@@ -3741,14 +3709,30 @@ async function hardDeleteLoan(adminClient, serviceClient, id) {
     throw createHttpError(400, 'Pinjaman harus ada di recycle bin sebelum dihapus permanen.')
   }
 
-  const { error: paymentError } = await serviceClient
+  const { data: loanPaymentRows, error: loanPaymentsError } = await adminClient
+    .from('loan_payments')
+    .select('id')
+    .eq('loan_id', normalizedId)
+
+  if (loanPaymentsError) {
+    throw loanPaymentsError
+  }
+
+  const { data: deletedPaymentRows, error: paymentError } = await serviceClient
     .from('loan_payments')
     .delete()
     .eq('loan_id', normalizedId)
+    .select('id')
 
   if (paymentError) {
     throw paymentError
   }
+
+  assertDeletedRows(
+    deletedPaymentRows,
+    'Pembayaran pinjaman gagal dihapus permanen. Muat ulang data lalu coba lagi.',
+    (loanPaymentRows ?? []).length
+  )
 
   const { data: deletedRows, error: deleteError } = await serviceClient
     .from('loans')
@@ -3763,7 +3747,8 @@ async function hardDeleteLoan(adminClient, serviceClient, id) {
 
   assertDeletedRows(
     deletedRows,
-    'Pinjaman tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+    'Pinjaman tidak terhapus permanen. Muat ulang data lalu coba lagi.',
+    1
   )
 
   return true
@@ -3790,14 +3775,30 @@ async function hardDeleteBill(adminClient, serviceClient, id) {
     throw createHttpError(400, 'Tagihan harus ada di recycle bin sebelum dihapus permanen.')
   }
 
-  const { error: paymentError } = await serviceClient
+  const { data: billPaymentRows, error: billPaymentsError } = await adminClient
+    .from('bill_payments')
+    .select('id')
+    .eq('bill_id', normalizedId)
+
+  if (billPaymentsError) {
+    throw billPaymentsError
+  }
+
+  const { data: deletedPaymentRows, error: paymentError } = await serviceClient
     .from('bill_payments')
     .delete()
     .eq('bill_id', normalizedId)
+    .select('id')
 
   if (paymentError) {
     throw paymentError
   }
+
+  assertDeletedRows(
+    deletedPaymentRows,
+    'Pembayaran tagihan gagal dihapus permanen. Muat ulang data lalu coba lagi.',
+    (billPaymentRows ?? []).length
+  )
 
   const { data: deletedRows, error: billDeleteError } = await serviceClient
     .from('bills')
@@ -3812,27 +3813,51 @@ async function hardDeleteBill(adminClient, serviceClient, id) {
 
   assertDeletedRows(
     deletedRows,
-    'Tagihan tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+    'Tagihan tidak terhapus permanen. Muat ulang data lalu coba lagi.',
+    1
   )
 
   if (bill.expense_id) {
-    const { error: lineItemError } = await serviceClient
+    const { data: lineItemRows, error: lineItemErrorQuery } = await adminClient
+      .from('expense_line_items')
+      .select('id')
+      .eq('expense_id', bill.expense_id)
+
+    if (lineItemErrorQuery) {
+      throw lineItemErrorQuery
+    }
+
+    const { data: deletedLineItemRows, error: lineItemError } = await serviceClient
       .from('expense_line_items')
       .delete()
       .eq('expense_id', bill.expense_id)
+      .select('id')
 
     if (lineItemError) {
       throw lineItemError
     }
 
-    const { error: expenseError } = await serviceClient
+    assertDeletedRows(
+      deletedLineItemRows,
+      'Baris faktur pengeluaran gagal dihapus permanen. Muat ulang data lalu coba lagi.',
+      (lineItemRows ?? []).length
+    )
+
+    const { data: deletedExpenseRows, error: expenseError } = await serviceClient
       .from('expenses')
       .delete()
       .eq('id', bill.expense_id)
+      .select('id')
 
     if (expenseError) {
       throw expenseError
     }
+
+    assertDeletedRows(
+      deletedExpenseRows,
+      'Pengeluaran parent gagal dihapus permanen. Muat ulang data lalu coba lagi.',
+      1
+    )
   }
 
   return true
@@ -3860,23 +3885,46 @@ async function hardDeleteAttendance(adminClient, serviceClient, id) {
   }
 
   if (attendance.salary_bill_id) {
-    const { error: paymentError } = await serviceClient
+    const { data: paymentRows, error: paymentRowsError } = await adminClient
+      .from('bill_payments')
+      .select('id')
+      .eq('bill_id', attendance.salary_bill_id)
+
+    if (paymentRowsError) {
+      throw paymentRowsError
+    }
+
+    const { data: deletedPaymentRows, error: paymentError } = await serviceClient
       .from('bill_payments')
       .delete()
       .eq('bill_id', attendance.salary_bill_id)
+      .select('id')
 
     if (paymentError) {
       throw paymentError
     }
 
-    const { error: billError } = await serviceClient
+    assertDeletedRows(
+      deletedPaymentRows,
+      'Pembayaran tagihan gaji gagal dihapus permanen. Muat ulang data lalu coba lagi.',
+      (paymentRows ?? []).length
+    )
+
+    const { data: deletedBillRows, error: billError } = await serviceClient
       .from('bills')
       .delete()
       .eq('id', attendance.salary_bill_id)
+      .select('id')
 
     if (billError) {
       throw billError
     }
+
+    assertDeletedRows(
+      deletedBillRows,
+      'Tagihan gaji gagal dihapus permanen. Muat ulang data lalu coba lagi.',
+      1
+    )
   }
 
   const { data: deletedRows, error: deleteError } = await serviceClient
@@ -3892,7 +3940,8 @@ async function hardDeleteAttendance(adminClient, serviceClient, id) {
 
   assertDeletedRows(
     deletedRows,
-    'Absensi tidak terhapus permanen. Muat ulang data lalu coba lagi.'
+    'Absensi tidak terhapus permanen. Muat ulang data lalu coba lagi.',
+    1
   )
 
   return true

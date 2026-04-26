@@ -61,8 +61,6 @@ function showToast() {}
 
 const loanSelectColumns =
   'id, telegram_user_id, created_by_user_id, team_id, creditor_id, transaction_date, disbursed_date, principal_amount, repayment_amount, interest_type, interest_rate, tenor_months, late_interest_rate, late_interest_basis, late_penalty_type, late_penalty_amount, loan_terms_snapshot, amount, description, notes, creditor_name_snapshot, status, paid_amount, created_at, updated_at, deleted_at'
-const billSelectColumns =
-  'id, expense_id, project_income_id, team_id, bill_type, description, amount, paid_amount, due_date, status, paid_at, supplier_name_snapshot, project_name_snapshot, worker_name_snapshot, created_at, updated_at, deleted_at'
 
 function buildProjectIncomeNotificationPayload(
   data = {},
@@ -118,102 +116,6 @@ function mapProjectIncomeRow(projectIncome) {
   }
 }
 
-function mapBillSummaryRow(bill) {
-  if (!bill?.id) {
-    return null
-  }
-
-  const amount = toNumber(bill?.amount)
-  const paidAmount = toNumber(bill?.paid_amount)
-
-  return {
-    id: bill.id,
-    expenseId: bill.expense_id ?? null,
-    projectIncomeId: bill.project_income_id ?? null,
-    teamId: bill.team_id ?? null,
-    billType: bill.bill_type ?? null,
-    description: bill.description ?? null,
-    amount,
-    paidAmount,
-    remainingAmount: Math.max(amount - paidAmount, 0),
-    dueDate: bill.due_date ?? null,
-    status: normalizeText(bill?.status, 'unpaid'),
-    paidAt: bill.paid_at ?? null,
-    supplierName: normalizeText(
-      bill?.supplier_name_snapshot ?? bill?.worker_name_snapshot,
-      'Tagihan belum terhubung'
-    ),
-    projectName: normalizeText(bill?.project_name_snapshot, 'Proyek belum terhubung'),
-    deletedAt: bill.deleted_at ?? null,
-    updatedAt: bill.updated_at ?? null,
-  }
-}
-
-function getAggregatedBillStatus(totalAmount, paidAmount) {
-  if (totalAmount > 0 && paidAmount >= totalAmount) {
-    return 'paid'
-  }
-
-  if (paidAmount > 0) {
-    return 'partial'
-  }
-
-  return 'unpaid'
-}
-
-function aggregateBillSummaries(bills = []) {
-  const mappedBills = bills.map(mapBillSummaryRow).filter(Boolean)
-
-  if (mappedBills.length === 0) {
-    return {
-      bill: null,
-      bills: [],
-    }
-  }
-
-  if (mappedBills.length === 1) {
-    return {
-      bill: mappedBills[0],
-      bills: mappedBills,
-    }
-  }
-
-  const amount = mappedBills.reduce((sum, bill) => sum + toNumber(bill.amount, 0), 0)
-  const paidAmount = mappedBills.reduce((sum, bill) => sum + toNumber(bill.paidAmount, 0), 0)
-  const dueDates = mappedBills.map((bill) => normalizeText(bill.dueDate, null)).filter(Boolean).sort()
-  const paidAtValues = mappedBills
-    .map((bill) => normalizeText(bill.paidAt, null))
-    .filter(Boolean)
-    .sort()
-  const projectName = normalizeText(mappedBills[0]?.projectName, 'Proyek belum terhubung')
-  const descriptions = [...new Set(mappedBills.map((bill) => normalizeText(bill.description, null)).filter(Boolean))]
-
-  return {
-    bill: {
-      id: null,
-      billIds: mappedBills.map((bill) => bill.id),
-      projectIncomeId: mappedBills[0]?.projectIncomeId ?? null,
-      teamId: mappedBills[0]?.teamId ?? null,
-      billType: 'fee',
-      description:
-        descriptions.length === 1
-          ? descriptions[0]
-          : `Fee termin (${mappedBills.length} tagihan)`,
-      amount,
-      paidAmount,
-      remainingAmount: Math.max(amount - paidAmount, 0),
-      dueDate: dueDates[0] ?? null,
-      status: getAggregatedBillStatus(amount, paidAmount),
-      paidAt: paidAtValues.at(-1) ?? null,
-      supplierName: mappedBills.length === 1 ? mappedBills[0].supplierName : `${mappedBills.length} fee staff`,
-      projectName,
-      deletedAt: null,
-      updatedAt: null,
-    },
-    bills: mappedBills,
-  }
-}
-
 function mapLoanRow(loan) {
   const loanTermsSnapshot = buildLoanTermsSnapshot(loan)
   const repaymentAmount = toNumber(loan?.repayment_amount ?? loanTermsSnapshot.repayment_amount, 0)
@@ -253,43 +155,24 @@ async function loadProjectIncomeById(projectIncomeId) {
     throw new Error('ID pemasukan proyek tidak valid.')
   }
 
-  const [incomeResult, billResult] = await Promise.all([
-    supabase
-      .from('project_incomes')
-      .select(
-        'id, telegram_user_id, created_by_user_id, team_id, project_id, transaction_date, income_date, amount, description, notes, project_name_snapshot, created_at, updated_at, deleted_at'
-      )
-      .eq('id', normalizedId)
-      .is('deleted_at', null)
-      .maybeSingle(),
-    supabase
-      .from('bills')
-      .select(billSelectColumns)
-      .eq('project_income_id', normalizedId)
-      .is('deleted_at', null)
-      .order('due_date', { ascending: true })
-      .order('created_at', { ascending: false }),
-  ])
+  const { data: income, error } = await supabase
+    .from('project_incomes')
+    .select(
+      'id, telegram_user_id, created_by_user_id, team_id, project_id, transaction_date, income_date, amount, description, notes, project_name_snapshot, created_at, updated_at, deleted_at'
+    )
+    .eq('id', normalizedId)
+    .is('deleted_at', null)
+    .maybeSingle()
 
-  if (incomeResult.error) {
-    throw incomeResult.error
+  if (error) {
+    throw error
   }
 
-  if (billResult.error) {
-    throw billResult.error
-  }
-
-  if (!incomeResult.data) {
+  if (!income) {
     return null
   }
 
-  const { bill, bills } = aggregateBillSummaries(billResult.data ?? [])
-
-  return {
-    ...mapProjectIncomeRow(incomeResult.data),
-    bill,
-    bills,
-  }
+  return mapProjectIncomeRow(income)
 }
 
 async function loadLoans(teamId) {
@@ -492,24 +375,6 @@ const useIncomeStore = create((set) => ({
 
       if (!normalizedId) {
         throw new Error('ID pemasukan proyek tidak valid.')
-      }
-
-      const { data: paidFeeBills, error: paidFeeBillsError } = await supabase
-        .from('bills')
-        .select('id')
-        .eq('project_income_id', normalizedId)
-        .is('deleted_at', null)
-        .gt('paid_amount', 0)
-        .limit(1)
-
-      if (paidFeeBillsError) {
-        throw paidFeeBillsError
-      }
-
-      if ((paidFeeBills ?? []).length > 0) {
-        throw new Error(
-          'Pemasukan proyek yang sudah memiliki pembayaran fee tidak bisa diubah.'
-        )
       }
 
       if (!projectId) {

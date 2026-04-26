@@ -23,14 +23,277 @@ Dokumen ini adalah log progres khusus untuk stream `Unified CRUD Workspace`.
 - Active stream: `Unified CRUD Workspace`
 - Referensi plan: `docs/unified-crud-workspace-plan-2026-04-18.md`
 - Primary freeze authority: `docs/freeze/00-index.md`
-- Current task: `UCW-411`
+- Current task: `UCW-422`
 - Current status: `validated`
 - Catatan fokus: `UCW-411` sudah validated untuk stabilisasi overload Gemini scan Faktur Barang; `UCW-410` tetap validated untuk permanent delete, bulk delete eligible, dan auto-retention Arsip; `UCW-409` tetap tercatat sebagai flow AI draft Faktur Barang yang sudah masuk backlog, sementara `UCW-384` tetap blocked di blocker identity bridge karena live project belum punya row `profiles.legacy_firebase_id` untuk 4 legacy creator UID, jadi tidak ada target exact-match yang bisa dibackfill.
-- Catatan brief terbaru: user meminta backlog docs-only untuk audit `created_by` legacy, detail teknis, UI/flow HRD dan Penerima, import CSV, PDF grouped ke DM, dan quick action Dashboard; `UCW-383` sudah divalidasi sebagai audit read-only, `UCW-385` sudah divalidasi sebagai perbaikan route kembali technical detail, `UCW-386` sudah divalidasi sebagai penghapusan card keterangan duplikat, `UCW-387` sudah divalidasi sebagai safe-zone shell, `UCW-388` sudah divalidasi sebagai redesign KPI solid 2x2, `UCW-389` sudah divalidasi sebagai ringkasan row list, `UCW-390` sudah divalidasi sebagai pemindahan aksi ke bottom sheet, `UCW-391` sudah divalidasi sebagai picker no-search untuk status filter, `UCW-392` sudah divalidasi sebagai picker no-search untuk filter Jenjang, `UCW-393` sudah divalidasi sebagai picker searchable untuk filter Instansi, `UCW-394` sudah divalidasi sebagai shared CSV template/import preview, `UCW-395` sudah divalidasi sebagai import batch Penerima, `UCW-396` sudah divalidasi sebagai import batch HRD, `UCW-397` sudah ditandai `deferred` karena XLSX butuh parser/dependency/sample file, `UCW-398` sudah divalidasi sebagai audit contract PDF grouped HRD/Penerima, dan `UCW-399` sudah divalidasi sebagai PDF Penerima per instansi via DM; `Playwright` untuk `UCW-399` sengaja di-skip sesuai instruksi user, sementara lint, unit PDF/delivery, dan build sudah lolos.
+- Catatan fokus tambahan: `UCW-412` sudah validated untuk hardening service-role contract manual stock-out; stock-out manual sekarang memakai service-role client terpisah untuk RPC `fn_create_atomic_manual_stock_out`, sementara access check tetap lewat client user-context dan error `42501` dipetakan ke pesan yang mengarah ke migration/grant yang harus di-deploy.
+- Catatan fokus tambahan kedua: `UCW-413` sudah validated untuk parity paid-row di tab aktif `Jurnal`; row settled `Lunas` sekarang disaring dari render/cache sebelum tampil, sementara `Riwayat` tetap canonical untuk histori settled.
+- Catatan fokus tambahan ketiga: `UCW-415` sudah validated sebagai docs-only contract untuk memposisikan `Tagihan Upah` sebagai payable independen; model child fee bill legacy tetap dijaga hanya sebagai compatibility note.
+- Catatan fokus tambahan keempat: `UCW-416` sudah validated sebagai audit kompatibilitas legacy fee staf; surface legacy yang masih bergantung ke `project-income`/child bill tetap dipertahankan sampai seam runtime berikutnya dibuka.
+- Catatan fokus tambahan kelima: `UCW-417` sudah validated sebagai shell create `Tagihan Upah` mandiri; button `Tambah Tagihan Upah` di `Pembayaran` sekarang membuka `/edit/bill/new`, dan form shell merender staf/proyek, tanggal tagih/jatuh tempo, nominal, dan catatan tanpa save mutation.
+- Catatan fokus tambahan keenam: `UCW-419` sudah validated sebagai aksi Edit pada row tagihan agregat; `BillsPage` kini menampilkan tombol `Edit` pada card fee-bill agregat yang aman diedit, lalu editor `Pemasukan Proyek` terbuka dari child unpaid tertua yang deterministik.
+- Catatan fokus tambahan ketujuh: `UCW-420` sudah validated sebagai aksi Hapus pada row tagihan agregat; tombol `Hapus` hanya muncul untuk `staff-group` yang masih eligible, confirm native menghapus child bill outstanding tertua, dan daftar tagihan di-refresh setelah delete.
+- Catatan fokus tambahan kedelapan: `UCW-423` sudah validated sebagai cleanup copy mobile form shell; helper text form, section header, toggle description, dan helper card yang paling panjang dipadatkan agar layar create/edit lebih ringkas di mobile.
+- Catatan fokus tambahan kesembilan: `UCW-424` sudah validated untuk edit loan canonical hydration dan safe-zone loading shell; route-state summary sparse tetap di-override oleh fetch canonical, dan loading branch sekarang memakai `AppViewportSafeArea`.
+- Catatan fokus tambahan kesepuluh: `UCW-422` sudah validated setelah delete bill dialihkan ke service-client RPC dan regresi unit mengunci kontrak soft delete tagihan agar permission denied tidak muncul lagi sebagai error mentah di UI.
+Catatan brief terbaru: user meminta backlog docs-only untuk audit `created_by` legacy, detail teknis, UI/flow HRD dan Penerima, import CSV, PDF grouped ke DM, dan quick action Dashboard; `UCW-383` sudah divalidasi sebagai audit read-only, `UCW-385` sudah divalidasi sebagai perbaikan route kembali technical detail, `UCW-386` sudah divalidasi sebagai penghapusan card keterangan duplikat, `UCW-387` sudah divalidasi sebagai safe-zone shell, `UCW-388` sudah divalidasi sebagai redesign KPI solid 2x2, `UCW-389` sudah divalidasi sebagai ringkasan row list, `UCW-390` sudah divalidasi sebagai pemindahan aksi ke bottom sheet, `UCW-391` sudah divalidasi sebagai picker no-search untuk status filter, `UCW-392` sudah divalidasi sebagai picker no-search untuk filter Jenjang, `UCW-393` sudah divalidasi sebagai picker searchable untuk filter Instansi, `UCW-394` sudah divalidasi sebagai shared CSV template/import preview, `UCW-395` sudah divalidasi sebagai import batch Penerima, `UCW-396` sudah divalidasi sebagai import batch HRD, `UCW-397` sudah ditandai `deferred` karena XLSX butuh parser/dependency/sample file, `UCW-398` sudah divalidasi sebagai audit contract PDF grouped HRD/Penerima, dan `UCW-399` sudah divalidasi sebagai PDF Penerima per instansi via DM; `Playwright` untuk `UCW-399` sengaja di-skip sesuai instruksi user, sementara lint, unit PDF/delivery, dan build sudah lolos.
+- Catatan brief terbaru tambahan: user juga meminta backlog docs-only untuk stock-out permission denied pada `fn_create_atomic_manual_stock_out` dan parity row `paid` di tab aktif `Jurnal`; `UCW-412` dan `UCW-413` ditambahkan sebagai `planned` di backlog stream aktif.
+- Catatan brief terbaru tambahan ketiga: redesign stepper `MaterialInvoiceForm` dan OCR bottomsheet mobile-first sudah dicatat sebagai `UCW-414`; runtime code sekarang sudah diimplementasikan dan divalidasi.
+- Catatan brief terbaru tambahan keempat: stepper item MaterialInvoiceForm dan OCR mobile sheet lolos lint, build, dan smoke Playwright Chromium/mobile-chrome.
+- Catatan brief terbaru implementasi: manual stock-out sekarang menggunakan service-role client tanpa bearer user untuk RPC dan dapat mengembalikan pesan konfigurasi/grant yang jelas bila kontrak database belum terpasang.
+- Catatan brief terbaru implementasi tambahan: active `Jurnal` sekarang menyaring row settled `Lunas` dari render/cache sebelum ditampilkan, sehingga row paid tidak lagi muncul di tab aktif dan `Riwayat` tetap canonical.
+- Catatan brief terbaru implementasi ketiga: reframe fee staf kini dikunci sebagai `Tagihan Upah` payable independen di backlog stream; `UCW-418` sampai `UCW-422` sudah validated, sementara brief berikutnya menunggu assignment baru.
 - Catatan brief lanjutan: user juga meminta quick action Dashboard Tim diganti ke `Stok Barang`; `UCW-401` sudah divalidasi, lalu brief UI fast-path dan freeze reconciliation melanjutkan backlog `UCW-402` sampai `UCW-407` untuk `GlobalToast`, refresh Dashboard, delay `Framer Motion`, audit performa lintas surface, selarasan `Tagihan Upah` ke repo aktual, dan follow-up trim shared overlay motion stack; setelah audit motion terbaru, `UCW-408` ditambahkan untuk menghapus ghosting route shell, lalu `UCW-402` sampai `UCW-408` sudah divalidasi.
 - Catatan audit freeze terbaru: fee bill saat ini masih `project_incomes -> bills.project_income_id`; user memilih UI/read-model grouping tanpa schema rewrite untuk tahap release mobile.
-- Status transitions touched: `UCW-370` tetap `validated`; `UCW-371` tetap `validated`; `UCW-372` tetap `validated`; `UCW-373` selesai `validated`; `UCW-374` selesai `validated`; `UCW-375` selesai `validated`; `UCW-376` selesai `validated`; `UCW-377` selesai `validated`; `UCW-378` selesai `validated`; `UCW-379` selesai `validated`; `UCW-380`, `UCW-381`, dan `UCW-382` tetap `validated`; `UCW-383` selesai `validated`; `UCW-384` ditandai `blocked`; `UCW-385` selesai `validated`; `UCW-386` selesai `validated`; `UCW-387` selesai `validated`; `UCW-388` selesai `validated`; `UCW-389` selesai `validated`; `UCW-390` selesai `validated`; `UCW-391` selesai `validated`; `UCW-392` selesai `validated`; `UCW-393` selesai `validated`; `UCW-394` selesai `validated`; `UCW-395` selesai `validated`; `UCW-396` selesai `validated`; `UCW-397` ditandai `deferred`; `UCW-398` selesai `validated`; `UCW-399` selesai `validated`; `UCW-400` selesai `validated`; `UCW-401` selesai `validated`; `UCW-402` selesai `validated`; `UCW-403` selesai `validated`; `UCW-404` selesai `validated`; `UCW-405` selesai `validated`; `UCW-406` selesai `validated`; `UCW-407` selesai `validated`; `UCW-408` selesai `validated`; `UCW-410` selesai `validated`; `UCW-411` selesai `validated`.
-- Review order: tidak ada task runnable berikutnya dari brief ini; tunggu brief baru, dan `UCW-384` tetap memerlukan identity bridge/profile rows sebelum DML live.
+- Catatan brief terbaru tambahan kelima: user meminta backlog docs-only untuk audit dan pangkas copy AI berlebih di form mobile lintas domain; `UCW-423` ditambahkan sebagai `planned` di backlog stream aktif.
+- Status transitions touched: `UCW-370` tetap `validated`; `UCW-371` tetap `validated`; `UCW-372` tetap `validated`; `UCW-373` selesai `validated`; `UCW-374` selesai `validated`; `UCW-375` selesai `validated`; `UCW-376` selesai `validated`; `UCW-377` selesai `validated`; `UCW-378` selesai `validated`; `UCW-379` selesai `validated`; `UCW-380`, `UCW-381`, dan `UCW-382` tetap `validated`; `UCW-383` selesai `validated`; `UCW-384` ditandai `blocked`; `UCW-385` selesai `validated`; `UCW-386` selesai `validated`; `UCW-387` selesai `validated`; `UCW-388` selesai `validated`; `UCW-389` selesai `validated`; `UCW-390` selesai `validated`; `UCW-391` selesai `validated`; `UCW-392` selesai `validated`; `UCW-393` selesai `validated`; `UCW-394` selesai `validated`; `UCW-395` selesai `validated`; `UCW-396` selesai `validated`; `UCW-397` ditandai `deferred`; `UCW-398` selesai `validated`; `UCW-399` selesai `validated`; `UCW-400` selesai `validated`; `UCW-401` selesai `validated`; `UCW-402` selesai `validated`; `UCW-403` selesai `validated`; `UCW-404` selesai `validated`; `UCW-405` selesai `validated`; `UCW-406` selesai `validated`; `UCW-407` selesai `validated`; `UCW-408` selesai `validated`; `UCW-410` selesai `validated`; `UCW-411` selesai `validated`; `UCW-412` selesai `validated`; `UCW-413` selesai `validated`; `UCW-414` selesai `validated`; `UCW-415` selesai `validated`; `UCW-416` selesai `validated`; `UCW-417` selesai `validated`; `UCW-419` selesai `validated`; `UCW-420` selesai `validated`; `UCW-421` selesai `validated`; `UCW-422` selesai `validated`; `UCW-423` selesai `validated`.
+- Status transitions touched tambahan: `UCW-412` selesai `validated`; `UCW-413` selesai `validated`; `UCW-414` selesai `validated`; `UCW-415` selesai `validated`; `UCW-416` selesai `validated`; `UCW-417` selesai `validated`; `UCW-419` selesai `validated`; `UCW-420` selesai `validated`; `UCW-422` selesai `validated`; `UCW-423` selesai `validated`.
+- Status transitions touched tambahan ketiga: `UCW-424` selesai `validated`.
+- Review order: `UCW-422` sudah selesai; `UCW-421` sudah selesai; tunggu brief implementasi berikutnya, dan `UCW-384` tetap memerlukan identity bridge/profile rows sebelum DML live.
+
+### [2026-04-26] `UCW-423` - Audit dan pangkas copy AI berlebih di form mobile lintas domain
+- Status: `validated`
+- Ringkasan:
+  - Form header dan section lead sekarang disembunyikan di mobile, toggle helper copy dipadatkan, dan helper card yang paling panjang disingkat supaya layar create/edit tidak penuh copy berlapis.
+  - Perubahan tetap UI-only; data flow, validation, dan contract form tidak disentuh.
+- File berubah:
+  - `src/components/ui/AppPrimitives.jsx`
+  - `src/components/layouts/FormHeader.jsx`
+  - `src/components/ExpenseForm.jsx`
+  - `src/components/IncomeForm.jsx`
+  - `src/components/LoanForm.jsx`
+  - `src/components/MaterialInvoiceForm.jsx`
+  - `src/components/WorkerForm.jsx`
+  - `src/pages/EditRecordPage.jsx`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Mobile form shell jauh lebih ringkas karena lead copy tidak lagi bertumpuk di header/section, sementara desktop tetap mempertahankan konteks yang sama.
+  - Toggle helper copy yang paling repetitif dipadatkan agar label utama lebih dominan di layar kecil.
+  - Smoke Playwright mobile pada create attendance, create material invoice, dan edit record shell tetap lolos setelah copy dipadatkan.
+- Validasi:
+  - `npx eslint src/components/ui/AppPrimitives.jsx src/components/layouts/FormHeader.jsx src/components/ExpenseForm.jsx src/components/IncomeForm.jsx src/components/LoanForm.jsx src/components/MaterialInvoiceForm.jsx src/components/WorkerForm.jsx src/pages/EditRecordPage.jsx`
+  - `npm run build`
+  - `npx playwright test tests/e2e/create.spec.js tests/e2e/edit.spec.js --project=mobile-chrome --grep "opens attendance create sheet|opens material invoice create sheet|opens record editor shell"`
+  - `git diff --check -- src/components/ui/AppPrimitives.jsx src/components/layouts/FormHeader.jsx src/components/ExpenseForm.jsx src/components/IncomeForm.jsx src/components/LoanForm.jsx src/components/MaterialInvoiceForm.jsx src/components/WorkerForm.jsx src/pages/EditRecordPage.jsx docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko/regresi:
+  - Menghilangkan lead copy di mobile bisa mengurangi konteks untuk beberapa form yang sangat padat; jika ada kontrol yang membingungkan, perlu pengecualian per-field, bukan mengembalikan copy massal.
+
+### [2026-04-26] `UCW-417` - Tambah shell create Tagihan Upah mandiri
+- Status: `validated`
+- Ringkasan:
+  - `Pembayaran` sekarang punya entrypoint `Tambah Tagihan Upah` yang membuka `/edit/bill/new`.
+  - `EditRecordPage` memetakan create mode `bill` ke shell form `Tagihan Upah` mandiri dengan field staf, proyek terkait, tanggal tagih/jatuh tempo, nominal, dan catatan, tanpa save mutation.
+- File berubah:
+  - `src/components/TagihanUpahForm.jsx`
+  - `src/pages/EditRecordPage.jsx`
+  - `src/pages/PaymentsPage.jsx`
+  - `tests/e2e/create.spec.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Shell create bisa dibuka langsung lewat route `/edit/bill/new` dan juga lewat CTA di `Pembayaran`.
+  - Form masih benar-benar shell: belum ada submit/save mutation, jadi tidak menyentuh contract data legacy.
+- Validasi:
+  - `npx eslint src/components/TagihanUpahForm.jsx src/pages/EditRecordPage.jsx src/pages/PaymentsPage.jsx tests/e2e/create.spec.js`
+  - `git diff --check -- src/components/TagihanUpahForm.jsx src/pages/EditRecordPage.jsx src/pages/PaymentsPage.jsx tests/e2e/create.spec.js`
+  - `npm run build`
+  - `npx playwright test tests/e2e/create.spec.js --project=chromium --grep "opens tagihan upah shell from pembayaran"`
+  - `npx playwright test tests/e2e/create.spec.js --project=chromium --workers=1`
+- Risiko/regresi:
+  - CTA baru menambah satu jalur navigasi create; jika route `/edit/bill/new` nanti berubah, tombol ini harus ikut diselaraskan.
+  - Karena belum ada save mutation, user bisa masuk ke shell tanpa bisa menyimpan; itu intentional sampai `UCW-418`.
+
+### [2026-04-26] `UCW-418` - Sambungkan save path Tagihan Upah
+- Status: `validated`
+- Ringkasan:
+  - Submit `Tagihan Upah` sekarang mengalir lewat `usePaymentStore.submitBill` ke `createBillFromApi`, lalu backend `api/records.js` mengeksekusi `POST resource=bills` dengan validasi staf, proyek opsional, tanggal tagih, dan nominal sebelum insert `bill_type: gaji`.
+  - Setelah simpan sukses, form kembali ke `/pembayaran`; legacy coupling parent income tidak disentuh di seam ini.
+- File berubah:
+  - `src/components/TagihanUpahForm.jsx`
+  - `src/store/usePaymentStore.js`
+  - `src/lib/records-api.js`
+  - `api/records.js`
+  - `tests/e2e/create.spec.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Payload create bill sekarang terformat stabil dari form shell, request body dikirim ke endpoint bills, dan mock E2E menerima payload yang sesuai untuk tagihan upah mandiri.
+  - Smoke Playwright membuktikan submit tagihan upah kembali ke `Pembayaran` setelah save.
+- Validasi:
+  - `npx eslint tests/e2e/create.spec.js src/components/TagihanUpahForm.jsx src/store/usePaymentStore.js src/lib/records-api.js api/records.js`
+  - `npm run build`
+  - `npx playwright test tests/e2e/create.spec.js --project=chromium --grep "saves tagihan upah and returns to pembayaran" --workers=1`
+- Risiko/regresi:
+  - Save path ini bergantung pada auth context dan master data staf; bila salah satunya hilang, submit gagal eksplisit, bukan fallback diam-diam.
+  - Karena `Tagihan Upah` masih kompatibel dengan row legacy, seam edit/hapus berikutnya tetap harus menjaga snapshot tidak rusak.
+
+### [2026-04-26] `UCW-419` - Tambah aksi Edit di row tagihan agregat
+- Status: `validated`
+- Ringkasan:
+  - Card fee-bill agregat di `BillsPage` sekarang punya tombol `Edit` yang hanya tampil saat group masih aman diedit; row utama tetap membuka payment route seperti sebelumnya.
+  - Resolver `getBillGroupEditRoute` memilih child unpaid tertua yang masih punya `projectIncomeId`, lalu mengarahkan user ke editor `Pemasukan Proyek` yang sesuai.
+- File berubah:
+  - `src/pages/BillsPage.jsx`
+  - `src/lib/transaction-presentation.js`
+  - `tests/unit/transaction-presentation.test.js`
+  - `tests/e2e/payment.spec.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Aksi Edit tidak mengganggu klik utama row tagihan; pembayaran tetap jalan dari row utama, sementara edit membuka route project-income untuk grup fee legacy yang masih editable.
+  - Grup yang sudah punya pembayaran tidak menampilkan Edit, sehingga user tidak diarahkan ke flow yang sejak awal memang diblok oleh guard edit existing.
+- Validasi:
+  - `npx eslint src/pages/BillsPage.jsx src/lib/transaction-presentation.js tests/unit/transaction-presentation.test.js tests/e2e/payment.spec.js`
+  - `node --test tests/unit/transaction-presentation.test.js`
+  - `npm run build`
+  - `npx playwright test tests/e2e/payment.spec.js --project=chromium --grep "edits fee bill groups through the oldest editable child bill" --workers=1`
+- Risiko/regresi:
+  - Karena editor tujuan masih `project-income`, guard legacy pada `IncomeForm`/store tetap menentukan apakah save akhir benar-benar diizinkan.
+  - Jika row fee group sudah punya pembayaran, tombol Edit sengaja disembunyikan untuk mencegah dead-end edit.
+
+### [2026-04-26] `UCW-420` - Tambah aksi Hapus di row tagihan agregat
+- Status: `validated`
+- Ringkasan:
+  - Card fee-bill agregat di `BillsPage` sekarang punya tombol `Hapus` yang hanya muncul saat group staff masih eligible; row utama tetap membuka payment route seperti sebelumnya.
+  - Resolver `getBillGroupDeleteTarget` memilih child unpaid tertua yang aman dihapus, lalu klik Hapus memicu confirm native dan soft-delete pada bill target sebelum refresh daftar tagihan.
+- File berubah:
+  - `src/pages/BillsPage.jsx`
+  - `src/lib/transaction-presentation.js`
+  - `tests/unit/transaction-presentation.test.js`
+  - `tests/e2e/payment.spec.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Tombol Hapus tidak dirender untuk group yang sudah punya pembayaran, sehingga row paid tetap read-only dan user tidak masuk ke flow yang diblok guard.
+  - Smoke Playwright memastikan delete benar-benar menghapus row target dari daftar tagihan setelah confirm.
+- Validasi:
+  - `npx eslint src/pages/BillsPage.jsx src/lib/transaction-presentation.js tests/unit/transaction-presentation.test.js tests/e2e/payment.spec.js`
+  - `node --test tests/unit/transaction-presentation.test.js`
+  - `npm run build`
+  - `npx playwright test tests/e2e/payment.spec.js --project=chromium --grep "deletes fee bill groups through the oldest unpaid child bill" --workers=1`
+- Risiko/regresi:
+  - Delete sekarang menargetkan child bill outstanding tertua pada group staff, jadi jika group berisi lebih dari satu bill belum dibayar, row bisa tetap ada setelah satu hapus dan itu perlu dipahami user sebagai aksi per bill canonical, bukan bulk delete seluruh group.
+  - Karena aksi memakai confirm native, UX di Telegram webview tetap sederhana tetapi tidak sehalus dialog custom; ini dipilih untuk menjaga blast radius kecil.
+
+### [2026-04-26] `UCW-421` - Lepas auto-create fee staf dari project-income
+- Status: `validated`
+- Ringkasan:
+  - `useIncomeStore` sekarang memuat `project-income` sebagai row pendapatan murni tanpa hydrate `bill/bills`, dan update project-income tidak lagi diblokir oleh fee bill child.
+  - `api/transactions.js` berhenti mengelola fee bill child pada edit/soft-delete/restore project-income, sementara hard delete legacy memutus relasi `project_income_id` dari bills sebelum income permanen dihapus.
+  - Project-income di read model tidak lagi memunculkan summary fee bill; row ledger tampil sebagai termin proyek murni.
+- File berubah:
+  - `api/transactions.js`
+  - `src/store/useIncomeStore.js`
+  - `tests/unit/transactions-project-income-aggregation.test.js`
+  - `tests/unit/transaction-presentation.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - App-side coupling project-income ke fee staf sudah putus pada read/write/delete lifecycle, tetapi trigger DB legacy tetap menjadi compatibility path sampai migration terpisah disiapkan.
+  - Regresi unit memastikan aggregate project-income tidak lagi mengeluarkan `fee_bill_*` dan summary fee bill tidak tampil dari helper ledger.
+- Validasi:
+  - `node --check api/transactions.js`
+  - `npx eslint api/transactions.js src/store/useIncomeStore.js tests/unit/transactions-project-income-aggregation.test.js tests/unit/transaction-presentation.test.js`
+  - `node --test tests/unit/transactions-project-income-aggregation.test.js tests/unit/transaction-presentation.test.js`
+  - `npm run build`
+  - `git diff --check -- api/transactions.js src/store/useIncomeStore.js tests/unit/transactions-project-income-aggregation.test.js tests/unit/transaction-presentation.test.js docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko/regresi:
+  - Trigger `fn_sync_fee_bills_from_project_income()` di schema masih aktif, jadi pemutusan total auto-create/auto-sync tetap butuh migration terpisah jika ingin benar-benar menghapus legacy coupling.
+
+### [2026-04-26] `UCW-416` - Audit kompatibilitas fee staf legacy
+- Status: `validated`
+- Ringkasan:
+  - Surface legacy yang masih bergantung ke model child fee bill tetap ada di `IncomeForm`, `useIncomeStore`, `BillsPage`, `PaymentsPage`, `TransactionDetailPage`, dan `EditRecordPage`; grup fee staff masih dibaca dari `project_income_id` / `staff_id` dan target pembayaran tetap child bill outstanding tertua.
+  - Coupling backend masih ada di `api/transactions.js` lewat sync, restore, delete, dan hard delete berbasis `project_income_id`, jadi compatibility path harus dipertahankan sampai seam runtime baru dibuka.
+- File berubah:
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Legacy read/detail/edit flow untuk `project-income` masih harus dipertahankan agar row existing tetap bisa dibuka dan diaudit.
+  - Jalur baru `Tagihan Upah` independen belum boleh memutus hydration relasi lama sampai `UCW-417` sampai `UCW-421` selesai.
+- Validasi:
+  - `rg -n "project_income_id|fee bill|child fee|child bill|Tagihan Upah|staff fee|fee staf|bills\\.|project-income|project income|paid row|Lunas" src api supabase docs tests -g '!node_modules'`
+  - `rg -n "editRoute|projectIncomeId|isPayrollBill|staff-group|worker-group|getBillGroupPaymentTarget|getPayrollBillGroupPaymentTarget|groupBillsByWorker|groupBillsForBillList|aggregateBillSummaries|loadProjectIncomeById|fetchProjectIncomeById|Tagihan Upah|fee staff|child bill|child fee" src/lib/transaction-presentation.js src/store/useIncomeStore.js src/pages/BillsPage.jsx src/pages/PaymentsPage.jsx src/pages/TransactionDetailPage.jsx src/pages/EditRecordPage.jsx`
+  - `git diff --check -- docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko/regresi:
+  - Jika runtime menghapus coupling legacy terlalu cepat, row fee staff yang sudah ada bisa kehilangan target pembayaran, detail, atau editor yang benar.
+  - Jika compatibility path dibiarkan tanpa pembatasan seam, model `Tagihan Upah` independen akan tetap kabur di UI lama.
+
+### [2026-04-26] `DOC-PLAN-UPDATE-08` - Audit brief pangkas copy AI berlebih di form mobile
+- Status: `validated`
+- Ringkasan:
+  - Mengaudit brief lanjutan untuk memangkas copy AI yang terlalu panjang di form mobile lintas domain supaya layar create/edit tidak pengap saat review dan input.
+  - Brief baru dicatat ke backlog sebagai `UCW-423` `planned`, sementara runtime code tetap ditahan sampai brief implementasi terpisah.
+- File berubah:
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Scope awal diarahkan ke form aktif yang benar-benar dirender dari route/page create/edit; helper/description, empty/error text, copy AI/OCR/review, dan CTA label adalah kandidat utama yang dipangkas.
+  - Legacy atau shell yang tidak lagi dirender tidak dijadikan target default supaya audit tetap sempit dan tidak memancing refactor liar.
+- Validasi:
+  - Audit dokumen + konsistensi backlog/progress.
+- Risiko/regresi:
+  - Jika cleanup copy nanti digabung dengan layout refactor tanpa batasan scope, form mobile bisa melebar lagi dan review kehilangan fokus.
+- Next allowed task:
+  - `UCW-417` tetap prioritas runtime terdekat; `UCW-423` sudah ditambahkan sebagai backlog cleanup copy AI lintas domain.
+
+### [2026-04-26] `DOC-PLAN-UPDATE-07` - Audit brief redesign MaterialInvoice stepper dan OCR mobile
+- Status: `validated`
+- Ringkasan:
+  - Mengaudit brief lanjutan untuk `MaterialInvoiceForm` agar item form menjadi stepper 1-item yang lebih pendek di mobile dan review item lebih fokus.
+  - Brief baru dicatat ke backlog sebagai `UCW-414` `planned`, sementara runtime code tetap ditahan sampai brief implementasi terpisah.
+- File berubah:
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Scope tetap terkunci pada `src/components/MaterialInvoiceForm.jsx` dan smoke test material invoice terkait.
+  - Keputusan yang sudah dikunci: delete item aktif kembali ke item sebelumnya, upload file lewat thumbnail/placeholder, dan overlay `Hapus` hanya muncul saat thumbnail difokuskan.
+- Validasi:
+  - Audit dokumen + konsistensi backlog/progress.
+- Risiko/regresi:
+  - Jika runtime nanti memecah layout ke komponen baru tanpa kontrol scope, form create/edit bisa melebar lagi dan mengurangi fokus review item.
+- Next allowed task:
+  - `UCW-414` untuk implementasi runtime stepper item `MaterialInvoiceForm` dan OCR mobile sheet.
+
+### [2026-04-26] `UCW-414` - Redesign stepper item MaterialInvoiceForm dan OCR mobile-first
+- Status: `validated`
+- Ringkasan:
+  - `MaterialInvoiceForm` create/edit faktur dan surat jalan sekarang memakai satu item aktif dalam stepper mobile-first; tombol `Tambah` tetap singkat dengan icon `+` dan sejajar dengan `Hapus`, sementara `Kembali/Lanjut` mengatur fokus antar item.
+  - Bottomsheet AI OCR di create mode sekarang memakai thumbnail-driven upload dan review stepper horizontal, tanpa card ringkasan tanggal/supplier/no faktur.
+- File berubah:
+  - `src/components/MaterialInvoiceForm.jsx`
+  - `tests/e2e/attachment-reset.spec.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Delete item aktif memindahkan fokus ke item sebelumnya, add item memindahkan fokus ke item baru, dan submit tetap mengirim array item lengkap.
+  - Upload AI OCR dibuka dari thumbnail placeholder, preview tampil sebagai thumbnail, overlay `Hapus` mengosongkan file, dan review AI bergerak satu baris per langkah sebelum `Terapkan`.
+- Validasi:
+  - `npx eslint src/components/MaterialInvoiceForm.jsx tests/e2e/attachment-reset.spec.js`
+  - `npm run build`
+  - `npx playwright test tests/e2e/attachment-reset.spec.js --project=mobile-chrome --grep "steps through material invoice items one card at a time|shows AI OCR as a thumbnail stepper and applies row review"`
+  - `npx playwright test tests/e2e/attachment-reset.spec.js --project=chromium --grep "steps through material invoice items one card at a time|shows AI OCR as a thumbnail stepper and applies row review"`
+- Risiko/regresi:
+  - Selector picker dan sheet bisa berubah jika label disesuaikan lagi, jadi smoke `attachment-reset.spec.js` perlu dipertahankan.
+  - Stepper item menyembunyikan baris non-aktif; bug clamp aktif bisa mempengaruhi navigasi jika jumlah item berubah cepat.
+
+### [2026-04-26] `UCW-415` - Kunci Tagihan Upah sebagai payable independen
+- Status: `validated`
+- Ringkasan:
+  - Arah produk fee staf dikunci ke `Tagihan Upah` sebagai payable mandiri, dengan relasi proyek/pemasukan hanya referensi opsional untuk laporan dan audit.
+  - Model `project-income -> fee bill` lama tetap dicatat sebagai compatibility legacy saja sampai seam runtime berikutnya dibuka.
+- File berubah:
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - backlog baru memecah compatibility audit, shell create, save path, aksi edit/hapus row, coupling removal, dan regresi kecil agar tiap seam tetap kecil.
+  - keputusan ini tidak mengubah runtime code dan tidak menyentuh freeze package.
+- Validasi:
+  - `rg -n "UCW-415|UCW-416|UCW-417|UCW-418|UCW-419|UCW-420|UCW-421|UCW-422|Tagihan Upah|fee bill" docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
+  - `git diff --check -- docs/unified-crud-workspace-plan-2026-04-18.md docs/progress/unified-crud-workspace-progress-log.md`
+- Risiko/regresi:
+  - freeze/package/runtime masih memuat model child fee bill lama, jadi task berikutnya harus menjaga compatibility path sampai seam coupling removal dijalankan.
 
 ### [2026-04-25] `UCW-410` - Finalkan permanent delete dan auto-retention Arsip
 - Status: `validated`
@@ -9236,3 +9499,90 @@ Gunakan section ini setiap ada brief baru sebelum memulai task berikutnya.
   - `node --check api/records.js`
   - `npx eslint api/records.js`
   - `npm run build`
+
+### [2026-04-26] `UCW-412` - Audit service-role contract untuk manual stock-out
+- Status: `validated`
+- Ringkasan:
+  - Manual stock-out sekarang memakai client user-context untuk access check dan client service-role terpisah untuk RPC `fn_create_atomic_manual_stock_out`, sehingga path save normal tidak lagi bergantung pada fallback publishable key.
+  - Jika `SUPABASE_SERVICE_ROLE_KEY` tidak ada atau grant function di database belum lengkap, handler mengembalikan pesan konfigurasi/grant yang jelas, bukan raw `permission denied`.
+- File berubah:
+  - `api/records.js`
+  - `tests/unit/records-stock-out.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - `createManualStockOut()` kini memisahkan access client dan service client.
+  - `resolveStockOutServiceRoleKey()` fail-fast ketika env service role belum tersedia.
+  - error `42501` dari RPC dipetakan ke instruksi migration/grant yang harus di-deploy.
+- Validasi:
+  - `node --check api/records.js`
+  - `node --check tests/unit/records-stock-out.test.js`
+  - `node --test tests/unit/records-stock-out.test.js`
+  - `npx eslint api/records.js tests/unit/records-stock-out.test.js`
+  - `npm run build`
+- Risiko/regresi:
+  - stock-out manual sekarang benar-benar bergantung pada `SUPABASE_SERVICE_ROLE_KEY`; jika secret itu hilang di production, flow akan gagal eksplisit dengan 500 yang lebih jelas.
+
+### [2026-04-26] `UCW-413` - Kunci parity paid-row di Jurnal aktif
+- Status: `validated`
+- Ringkasan:
+  - Tab `Jurnal` aktif sekarang menyaring row settled `Lunas` dari cache/render sebelum tampil, sehingga row paid tidak lagi muncul di surface aktif.
+  - `Riwayat` tetap menjadi surface canonical untuk histori settled, dan paging awal aktif akan melewati page yang hanya berisi row settled agar view tidak kosong tanpa alasan.
+- File berubah:
+  - `src/pages/TransactionsPage.jsx`
+  - `tests/e2e/transactions.spec.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - helper visibility active ledger menolak transaksi dengan badge `Lunas`.
+  - restored seed, warm seed, dan fetch active memakai filter yang sama agar paid row tidak terrehidrasi ke tab aktif.
+  - smoke Playwright memastikan row `Operasional Settled Aktif` dan label `Lunas` tidak muncul di `Jurnal` aktif, sementara filter `Faktur` tetap berfungsi.
+- Validasi:
+  - `npx eslint src/pages/TransactionsPage.jsx tests/e2e/transactions.spec.js`
+  - `npm run build`
+  - `npx playwright test tests/e2e/transactions.spec.js --grep "keeps Jurnal free of payroll and paid bills, and filters surat jalan out of Faktur view" --reporter=line --workers=1`
+- Risiko/regresi:
+  - tab aktif sekarang sengaja menyembunyikan row settled; pengguna yang mencari histori paid harus pindah ke `Riwayat`.
+
+### [2026-04-26] `UCW-424` - Audit edit loan prefilling dan safe-zone loading shell
+- Status: `validated`
+- Ringkasan:
+  - `EditRecordPage` sekarang selalu hydrate record pinjaman canonical dari `fetchLoanById`, jadi route-state summary ringkas dari ledger/detail tidak lagi membuat field edit pinjaman kosong.
+  - Loading shell edit page sekarang dibungkus `AppViewportSafeArea` sehingga safe-zone padding konsisten dengan form shell sebelum data selesai dimuat.
+- File berubah:
+  - `src/pages/EditRecordPage.jsx`
+  - `tests/e2e/edit.spec.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - Branch `loan` tidak lagi short-circuit saat `location.state.item` ada; canonical row dari `loans` selalu jadi source of truth untuk form edit.
+  - Loading shell memakai wrapper safe-zone yang sama dengan form shell, jadi padding mobile dan lebar desktop konsisten saat data sedang loading.
+  - Smoke Playwright menutup dua kasus: prefill loan canonical dari route-state sparse, dan safe-zone loading shell di mobile-chrome serta chromium.
+- Validasi:
+  - `npx eslint src/pages/EditRecordPage.jsx tests/e2e/edit.spec.js`
+  - `npm run build`
+  - `npx playwright test tests/e2e/edit.spec.js --project=mobile-chrome --grep "hydrates loan edit form from canonical record even when route state is sparse|keeps the loan loading shell inside the viewport safe zone" --reporter=line --workers=1`
+  - `npx playwright test tests/e2e/edit.spec.js --project=chromium --grep "hydrates loan edit form from canonical record even when route state is sparse|keeps the loan loading shell inside the viewport safe zone" --reporter=line --workers=1`
+- Risiko/regresi:
+  - Loan edit sekarang sengaja mengabaikan summary route-state yang tidak lengkap; kalau ada navigasi baru yang memang membawa payload canonical penuh, tetap aman karena fetch canonical hanya menimpa dengan data sumber truth.
+
+### [2026-04-26] `UCW-422` - Regression tests untuk seams fee staf
+- Status: `validated`
+- Ringkasan:
+  - Jalur delete tagihan fee sekarang memakai service-client RPC `fn_soft_delete_bill_with_history`, sehingga user token tidak lagi menjadi source of permission denied untuk fungsi soft delete tersebut.
+  - Error permission denied dari kontrak soft delete tagihan dipetakan ke pesan yang jelas dan regresi unit mengunci jalur service-role agar tidak balik lagi ke raw 500 dari PostgREST.
+- File berubah:
+  - `api/records.js`
+  - `tests/unit/records-bill-delete.test.js`
+  - `docs/unified-crud-workspace-plan-2026-04-18.md`
+  - `docs/progress/unified-crud-workspace-progress-log.md`
+- Audit hasil:
+  - `softDeleteBill()` sekarang memanggil `serviceClient.rpc(...)`, bukan `adminClient.rpc(...)`.
+  - handler `DELETE resource=bills` masih memakai `adminClient` untuk auth dan optimistic concurrency, lalu service client untuk mutation yang butuh `service_role`.
+  - regresi unit mengunci dua jalur: RPC service client dipakai, dan `42501` permission denied dibungkus jadi pesan kontrak yang bisa ditindaklanjuti.
+- Validasi:
+  - `node --check api/records.js`
+  - `node --test tests/unit/records-bill-delete.test.js`
+  - `npx eslint api/records.js tests/unit/records-bill-delete.test.js`
+- Risiko/regresi:
+  - delete bill kini bergantung pada `SUPABASE_SERVICE_ROLE_KEY` atau grant service-role yang benar; jika env produksi belum lengkap, error akan lebih jelas tetapi flow tetap gagal sampai kontrak database dibereskan.

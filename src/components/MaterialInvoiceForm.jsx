@@ -230,10 +230,13 @@ function MaterialInvoiceForm({
     recordId ?? initialData?.id ?? null
   )
   const [attachmentResetRequestId, setAttachmentResetRequestId] = useState(null)
+  const [activeItemIndex, setActiveItemIndex] = useState(0)
   const [isAiSheetOpen, setIsAiSheetOpen] = useState(false)
   const [aiFile, setAiFile] = useState(null)
+  const [aiFilePreviewUrl, setAiFilePreviewUrl] = useState('')
   const [aiDraft, setAiDraft] = useState(null)
   const [aiReviewRows, setAiReviewRows] = useState([])
+  const [activeAiReviewIndex, setActiveAiReviewIndex] = useState(0)
   const [aiError, setAiError] = useState('')
   const [isAiProcessing, setIsAiProcessing] = useState(false)
   const skipNextDraftWriteRef = useRef(false)
@@ -327,6 +330,11 @@ function MaterialInvoiceForm({
     projects.length > 0 &&
     (materials.length > 0 || hasPendingMaterialDraftRows) &&
     availableMaterialSuppliers.length > 0
+  const activeItem = items[activeItemIndex] ?? items[0] ?? null
+  const activeItemMaterial = activeItem
+    ? materials.find((material) => material.id === activeItem.materialId) ?? null
+    : null
+  const activeAiReviewRow = aiReviewRows[activeAiReviewIndex] ?? aiReviewRows[0] ?? null
 
   const handleAttachmentResetSettled = useCallback(
     async (requestId) => {
@@ -340,9 +348,11 @@ function MaterialInvoiceForm({
       setHeader(createInitialHeader(initialData))
       setItems(createInitialItems(initialData))
       setPendingMaterialDrafts([])
+      setActiveItemIndex(0)
       setAiFile(null)
       setAiDraft(null)
       setAiReviewRows([])
+      setActiveAiReviewIndex(0)
       setAiError('')
       setSavedExpenseId(null)
 
@@ -393,6 +403,35 @@ function MaterialInvoiceForm({
 
   useEffect(() => () => clearError(), [clearError])
   useEffect(() => () => clear(), [clear])
+  useEffect(() => {
+    if (!aiFile) {
+      setAiFilePreviewUrl('')
+      return undefined
+    }
+
+    const previewUrl = URL.createObjectURL(aiFile)
+    setAiFilePreviewUrl(previewUrl)
+
+    return () => URL.revokeObjectURL(previewUrl)
+  }, [aiFile])
+  useEffect(() => {
+    setActiveItemIndex((currentIndex) => {
+      if (items.length === 0) {
+        return 0
+      }
+
+      return Math.min(currentIndex, items.length - 1)
+    })
+  }, [items.length])
+  useEffect(() => {
+    setActiveAiReviewIndex((currentIndex) => {
+      if (aiReviewRows.length === 0) {
+        return 0
+      }
+
+      return Math.min(currentIndex, aiReviewRows.length - 1)
+    })
+  }, [aiReviewRows.length])
 
   const setHeaderField = (field, value) => {
     setHeader((current) => ({
@@ -457,7 +496,21 @@ function MaterialInvoiceForm({
     setAiFile(file)
     setAiDraft(null)
     setAiReviewRows([])
+    setActiveAiReviewIndex(0)
     setAiError('')
+    event.target.value = ''
+  }
+
+  const handleAiFileReset = () => {
+    setAiFile(null)
+    setAiDraft(null)
+    setAiReviewRows([])
+    setActiveAiReviewIndex(0)
+    setAiError('')
+
+    if (aiFileInputRef.current) {
+      aiFileInputRef.current.value = ''
+    }
   }
 
   const handleAiExtract = async () => {
@@ -496,6 +549,7 @@ function MaterialInvoiceForm({
 
       setAiDraft(result.draft)
       setAiReviewRows(Array.isArray(result.review) ? result.review : [])
+      setActiveAiReviewIndex(0)
     } catch (extractError) {
       setAiError(
         extractError instanceof Error
@@ -604,6 +658,7 @@ function MaterialInvoiceForm({
 
     setPendingMaterialDrafts(nextMaterialDrafts)
     setItems(nextItems.length > 0 ? nextItems : [createLineItem()])
+    setActiveItemIndex(0)
     setHeader((current) => ({
       ...current,
       supplierId: current.supplierId || matchedSupplier?.id || current.supplierId,
@@ -620,16 +675,30 @@ function MaterialInvoiceForm({
     event?.preventDefault()
     event?.stopPropagation()
     setItems((current) => [...current, createLineItem()])
+    setActiveItemIndex(items.length)
   }
 
-  const handleRemoveItem = (event, itemId) => {
+  const handleRemoveItem = (event) => {
     event?.preventDefault()
     event?.stopPropagation()
 
     setItems((current) =>
       current.length > 1
-        ? current.filter((item) => item.id !== itemId)
+        ? current.filter((_, index) => index !== activeItemIndex)
         : current
+    )
+    setActiveItemIndex((currentIndex) => Math.max(0, currentIndex - 1))
+  }
+
+  const handleNavigateItem = (delta) => {
+    setActiveItemIndex((currentIndex) =>
+      Math.max(0, Math.min(items.length - 1, currentIndex + delta))
+    )
+  }
+
+  const handleNavigateAiReview = (delta) => {
+    setActiveAiReviewIndex((currentIndex) =>
+      Math.max(0, Math.min(aiReviewRows.length - 1, currentIndex + delta))
     )
   }
 
@@ -796,7 +865,7 @@ function MaterialInvoiceForm({
         >
           {hasBillPaymentHistory ? (
             <AppErrorState
-              description="Faktur material yang sudah memiliki pembayaran tidak bisa diedit dari form ini. Gunakan detail bill untuk melihat histori pembayaran."
+              description="Faktur terkunci karena ada pembayaran. Gunakan detail bill untuk histori."
               title="Faktur terkunci"
             />
           ) : null}
@@ -804,7 +873,7 @@ function MaterialInvoiceForm({
           <FormSection
             eyebrow="Header"
             title={isDeliveryOrder ? 'Header Surat Jalan' : 'Header Faktur'}
-            description="Tentukan proyek, supplier, tipe dokumen, lalu lengkapi tanggal dan konteks singkat."
+            description="Isi konteks dasar faktur."
           >
             <MasterPickerField
               disabled={isSubmitting || isMasterLoading || projects.length === 0}
@@ -840,7 +909,7 @@ function MaterialInvoiceForm({
               />
 
               <AppToggleGroup
-                description="Jenis dokumen hanya punya dua mode dan tidak mengambil master data."
+                description="Faktur atau surat jalan."
                 label="Jenis Dokumen"
                 onChange={(nextValue) => setHeaderField('documentType', nextValue)}
                 options={[
@@ -869,8 +938,8 @@ function MaterialInvoiceForm({
               <AppToggleGroup
                 description={
                   isDeliveryOrder
-                    ? 'Status pembayaran dikunci saat jenis dokumen surat jalan.'
-                    : 'Status pembayaran hanya punya dua opsi dan tidak mengambil master data.'
+                    ? 'Surat jalan selalu dikunci.'
+                    : 'Lunas atau hutang.'
                 }
                 disabled={isDeliveryOrder}
                 label="Status Pembayaran"
@@ -908,7 +977,7 @@ function MaterialInvoiceForm({
           <FormSection
             eyebrow="Item"
             title="Baris Material"
-            description="Tambahkan material per baris. Qty dan harga satuan tetap mengikuti dokumen yang dicatat."
+            description="Tambahkan material per baris."
           >
             {isCreateMode ? (
               <AppCard className="app-tone-info">
@@ -918,7 +987,7 @@ function MaterialInvoiceForm({
                       Input dari foto
                     </p>
                     <p className="text-sm leading-6">
-                      Scan faktur untuk mengisi item dan menyiapkan master barang baru tanpa keluar dari form.
+                      Scan faktur untuk isi item.
                     </p>
                   </div>
                   <AppButton
@@ -934,156 +1003,172 @@ function MaterialInvoiceForm({
             ) : null}
 
             <div className="space-y-3">
-              {items.map((item, index) => {
-                const selectedMaterial = materials.find(
-                  (material) => material.id === item.materialId
-                )
-                const draftMaterialLabel = item.materialDraftId
-                  ? [item.materialDraftName, item.materialDraftUnit].filter(Boolean).join(' / ')
-                  : ''
-                const lineTotal = getLineTotal(item)
-
-                return (
-                  <AppCard
-                    key={item.id}
-                    className="space-y-4 rounded-[24px] border border-slate-200 bg-white"
-                  >
-                    <div className="mb-4 flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-[var(--app-text-color)]">
-                          Item {index + 1}
-                        </p>
-                        <p className="text-xs text-[var(--app-hint-color)]">
-                          {draftMaterialLabel
-                            ? `Barang baru: ${draftMaterialLabel}`
-                            : selectedMaterial?.unit
-                            ? `Satuan: ${selectedMaterial.unit}`
+              {activeItem ? (
+                <AppCard
+                  key={activeItem.id}
+                  className="space-y-4 rounded-[24px] border border-slate-200 bg-white"
+                >
+                  <div className="mb-4 flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                        Item {activeItemIndex + 1}
+                      </p>
+                      <p className="text-xs text-[var(--app-hint-color)]">
+                        Baris {activeItemIndex + 1} dari {items.length}
+                      </p>
+                      <p className="text-xs text-[var(--app-hint-color)]">
+                        {activeItem.materialDraftId
+                          ? `Barang baru: ${[activeItem.materialDraftName, activeItem.materialDraftUnit]
+                              .filter(Boolean)
+                              .join(' / ')}`
+                          : activeItemMaterial?.unit
+                            ? `Satuan: ${activeItemMaterial.unit}`
                             : isDeliveryOrder
                               ? 'Pilih material dan qty barang yang diterima.'
                               : 'Pilih material, qty, dan harga satuan.'}
-                        </p>
-                      </div>
+                      </p>
+                    </div>
 
+                    <div className="flex shrink-0 items-center gap-2">
                       <AppButton
-                        aria-label={`Hapus item ${index + 1}`}
+                        aria-label={`Hapus item ${activeItemIndex + 1}`}
                         className="shrink-0"
                         disabled={items.length === 1}
                         iconOnly
                         leadingIcon={<Trash2 className="h-4 w-4" />}
-                        onClick={(event) => handleRemoveItem(event, item.id)}
+                        onClick={handleRemoveItem}
                         type="button"
                         variant="danger"
                       />
+                      <AppButton
+                        className="shrink-0"
+                        leadingIcon={<Plus className="h-4 w-4" />}
+                        onClick={handleAddItem}
+                        size="sm"
+                        type="button"
+                        variant="secondary"
+                      >
+                        Tambah
+                      </AppButton>
                     </div>
+                  </div>
 
-                    <div className="grid gap-3">
-                      {draftMaterialLabel ? (
-                        <AppCard className="app-tone-warning px-3 py-3" padded={false}>
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 space-y-1">
-                              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--app-tone-warning-text)]">
-                                Master baru saat simpan
-                              </p>
-                              <p className="text-sm font-semibold text-[var(--app-text-color)]">
-                                {draftMaterialLabel}
-                              </p>
-                            </div>
-                            <AppButton
-                              onClick={() =>
-                                handleItemChange(item.id, 'materialDraftId', '')
-                              }
-                              size="sm"
-                              type="button"
-                              variant="secondary"
-                            >
-                              Batal
-                            </AppButton>
+                  <div className="grid gap-3">
+                    {activeItem.materialDraftId ? (
+                      <AppCard className="app-tone-warning px-3 py-3" padded={false}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-1">
+                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--app-tone-warning-text)]">
+                              Master baru saat simpan
+                            </p>
+                            <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                              {[activeItem.materialDraftName, activeItem.materialDraftUnit]
+                                .filter(Boolean)
+                                .join(' / ')}
+                            </p>
                           </div>
-                        </AppCard>
-                      ) : null}
+                          <AppButton
+                            onClick={() => handleItemChange(activeItem.id, 'materialDraftId', '')}
+                            size="sm"
+                            type="button"
+                            variant="secondary"
+                          >
+                            Batal
+                          </AppButton>
+                        </div>
+                      </AppCard>
+                    ) : null}
 
-                      <MasterPickerField
-                        disabled={isSubmitting || isMasterLoading || materials.length === 0}
-                        emptyMessage="Data material belum tersedia."
-                        label="Material"
-                        onChange={(nextValue) => handleItemMaterialChange(item.id, nextValue)}
-                        options={materialPickerOptions}
-                        placeholder={draftMaterialLabel ? 'Ganti ke master existing' : 'Pilih material'}
-                        required={!draftMaterialLabel}
-                        searchPlaceholder="Cari material..."
-                        title={`Pilih Material ${index + 1}`}
-                        value={item.materialId}
-                      />
+                    <MasterPickerField
+                      disabled={isSubmitting || isMasterLoading || materials.length === 0}
+                      emptyMessage="Data material belum tersedia."
+                      label="Material"
+                      onChange={(nextValue) => handleItemMaterialChange(activeItem.id, nextValue)}
+                      options={materialPickerOptions}
+                      placeholder={activeItem.materialDraftId ? 'Ganti ke master existing' : 'Pilih material'}
+                      required={!activeItem.materialDraftId}
+                      searchPlaceholder="Cari material..."
+                      title={`Pilih Material ${activeItemIndex + 1}`}
+                      value={activeItem.materialId}
+                    />
 
-                      <div className={`grid gap-3 ${isDeliveryOrder ? '' : 'sm:grid-cols-2'}`}>
+                    <div className={`grid gap-3 ${isDeliveryOrder ? '' : 'sm:grid-cols-2'}`}>
+                      <label className="block space-y-2">
+                        <span className="text-sm font-medium text-[var(--app-text-color)]">
+                          Qty
+                        </span>
+                        <input
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                          inputMode="decimal"
+                          min="0.01"
+                          onChange={(event) =>
+                            handleItemChange(activeItem.id, 'qty', event.target.value)
+                          }
+                          placeholder="0"
+                          required
+                          step="0.01"
+                          type="number"
+                          value={activeItem.qty}
+                        />
+                      </label>
+
+                      {isDeliveryOrder ? null : (
                         <label className="block space-y-2">
                           <span className="text-sm font-medium text-[var(--app-text-color)]">
-                            Qty
+                            Harga Satuan
                           </span>
-                          <input
+                          <AppNominalInput
                             className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                            inputMode="decimal"
-                            min="0.01"
-                            onChange={(event) =>
-                              handleItemChange(item.id, 'qty', event.target.value)
+                            onValueChange={(nextValue) =>
+                              handleItemChange(activeItem.id, 'unitPrice', nextValue)
                             }
-                            placeholder="0"
+                            placeholder="Rp 0"
                             required
-                            step="0.01"
-                            type="number"
-                            value={item.qty}
+                            value={activeItem.unitPrice}
                           />
                         </label>
-
-                        {isDeliveryOrder ? null : (
-                          <label className="block space-y-2">
-                            <span className="text-sm font-medium text-[var(--app-text-color)]">
-                              Harga Satuan
-                            </span>
-                            <AppNominalInput
-                              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                              onValueChange={(nextValue) =>
-                                handleItemChange(item.id, 'unitPrice', nextValue)
-                              }
-                              placeholder="Rp 0"
-                              required
-                              value={item.unitPrice}
-                            />
-                          </label>
-                        )}
-                      </div>
+                      )}
                     </div>
+                  </div>
 
-                    {isDeliveryOrder ? null : (
-                      <div className="mt-4 rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] px-4 py-3">
-                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--app-hint-color)]">
-                          Subtotal
-                        </p>
-                        <p className="mt-2 text-lg font-semibold text-[var(--app-text-color)]">
-                          {formatCurrency(lineTotal)}
-                        </p>
-                      </div>
-                    )}
-                  </AppCard>
-                )
-              })}
+                  {isDeliveryOrder ? null : (
+                    <div className="mt-4 rounded-2xl border border-[var(--app-border-color)] bg-[var(--app-surface-low-color)] px-4 py-3">
+                      <p className="text-xs uppercase tracking-[0.18em] text-[var(--app-hint-color)]">
+                        Subtotal
+                      </p>
+                      <p className="mt-2 text-lg font-semibold text-[var(--app-text-color)]">
+                        {formatCurrency(getLineTotal(activeItem))}
+                      </p>
+                    </div>
+                  )}
+                </AppCard>
+              ) : null}
+
+              <div className="grid grid-cols-2 gap-2">
+                <AppButton
+                  disabled={items.length <= 1 || activeItemIndex === 0}
+                  onClick={() => handleNavigateItem(-1)}
+                  type="button"
+                  variant="secondary"
+                >
+                  Kembali
+                </AppButton>
+                <AppButton
+                  disabled={items.length <= 1 || activeItemIndex >= items.length - 1}
+                  onClick={() => handleNavigateItem(1)}
+                  type="button"
+                  variant="secondary"
+                >
+                  Lanjut
+                </AppButton>
+              </div>
             </div>
-
-            <AppButton
-              className="w-full"
-              leadingIcon={<Plus className="h-4 w-4" />}
-              onClick={handleAddItem}
-              type="button"
-              variant="secondary"
-            >
-              Tambah Item
-            </AppButton>
           </FormSection>
 
           <FormSection
             eyebrow="Lampiran"
             title="Ringkasan dan Lampiran"
-            description="Periksa total akhir, lampiran aktif, dan simpan dari footer halaman."
+            description="Periksa total, lampiran, lalu simpan."
           >
             {isDeliveryOrder ? (
               <AppCard className="app-tone-info">
@@ -1092,7 +1177,7 @@ function MaterialInvoiceForm({
                     Ringkasan Surat Jalan
                   </p>
                   <p className="text-sm leading-6">
-                    {items.length} item material akan dicatat sebagai barang masuk tanpa nilai faktur.
+                    {items.length} item dicatat sebagai barang masuk.
                   </p>
                 </div>
               </AppCard>
@@ -1121,7 +1206,7 @@ function MaterialInvoiceForm({
 
             {materials.length === 0 && !isMasterLoading && !hasPendingMaterialDraftRows ? (
               <AppErrorState
-                description="Data material masih kosong. Pilih master material atau scan faktur untuk menyiapkan master baru saat simpan."
+                description="Master material masih kosong. Scan faktur untuk menyiapkan master baru."
                 title="Material belum tersedia"
               />
             ) : null}
@@ -1138,7 +1223,7 @@ function MaterialInvoiceForm({
       </fieldset>
 
       <AppSheet
-        description="Review hasil AI sebelum baris diterapkan ke form."
+        description="Review hasil AI sebelum diterapkan."
         footer={
           <div className="grid grid-cols-2 gap-2">
             <AppButton
@@ -1164,236 +1249,270 @@ function MaterialInvoiceForm({
         title="Scan Faktur Barang"
       >
         <div className="space-y-4">
-          <input
-            ref={aiFileInputRef}
-            accept="image/jpeg,image/png,image/webp"
-            className="hidden"
-            onChange={handleAiFileChange}
-            type="file"
-          />
-
           <AppCard className="space-y-3 bg-white">
-            <div className="space-y-1">
-              <p className="app-meta">File gambar</p>
-              <p className="text-sm leading-6 text-[var(--app-hint-color)]">
-                {aiFile?.name ?? 'Belum ada file dipilih.'}
-              </p>
+            <input
+              ref={aiFileInputRef}
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handleAiFileChange}
+              type="file"
+            />
+
+            <div className="flex items-center gap-3">
+              <div className="group relative h-20 w-20 shrink-0">
+                <button
+                  aria-label={aiFile ? `Ganti file ${aiFile.name}` : 'Pilih file gambar untuk scan AI'}
+                  className="flex h-full w-full items-center justify-center overflow-hidden rounded-2xl border border-dashed border-[var(--app-outline-soft)] bg-[var(--app-surface-low-color)] transition active:scale-[0.99] hover:border-sky-400 hover:bg-sky-50 focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                  onClick={() => aiFileInputRef.current?.click()}
+                  type="button"
+                >
+                  {aiFilePreviewUrl ? (
+                    <img
+                      alt={aiFile?.name ?? 'Pratinjau file scan'}
+                      className="h-full w-full object-cover"
+                      src={aiFilePreviewUrl}
+                    />
+                  ) : (
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-[var(--app-hint-color)]">
+                      <Upload className="h-5 w-5" />
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.16em]">
+                        Pilih
+                      </span>
+                    </div>
+                  )}
+                </button>
+
+                {aiFile ? (
+                  <button
+                    aria-label={`Hapus file ${aiFile.name}`}
+                    className="absolute right-1 top-1 rounded-full border border-[var(--app-border-color)] bg-white/95 px-2 py-1 text-[11px] font-semibold text-[var(--app-text-color)] shadow-sm transition hover:bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                    disabled={isAiProcessing}
+                    onClick={handleAiFileReset}
+                    type="button"
+                  >
+                    Hapus
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="truncate text-sm font-semibold text-[var(--app-text-color)]">
+                  {aiFile?.name ?? 'Ketuk untuk pilih gambar'}
+                </p>
+                <p className="text-xs leading-5 text-[var(--app-hint-color)]">
+                  {aiFile ? 'Ketuk thumbnail untuk ganti file.' : 'JPEG, PNG, atau WEBP.'}
+                </p>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <AppButton
-                leadingIcon={<Upload className="h-4 w-4" />}
-                onClick={() => aiFileInputRef.current?.click()}
-                type="button"
-                variant="secondary"
-              >
-                Pilih
-              </AppButton>
-              <AppButton
-                disabled={!aiFile || isAiProcessing}
-                leadingIcon={<Sparkles className="h-4 w-4" />}
-                onClick={handleAiExtract}
-                type="button"
-              >
-                {isAiProcessing ? 'Proses...' : 'Proses AI'}
-              </AppButton>
-            </div>
+
+            <AppButton
+              disabled={!aiFile || isAiProcessing}
+              leadingIcon={<Sparkles className="h-4 w-4" />}
+              onClick={handleAiExtract}
+              type="button"
+              fullWidth
+            >
+              {isAiProcessing ? 'Proses...' : 'Proses AI'}
+            </AppButton>
           </AppCard>
 
           {aiError ? <AppErrorState description={aiError} title="Review AI belum valid" /> : null}
 
-          {aiDraft ? (
-            <AppCard className="grid gap-3 bg-white sm:grid-cols-3">
-              <div className="space-y-1">
-                <p className="app-meta">Tanggal</p>
-                <p className="text-sm font-semibold text-[var(--app-text-color)]">
-                  {aiDraft.documentDate || '-'}
-                </p>
-              </div>
-              <div className="space-y-1">
-                <p className="app-meta">Supplier</p>
-                <p className="text-sm font-semibold text-[var(--app-text-color)]">
-                  {aiDraft.supplierName || '-'}
-                </p>
-              </div>
-              <div className="space-y-1">
-                <p className="app-meta">No Faktur</p>
-                <p className="text-sm font-semibold text-[var(--app-text-color)]">
-                  {aiDraft.invoiceNumber || '-'}
-                </p>
-              </div>
-            </AppCard>
-          ) : null}
-
           {aiReviewRows.length > 0 ? (
             <div className="space-y-3">
-              {aiReviewRows.map((row, index) => {
-                const isMatched = row.status === MATERIAL_REVIEW_STATUS.MATCHED
-                const isInvalid = row.status === MATERIAL_REVIEW_STATUS.INVALID
-                const hasCandidateLinks = !isInvalid && Array.isArray(row.candidates) && row.candidates.length > 0
-                const needsMaterialDraft = !row.selectedMaterialId
-                const statusIcon = isInvalid ? (
-                  <AlertTriangle className="h-4 w-4" />
-                ) : isMatched ? (
-                  <CheckCircle2 className="h-4 w-4" />
-                ) : (
-                  <Sparkles className="h-4 w-4" />
-                )
-
-                return (
-                  <AppCard
-                    key={row.tempId}
-                    className="space-y-4 rounded-[24px] border border-slate-200 bg-white"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 space-y-1">
-                        <p className="text-sm font-semibold text-[var(--app-text-color)]">
-                          Item {index + 1}
-                        </p>
-                        <p className="text-xs leading-5 text-[var(--app-hint-color)]">
-                          {row.reason}
-                        </p>
-                      </div>
-                      <span className="inline-flex items-center gap-1 rounded-full border border-[var(--app-outline-soft)] px-2.5 py-1 text-xs font-semibold text-[var(--app-text-color)]">
-                        {statusIcon}
-                        {isMatched ? 'Cocok' : isInvalid ? 'Salah' : 'Cek'}
-                      </span>
+              {activeAiReviewRow ? (
+                <AppCard
+                  key={activeAiReviewRow.tempId}
+                  className="space-y-4 rounded-[24px] border border-slate-200 bg-white"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <p className="text-sm font-semibold text-[var(--app-text-color)]">
+                        Item {activeAiReviewIndex + 1} dari {aiReviewRows.length}
+                      </p>
+                      <p className="text-xs leading-5 text-[var(--app-hint-color)]">
+                        {activeAiReviewRow.reason}
+                      </p>
                     </div>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--app-outline-soft)] px-2.5 py-1 text-xs font-semibold text-[var(--app-text-color)]">
+                      {activeAiReviewRow.status === MATERIAL_REVIEW_STATUS.INVALID ? (
+                        <AlertTriangle className="h-4 w-4" />
+                      ) : activeAiReviewRow.status === MATERIAL_REVIEW_STATUS.MATCHED ? (
+                        <CheckCircle2 className="h-4 w-4" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" />
+                      )}
+                      {activeAiReviewRow.status === MATERIAL_REVIEW_STATUS.MATCHED
+                        ? 'Cocok'
+                        : activeAiReviewRow.status === MATERIAL_REVIEW_STATUS.INVALID
+                          ? 'Salah'
+                          : 'Cek'}
+                    </span>
+                  </div>
 
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <label className="block space-y-2 sm:col-span-2">
-                        <span className="text-sm font-medium text-[var(--app-text-color)]">Nama</span>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <label className="block space-y-2 sm:col-span-2">
+                      <span className="text-sm font-medium text-[var(--app-text-color)]">
+                        Nama
+                      </span>
+                      <input
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                        onChange={(event) =>
+                          handleAiRowChange(activeAiReviewRow.tempId, {
+                            name: event.target.value,
+                            materialDraftName: !activeAiReviewRow.selectedMaterialId
+                              ? event.target.value
+                              : activeAiReviewRow.materialDraftName,
+                          })
+                        }
+                        value={activeAiReviewRow.name}
+                      />
+                    </label>
+                    <label className="block space-y-2">
+                      <span className="text-sm font-medium text-[var(--app-text-color)]">
+                        Qty
+                      </span>
+                      <input
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                        inputMode="decimal"
+                        min="0.01"
+                        onChange={(event) =>
+                          handleAiRowChange(activeAiReviewRow.tempId, {
+                            qty: event.target.value,
+                          })
+                        }
+                        step="0.01"
+                        type="number"
+                        value={activeAiReviewRow.qty}
+                      />
+                    </label>
+                  </div>
+
+                  {activeAiReviewRow.status !== MATERIAL_REVIEW_STATUS.INVALID ? (
+                    <div className="space-y-3">
+                      {Array.isArray(activeAiReviewRow.candidates) &&
+                      activeAiReviewRow.candidates.length > 0 ? (
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-medium text-[var(--app-hint-color)]">
+                            Saran cepat
+                          </p>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1">
+                            {activeAiReviewRow.candidates.map((candidate) => (
+                              <button
+                                key={candidate.id}
+                                className="min-h-8 px-0 py-1 text-left text-sm font-medium text-[var(--app-link-color)] underline decoration-dotted underline-offset-4"
+                                onClick={() =>
+                                  handleAiRowMaterialChange(activeAiReviewRow, candidate.id)
+                                }
+                                type="button"
+                              >
+                                {candidate.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <MasterPickerField
+                        disabled={materials.length === 0}
+                        emptyMessage="Master belum ada."
+                        label="Pilih master"
+                        onChange={(nextValue) => handleAiRowMaterialChange(activeAiReviewRow, nextValue)}
+                        options={materialPickerOptions}
+                        placeholder="Pilih jika cocok"
+                        searchPlaceholder="Cari master..."
+                        title={`Pilih Master ${activeAiReviewIndex + 1}`}
+                        value={activeAiReviewRow.selectedMaterialId}
+                      />
+                      {activeAiReviewRow.selectedMaterialId ? (
+                        <AppButton
+                          onClick={() => handleAiRowMaterialChange(activeAiReviewRow, '')}
+                          size="sm"
+                          type="button"
+                          variant="secondary"
+                        >
+                          Barang baru
+                        </AppButton>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {activeAiReviewRow.status !== MATERIAL_REVIEW_STATUS.INVALID &&
+                  !activeAiReviewRow.selectedMaterialId ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="block space-y-2">
+                        <span className="text-sm font-medium text-[var(--app-text-color)]">
+                          Nama baru
+                        </span>
                         <input
                           className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                           onChange={(event) =>
-                            handleAiRowChange(row.tempId, {
-                              name: event.target.value,
-                              materialDraftName: needsMaterialDraft
-                                ? event.target.value
-                                : row.materialDraftName,
+                            handleAiRowChange(activeAiReviewRow.tempId, {
+                              materialDraftName: event.target.value,
                             })
                           }
-                          value={row.name}
+                          value={activeAiReviewRow.materialDraftName ?? activeAiReviewRow.name}
                         />
                       </label>
                       <label className="block space-y-2">
                         <span className="text-sm font-medium text-[var(--app-text-color)]">
-                          Qty
+                          Satuan baru
                         </span>
                         <input
                           className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                          inputMode="decimal"
-                          min="0.01"
                           onChange={(event) =>
-                            handleAiRowChange(row.tempId, {
-                              qty: event.target.value,
+                            handleAiRowChange(activeAiReviewRow.tempId, {
+                              materialDraftUnit: event.target.value,
+                              missingUnit: !normalizeText(event.target.value, ''),
                             })
                           }
-                          step="0.01"
-                          type="number"
-                          value={row.qty}
+                          placeholder="sak, kg, m3"
+                          value={activeAiReviewRow.materialDraftUnit ?? activeAiReviewRow.unit}
                         />
                       </label>
                     </div>
+                  ) : null}
 
-                    {!isInvalid ? (
-                      <div className="space-y-3">
-                        {hasCandidateLinks ? (
-                          <div className="space-y-1.5">
-                            <p className="text-xs font-medium text-[var(--app-hint-color)]">
-                              Saran cepat
-                            </p>
-                            <div className="flex flex-wrap gap-x-3 gap-y-1">
-                              {row.candidates.map((candidate) => (
-                                <button
-                                  key={candidate.id}
-                                  className="min-h-8 px-0 py-1 text-left text-sm font-medium text-[var(--app-link-color)] underline decoration-dotted underline-offset-4"
-                                  onClick={() => handleAiRowMaterialChange(row, candidate.id)}
-                                  type="button"
-                                >
-                                  {candidate.name}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
+                  {isDeliveryOrder ? null : (
+                    <label className="block space-y-2">
+                      <span className="text-sm font-medium text-[var(--app-text-color)]">
+                        Harga
+                      </span>
+                      <AppNominalInput
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+                        onValueChange={(nextValue) =>
+                          handleAiRowChange(activeAiReviewRow.tempId, {
+                            unitPrice: nextValue,
+                          })
+                        }
+                        placeholder="Rp 0"
+                        value={activeAiReviewRow.unitPrice}
+                      />
+                    </label>
+                  )}
+                </AppCard>
+              ) : null}
 
-                        <MasterPickerField
-                          disabled={materials.length === 0}
-                          emptyMessage="Master belum ada."
-                          label="Pilih master"
-                          onChange={(nextValue) => handleAiRowMaterialChange(row, nextValue)}
-                          options={materialPickerOptions}
-                          placeholder="Pilih jika cocok"
-                          searchPlaceholder="Cari master..."
-                          title={`Pilih Master ${index + 1}`}
-                          value={row.selectedMaterialId}
-                        />
-                        {row.selectedMaterialId ? (
-                          <AppButton
-                            onClick={() => handleAiRowMaterialChange(row, '')}
-                            size="sm"
-                            type="button"
-                            variant="secondary"
-                          >
-                            Barang baru
-                          </AppButton>
-                        ) : null}
-                      </div>
-                    ) : null}
-
-                    {!isInvalid && needsMaterialDraft ? (
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="block space-y-2">
-                          <span className="text-sm font-medium text-[var(--app-text-color)]">
-                            Nama baru
-                          </span>
-                          <input
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                            onChange={(event) =>
-                              handleAiRowChange(row.tempId, {
-                                materialDraftName: event.target.value,
-                              })
-                            }
-                            value={row.materialDraftName ?? row.name}
-                          />
-                        </label>
-                        <label className="block space-y-2">
-                          <span className="text-sm font-medium text-[var(--app-text-color)]">
-                            Satuan baru
-                          </span>
-                          <input
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                            onChange={(event) =>
-                              handleAiRowChange(row.tempId, {
-                                materialDraftUnit: event.target.value,
-                                missingUnit: !normalizeText(event.target.value, ''),
-                              })
-                            }
-                            placeholder="sak, kg, m3"
-                            value={row.materialDraftUnit ?? row.unit}
-                          />
-                        </label>
-                      </div>
-                    ) : null}
-
-                    {isDeliveryOrder ? null : (
-                      <label className="block space-y-2">
-                        <span className="text-sm font-medium text-[var(--app-text-color)]">Harga</span>
-                        <AppNominalInput
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-[var(--app-text-color)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                          onValueChange={(nextValue) =>
-                            handleAiRowChange(row.tempId, {
-                              unitPrice: nextValue,
-                            })
-                          }
-                          placeholder="Rp 0"
-                          value={row.unitPrice}
-                        />
-                      </label>
-                    )}
-                  </AppCard>
-                )
-              })}
+              <div className="grid grid-cols-2 gap-2">
+                <AppButton
+                  disabled={aiReviewRows.length <= 1 || activeAiReviewIndex === 0}
+                  onClick={() => handleNavigateAiReview(-1)}
+                  type="button"
+                  variant="secondary"
+                >
+                  Kembali
+                </AppButton>
+                <AppButton
+                  disabled={
+                    aiReviewRows.length <= 1 || activeAiReviewIndex >= aiReviewRows.length - 1
+                  }
+                  onClick={() => handleNavigateAiReview(1)}
+                  type="button"
+                  variant="secondary"
+                >
+                  Lanjut
+                </AppButton>
+              </div>
             </div>
           ) : null}
         </div>
